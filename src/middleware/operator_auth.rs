@@ -1,0 +1,118 @@
+use axum::{
+    extract::{Request, State},
+    http::StatusCode,
+    middleware::Next,
+    response::Response,
+};
+
+use crate::db::{queries, DbPool};
+use crate::models::{Operator, OperatorRole};
+
+#[derive(Clone)]
+pub struct OperatorContext {
+    pub operator: Operator,
+}
+
+impl OperatorContext {
+    pub fn require_owner(&self) -> Result<(), StatusCode> {
+        if self.operator.role.can_manage_operators() {
+            Ok(())
+        } else {
+            Err(StatusCode::FORBIDDEN)
+        }
+    }
+
+    pub fn require_admin(&self) -> Result<(), StatusCode> {
+        if self.operator.role.can_manage_orgs() {
+            Ok(())
+        } else {
+            Err(StatusCode::FORBIDDEN)
+        }
+    }
+}
+
+pub async fn operator_auth(
+    State(pool): State<DbPool>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let auth_header = request
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let api_key = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let conn = pool.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let operator = queries::get_operator_by_api_key(&conn, api_key)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    request.extensions_mut().insert(OperatorContext { operator });
+
+    Ok(next.run(request).await)
+}
+
+pub async fn require_owner_role(
+    State(pool): State<DbPool>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let auth_header = request
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let api_key = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let conn = pool.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let operator = queries::get_operator_by_api_key(&conn, api_key)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if !matches!(operator.role, OperatorRole::Owner) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    request.extensions_mut().insert(OperatorContext { operator });
+
+    Ok(next.run(request).await)
+}
+
+pub async fn require_admin_role(
+    State(pool): State<DbPool>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let auth_header = request
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let api_key = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let conn = pool.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let operator = queries::get_operator_by_api_key(&conn, api_key)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if !matches!(operator.role, OperatorRole::Owner | OperatorRole::Admin) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    request.extensions_mut().insert(OperatorContext { operator });
+
+    Ok(next.run(request).await)
+}

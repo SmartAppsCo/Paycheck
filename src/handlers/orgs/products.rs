@@ -1,0 +1,172 @@
+use axum::{
+    extract::{Extension, Path, State},
+    http::HeaderMap,
+    Json,
+};
+
+use crate::db::{queries, DbPool};
+use crate::error::{AppError, Result};
+use crate::middleware::OrgMemberContext;
+use crate::models::{ActorType, CreateProduct, Product, UpdateProduct};
+
+fn extract_request_info(headers: &HeaderMap) -> (Option<String>, Option<String>) {
+    let ip = headers
+        .get("x-forwarded-for")
+        .or_else(|| headers.get("x-real-ip"))
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+
+    (ip, user_agent)
+}
+
+#[derive(serde::Deserialize)]
+pub struct ProductPath {
+    pub org_id: String,
+    pub project_id: String,
+    pub id: String,
+}
+
+pub async fn create_product(
+    State(pool): State<DbPool>,
+    Extension(ctx): Extension<OrgMemberContext>,
+    Path(path): Path<crate::middleware::OrgProjectPath>,
+    headers: HeaderMap,
+    Json(input): Json<CreateProduct>,
+) -> Result<Json<Product>> {
+    if !ctx.can_write_project() {
+        return Err(AppError::Forbidden("Insufficient permissions".into()));
+    }
+
+    let conn = pool.get()?;
+    let product = queries::create_product(&conn, &path.project_id, &input)?;
+
+    let (ip, ua) = extract_request_info(&headers);
+    queries::create_audit_log(
+        &conn,
+        ActorType::OrgMember,
+        Some(&ctx.member.id),
+        "create_product",
+        "product",
+        &product.id,
+        Some(&serde_json::json!({
+            "name": input.name,
+            "tier": input.tier,
+        })),
+        ip.as_deref(),
+        ua.as_deref(),
+    )?;
+
+    Ok(Json(product))
+}
+
+pub async fn list_products(
+    State(pool): State<DbPool>,
+    Path(path): Path<crate::middleware::OrgProjectPath>,
+) -> Result<Json<Vec<Product>>> {
+    let conn = pool.get()?;
+    let products = queries::list_products_for_project(&conn, &path.project_id)?;
+    Ok(Json(products))
+}
+
+pub async fn get_product(
+    State(pool): State<DbPool>,
+    Path(path): Path<ProductPath>,
+) -> Result<Json<Product>> {
+    let conn = pool.get()?;
+    let product = queries::get_product_by_id(&conn, &path.id)?
+        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+
+    if product.project_id != path.project_id {
+        return Err(AppError::NotFound("Product not found".into()));
+    }
+
+    Ok(Json(product))
+}
+
+pub async fn update_product(
+    State(pool): State<DbPool>,
+    Extension(ctx): Extension<OrgMemberContext>,
+    Path(path): Path<ProductPath>,
+    headers: HeaderMap,
+    Json(input): Json<UpdateProduct>,
+) -> Result<Json<Product>> {
+    if !ctx.can_write_project() {
+        return Err(AppError::Forbidden("Insufficient permissions".into()));
+    }
+
+    let conn = pool.get()?;
+
+    let existing = queries::get_product_by_id(&conn, &path.id)?
+        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+
+    if existing.project_id != path.project_id {
+        return Err(AppError::NotFound("Product not found".into()));
+    }
+
+    queries::update_product(&conn, &path.id, &input)?;
+
+    let (ip, ua) = extract_request_info(&headers);
+    queries::create_audit_log(
+        &conn,
+        ActorType::OrgMember,
+        Some(&ctx.member.id),
+        "update_product",
+        "product",
+        &path.id,
+        Some(&serde_json::json!({
+            "name": input.name,
+            "tier": input.tier,
+        })),
+        ip.as_deref(),
+        ua.as_deref(),
+    )?;
+
+    let product = queries::get_product_by_id(&conn, &path.id)?
+        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+
+    Ok(Json(product))
+}
+
+pub async fn delete_product(
+    State(pool): State<DbPool>,
+    Extension(ctx): Extension<OrgMemberContext>,
+    Path(path): Path<ProductPath>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>> {
+    if !ctx.can_write_project() {
+        return Err(AppError::Forbidden("Insufficient permissions".into()));
+    }
+
+    let conn = pool.get()?;
+
+    let existing = queries::get_product_by_id(&conn, &path.id)?
+        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+
+    if existing.project_id != path.project_id {
+        return Err(AppError::NotFound("Product not found".into()));
+    }
+
+    queries::delete_product(&conn, &path.id)?;
+
+    let (ip, ua) = extract_request_info(&headers);
+    queries::create_audit_log(
+        &conn,
+        ActorType::OrgMember,
+        Some(&ctx.member.id),
+        "delete_product",
+        "product",
+        &path.id,
+        Some(&serde_json::json!({
+            "name": existing.name,
+        })),
+        ip.as_deref(),
+        ua.as_deref(),
+    )?;
+
+    Ok(Json(serde_json::json!({ "deleted": true })))
+}

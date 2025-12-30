@@ -1,0 +1,139 @@
+use axum::{
+    extract::{Path, Request, State},
+    http::StatusCode,
+    middleware::Next,
+    response::Response,
+};
+
+use crate::db::{queries, DbPool};
+use crate::models::{OrgMember, OrgMemberRole, ProjectMemberRole};
+
+#[derive(Clone)]
+pub struct OrgMemberContext {
+    pub member: OrgMember,
+    pub project_role: Option<ProjectMemberRole>,
+}
+
+impl OrgMemberContext {
+    pub fn require_owner(&self) -> Result<(), StatusCode> {
+        if self.member.role.can_manage_members() {
+            Ok(())
+        } else {
+            Err(StatusCode::FORBIDDEN)
+        }
+    }
+
+    pub fn require_admin(&self) -> Result<(), StatusCode> {
+        if matches!(self.member.role, OrgMemberRole::Owner | OrgMemberRole::Admin) {
+            Ok(())
+        } else {
+            Err(StatusCode::FORBIDDEN)
+        }
+    }
+
+    pub fn can_access_project(&self) -> bool {
+        self.member.role.has_implicit_project_access() || self.project_role.is_some()
+    }
+
+    pub fn can_write_project(&self) -> bool {
+        matches!(self.member.role, OrgMemberRole::Owner | OrgMemberRole::Admin)
+            || matches!(self.project_role, Some(ProjectMemberRole::Admin))
+    }
+}
+
+pub async fn org_member_auth(
+    State(pool): State<DbPool>,
+    Path(org_id): Path<String>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let auth_header = request
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let api_key = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let conn = pool.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let member = queries::get_org_member_by_api_key(&conn, api_key)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if member.org_id != org_id {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    request.extensions_mut().insert(OrgMemberContext {
+        member,
+        project_role: None,
+    });
+
+    Ok(next.run(request).await)
+}
+
+#[derive(Clone, serde::Deserialize)]
+pub struct OrgProjectPath {
+    pub org_id: String,
+    pub project_id: String,
+}
+
+pub async fn org_member_project_auth(
+    State(pool): State<DbPool>,
+    Path(path): Path<OrgProjectPath>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let auth_header = request
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let api_key = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let conn = pool.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let member = queries::get_org_member_by_api_key(&conn, api_key)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if member.org_id != path.org_id {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Check project exists and belongs to org
+    let project = queries::get_project_by_id(&conn, &path.project_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    if project.org_id != path.org_id {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    // Get project-level role if exists
+    let project_role = if member.role.has_implicit_project_access() {
+        None // Owner/admin have implicit access, no need for project_members entry
+    } else {
+        queries::get_project_member(&conn, &member.id, &path.project_id)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .map(|pm| pm.role)
+    };
+
+    // Check if member has any access to this project
+    if !member.role.has_implicit_project_access() && project_role.is_none() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    request.extensions_mut().insert(OrgMemberContext {
+        member,
+        project_role,
+    });
+
+    Ok(next.run(request).await)
+}

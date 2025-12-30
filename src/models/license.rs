@@ -1,0 +1,28 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LicenseKey {
+    pub id: String,
+    pub key: String,
+    pub product_id: String,
+    pub email: Option<String>,
+    pub activation_count: i32,
+    pub revoked: bool,
+    pub revoked_jtis: Vec<String>,
+    pub created_at: i64,
+    pub expires_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LicenseKeyWithProduct {
+    #[serde(flatten)]
+    pub license: LicenseKey,
+    pub product_name: String,
+    pub project_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateLicenseKey {
+    pub email: Option<String>,
+    pub expires_at: Option<i64>,
+}
