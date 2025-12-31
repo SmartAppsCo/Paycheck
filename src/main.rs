@@ -343,12 +343,12 @@ async fn main() {
         audit: audit_pool,
     };
 
-    // Purge old audit logs on startup (90-day retention for GDPR compliance)
-    {
+    // Purge old audit logs on startup (0 = never purge)
+    if config::AUDIT_LOG_RETENTION_DAYS > 0 {
         let conn = state.audit.get().expect("Failed to get audit connection for purge");
-        match queries::purge_old_audit_logs(&conn, 90) {
+        match queries::purge_old_audit_logs(&conn, config::AUDIT_LOG_RETENTION_DAYS) {
             Ok(count) if count > 0 => {
-                tracing::info!("Purged {} audit log entries older than 90 days", count);
+                tracing::info!("Purged {} audit log entries older than {} days", count, config::AUDIT_LOG_RETENTION_DAYS);
             }
             Ok(_) => {}
             Err(e) => {

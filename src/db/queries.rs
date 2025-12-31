@@ -170,6 +170,25 @@ pub fn create_audit_log(
 ) -> Result<AuditLog> {
     let id = gen_id();
     let timestamp = now();
+
+    // Skip database insert if audit logging is disabled
+    if !crate::config::AUDIT_LOG_ENABLED {
+        return Ok(AuditLog {
+            id,
+            timestamp,
+            actor_type,
+            actor_id: actor_id.map(String::from),
+            action: action.to_string(),
+            resource_type: resource_type.to_string(),
+            resource_id: resource_id.to_string(),
+            details: details.cloned(),
+            org_id: org_id.map(String::from),
+            project_id: project_id.map(String::from),
+            ip_address: ip_address.map(String::from),
+            user_agent: user_agent.map(String::from),
+        });
+    }
+
     let details_str = details.map(|d| d.to_string());
 
     conn.execute(

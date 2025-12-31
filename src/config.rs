@@ -1,5 +1,11 @@
 use std::env;
 
+// ============ Audit Log Settings ============
+// Set to false to disable audit logging entirely
+pub const AUDIT_LOG_ENABLED: bool = true;
+// Days to retain audit logs before purging (0 = never purge)
+pub const AUDIT_LOG_RETENTION_DAYS: i64 = 90;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub host: String,
