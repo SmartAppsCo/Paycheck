@@ -91,10 +91,8 @@ pub async fn initiate_buy(
     )?;
 
     // Build callback URL (the payment provider will redirect here after success)
-    // In production, this should be configured via environment variable
-    let base_url = std::env::var("BASE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    let callback_url = format!("{}/callback?session={}", base_url, session.id);
-    let cancel_url = format!("{}/cancel", base_url);
+    let callback_url = format!("{}/callback?session={}", state.base_url, session.id);
+    let cancel_url = format!("{}/cancel", state.base_url);
 
     // Create checkout with the appropriate provider
     let checkout_url = match provider {

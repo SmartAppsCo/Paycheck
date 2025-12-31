@@ -1,6 +1,7 @@
 use axum::{
     extract::{Query, State},
-    response::{Html, Redirect},
+    http::HeaderMap,
+    response::{Html, Json, Redirect},
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -15,22 +16,43 @@ pub struct CallbackQuery {
     /// Optional: redirect to app with token
     #[serde(default)]
     pub redirect: Option<String>,
+    /// Optional: response format ("json" or "html", default based on Accept header)
+    #[serde(default)]
+    pub format: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct CallbackResponse {
     pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub license_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+/// Check if client wants JSON response
+fn wants_json(headers: &HeaderMap, format: &Option<String>) -> bool {
+    // Explicit format param takes precedence
+    if let Some(fmt) = format {
+        return fmt.eq_ignore_ascii_case("json");
+    }
+    // Check Accept header
+    if let Some(accept) = headers.get("accept").and_then(|v| v.to_str().ok()) {
+        return accept.contains("application/json");
+    }
+    false
 }
 
 /// Callback after payment - issues JWT to the customer
 pub async fn payment_callback(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<CallbackQuery>,
 ) -> Result<CallbackResult> {
     let conn = state.db.get()?;
+    let use_json = wants_json(&headers, &query.format);
 
     // Get payment session
     let session = queries::get_payment_session(&conn, &query.session)?
@@ -39,6 +61,14 @@ pub async fn payment_callback(
     // Check if session was completed by webhook
     if !session.completed {
         // Payment might still be processing
+        if use_json {
+            return Ok(CallbackResult::Json(Json(CallbackResponse {
+                success: false,
+                token: None,
+                license_key: None,
+                message: Some("Payment is still processing".into()),
+            })));
+        }
         return Ok(CallbackResult::Html(Html(pending_html(&query.session))));
     }
 
@@ -116,12 +146,22 @@ pub async fn payment_callback(
         return Ok(CallbackResult::Redirect(Redirect::temporary(&redirect_with_token)));
     }
 
-    // Otherwise return success page with token
+    // Return JSON or HTML based on client preference
+    if use_json {
+        return Ok(CallbackResult::Json(Json(CallbackResponse {
+            success: true,
+            token: Some(token),
+            license_key: Some(license.key.clone()),
+            message: None,
+        })));
+    }
+
     Ok(CallbackResult::Html(Html(success_html(&token, &license.key))))
 }
 
 pub enum CallbackResult {
     Html(Html<String>),
+    Json(Json<CallbackResponse>),
     Redirect(Redirect),
 }
 
@@ -129,6 +169,7 @@ impl axum::response::IntoResponse for CallbackResult {
     fn into_response(self) -> axum::response::Response {
         match self {
             CallbackResult::Html(html) => html.into_response(),
+            CallbackResult::Json(json) => json.into_response(),
             CallbackResult::Redirect(redirect) => redirect.into_response(),
         }
     }

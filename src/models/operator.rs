@@ -26,13 +26,6 @@ impl OperatorRole {
         }
     }
 
-    pub fn can_manage_operators(&self) -> bool {
-        matches!(self, OperatorRole::Owner)
-    }
-
-    pub fn can_manage_orgs(&self) -> bool {
-        matches!(self, OperatorRole::Owner | OperatorRole::Admin)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

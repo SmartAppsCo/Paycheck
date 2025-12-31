@@ -1,8 +1,8 @@
-mod operators;
+mod management;
 mod organizations;
 mod audit_logs;
 
-pub use operators::*;
+pub use management::*;
 pub use organizations::*;
 pub use audit_logs::*;
 
@@ -30,6 +30,7 @@ pub fn router(state: AppState) -> Router<AppState> {
                 .route("/operators/organizations", post(create_organization))
                 .route("/operators/organizations", get(list_organizations))
                 .route("/operators/organizations/{id}", get(get_organization))
+                .route("/operators/organizations/{id}", put(update_organization))
                 .route("/operators/organizations/{id}", delete(delete_organization))
                 .layer(middleware::from_fn_with_state(state.clone(), require_admin_role)),
         )

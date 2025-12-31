@@ -341,6 +341,7 @@ async fn main() {
     let state = AppState {
         db: db_pool,
         audit: audit_pool,
+        base_url: config.base_url.clone(),
     };
 
     // Purge old audit logs on startup (0 = never purge)

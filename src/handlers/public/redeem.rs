@@ -105,9 +105,11 @@ pub async fn redeem_with_code(
 }
 
 /// POST /redeem/key - Redeem using the permanent license key
+///
 /// License key can be provided via:
-///   - Authorization header: `Authorization: Bearer {key}`
-///   - Request body: `{"key": "..."}`
+/// - Authorization header: `Authorization: Bearer {key}`
+/// - Request body: `{"key": "..."}`
+///
 /// Header takes precedence if both are provided.
 pub async fn redeem_with_key(
     State(state): State<AppState>,
@@ -157,10 +159,10 @@ fn redeem_license_internal(
     }
 
     // Check if expired
-    if let Some(expires_at) = license.expires_at {
-        if Utc::now().timestamp() > expires_at {
-            return Err(AppError::Forbidden("License has expired".into()));
-        }
+    if let Some(expires_at) = license.expires_at
+        && Utc::now().timestamp() > expires_at
+    {
+        return Err(AppError::Forbidden("License has expired".into()));
     }
 
     // Get the product
@@ -301,10 +303,10 @@ pub async fn generate_redemption_code(
     }
 
     // Check if expired
-    if let Some(expires_at) = license.expires_at {
-        if Utc::now().timestamp() > expires_at {
-            return Err(AppError::Forbidden("License has expired".into()));
-        }
+    if let Some(expires_at) = license.expires_at
+        && Utc::now().timestamp() > expires_at
+    {
+        return Err(AppError::Forbidden("License has expired".into()));
     }
 
     // Create a new redemption code

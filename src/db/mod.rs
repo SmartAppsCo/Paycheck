@@ -8,13 +8,15 @@ use r2d2_sqlite::SqliteConnectionManager;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
-/// Application state holding both database pools
+/// Application state holding database pools and configuration
 #[derive(Clone)]
 pub struct AppState {
     /// Main database pool (operators, orgs, projects, licenses, etc.)
     pub db: DbPool,
     /// Audit log database pool (separate file to isolate growth)
     pub audit: DbPool,
+    /// Base URL for callbacks (e.g., https://api.example.com)
+    pub base_url: String,
 }
 
 pub fn create_pool(database_path: &str) -> Result<DbPool, r2d2::Error> {

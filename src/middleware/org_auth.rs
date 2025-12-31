@@ -31,10 +31,6 @@ impl OrgMemberContext {
         }
     }
 
-    pub fn can_access_project(&self) -> bool {
-        self.member.role.has_implicit_project_access() || self.project_role.is_some()
-    }
-
     pub fn can_write_project(&self) -> bool {
         matches!(self.member.role, OrgMemberRole::Owner | OrgMemberRole::Admin)
             || matches!(self.project_role, Some(ProjectMemberRole::Admin))

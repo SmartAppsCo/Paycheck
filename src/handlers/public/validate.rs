@@ -77,15 +77,15 @@ pub async fn validate_license(
     }
 
     // Check if license has expired
-    if let Some(expires_at) = license.expires_at {
-        if Utc::now().timestamp() > expires_at {
-            return Ok(Json(ValidateResponse {
-                valid: false,
-                reason: Some("License has expired".into()),
-                license_exp: None,
-                updates_exp: None,
-            }));
-        }
+    if let Some(expires_at) = license.expires_at
+        && Utc::now().timestamp() > expires_at
+    {
+        return Ok(Json(ValidateResponse {
+            valid: false,
+            reason: Some("License has expired".into()),
+            license_exp: None,
+            updates_exp: None,
+        }));
     }
 
     // Get the product for expiration info
@@ -110,15 +110,15 @@ pub async fn validate_license(
     let updates_exp = product.updates_exp_days.map(|days| device.activated_at + (days as i64 * 86400));
 
     // Check if license_exp has passed
-    if let Some(exp) = license_exp {
-        if Utc::now().timestamp() > exp {
-            return Ok(Json(ValidateResponse {
-                valid: false,
-                reason: Some("License access has expired".into()),
-                license_exp: Some(exp),
-                updates_exp,
-            }));
-        }
+    if let Some(exp) = license_exp
+        && Utc::now().timestamp() > exp
+    {
+        return Ok(Json(ValidateResponse {
+            valid: false,
+            reason: Some("License access has expired".into()),
+            license_exp: Some(exp),
+            updates_exp,
+        }));
     }
 
     Ok(Json(ValidateResponse {

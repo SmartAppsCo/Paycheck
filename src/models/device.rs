@@ -35,10 +35,3 @@ pub struct Device {
     pub activated_at: i64,
     pub last_seen_at: i64,
 }
-
-#[derive(Debug, Deserialize)]
-pub struct DeactivateDevice {
-    pub project_id: String,
-    pub key: String,
-    pub device_id: String,
-}

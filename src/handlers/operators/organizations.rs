@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
 use crate::middleware::OperatorContext;
-use crate::models::{ActorType, CreateOrganization, OrgMemberRole, Organization, CreateOrgMember};
+use crate::models::{ActorType, CreateOrganization, OrgMemberRole, Organization, CreateOrgMember, UpdateOrganization};
 
 #[derive(Serialize)]
 pub struct OrganizationCreated {
@@ -97,6 +97,47 @@ pub async fn get_organization(
     let conn = state.db.get()?;
     let organization = queries::get_organization_by_id(&conn, &id)?
         .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+    Ok(Json(organization))
+}
+
+pub async fn update_organization(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<OperatorContext>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<UpdateOrganization>,
+) -> Result<Json<Organization>> {
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
+
+    // Verify organization exists
+    let existing = queries::get_organization_by_id(&conn, &id)?
+        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+
+    queries::update_organization(&conn, &id, &input)?;
+
+    // Fetch updated organization
+    let organization = queries::get_organization_by_id(&conn, &id)?
+        .ok_or_else(|| AppError::Internal("Organization not found after update".into()))?;
+
+    let (ip, ua) = extract_request_info(&headers);
+    queries::create_audit_log(
+        &audit_conn,
+        ActorType::Operator,
+        Some(&ctx.operator.id),
+        "update_organization",
+        "organization",
+        &id,
+        Some(&serde_json::json!({
+            "old_name": existing.name,
+            "new_name": input.name,
+        })),
+        Some(&id),
+        None,
+        ip.as_deref(),
+        ua.as_deref(),
+    )?;
+
     Ok(Json(organization))
 }
 

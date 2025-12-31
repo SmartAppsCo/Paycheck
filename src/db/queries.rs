@@ -155,6 +155,7 @@ pub fn count_operators(conn: &Connection) -> Result<i64> {
 
 // ============ Audit Logs ============
 
+#[allow(clippy::too_many_arguments)]
 pub fn create_audit_log(
     conn: &Connection,
     actor_type: ActorType,
@@ -363,15 +364,16 @@ pub fn list_organizations(conn: &Connection) -> Result<Vec<Organization>> {
     Ok(orgs)
 }
 
-pub fn update_organization(conn: &Connection, id: &str, input: &UpdateOrganization) -> Result<()> {
+pub fn update_organization(conn: &Connection, id: &str, input: &UpdateOrganization) -> Result<bool> {
     let now = now();
     if let Some(ref name) = input.name {
-        conn.execute(
+        let updated = conn.execute(
             "UPDATE organizations SET name = ?1, updated_at = ?2 WHERE id = ?3",
             params![name, now, id],
         )?;
+        return Ok(updated > 0);
     }
-    Ok(())
+    Ok(false)
 }
 
 pub fn delete_organization(conn: &Connection, id: &str) -> Result<bool> {
@@ -1279,18 +1281,6 @@ pub fn update_device_jti(conn: &Connection, id: &str, jti: &str) -> Result<()> {
 
 pub fn delete_device(conn: &Connection, id: &str) -> Result<bool> {
     let deleted = conn.execute("DELETE FROM devices WHERE id = ?1", params![id])?;
-    Ok(deleted > 0)
-}
-
-pub fn delete_device_by_device_id(
-    conn: &Connection,
-    license_key_id: &str,
-    device_id: &str,
-) -> Result<bool> {
-    let deleted = conn.execute(
-        "DELETE FROM devices WHERE license_key_id = ?1 AND device_id = ?2",
-        params![license_key_id, device_id],
-    )?;
     Ok(deleted > 0)
 }
 

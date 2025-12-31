@@ -13,23 +13,6 @@ pub struct OperatorContext {
     pub operator: Operator,
 }
 
-impl OperatorContext {
-    pub fn require_owner(&self) -> Result<(), StatusCode> {
-        if self.operator.role.can_manage_operators() {
-            Ok(())
-        } else {
-            Err(StatusCode::FORBIDDEN)
-        }
-    }
-
-    pub fn require_admin(&self) -> Result<(), StatusCode> {
-        if self.operator.role.can_manage_orgs() {
-            Ok(())
-        } else {
-            Err(StatusCode::FORBIDDEN)
-        }
-    }
-}
 
 pub async fn operator_auth(
     State(state): State<AppState>,

@@ -1,6 +1,6 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
+use sha2::Sha256;
 use hmac::{Hmac, Mac};
 
 use crate::error::{AppError, Result};
@@ -64,6 +64,7 @@ impl StripeClient {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_checkout_session(
         &self,
         session_id: &str,
