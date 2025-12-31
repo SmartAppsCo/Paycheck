@@ -5,7 +5,7 @@ use axum::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::db::{queries, DbPool};
+use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
 
 #[derive(Debug, Deserialize)]
@@ -25,10 +25,10 @@ pub struct ValidateResponse {
 }
 
 pub async fn validate_license(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Query(query): Query<ValidateQuery>,
 ) -> Result<Json<ValidateResponse>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
 
     // Find the device by JTI
     let device = match queries::get_device_by_jti(&conn, &query.jti)? {

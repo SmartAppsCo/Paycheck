@@ -1,19 +1,21 @@
 mod redeem;
 mod validate;
 mod devices;
+mod license;
 mod buy;
 mod callback;
 
 pub use redeem::*;
 pub use validate::*;
 pub use devices::*;
+pub use license::*;
 pub use buy::*;
 pub use callback::*;
 
 use axum::{routing::{get, post}, Json, Router};
 use serde::Serialize;
 
-use crate::db::DbPool;
+use crate::db::AppState;
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -28,13 +30,19 @@ async fn health() -> Json<HealthResponse> {
     })
 }
 
-pub fn router() -> Router<DbPool> {
+pub fn router() -> Router<AppState> {
     Router::new()
         .route("/health", get(health))
         .route("/buy", get(initiate_buy))
         .route("/callback", get(payment_callback))
-        .route("/redeem", get(redeem_license))
+        // GET /redeem accepts short-lived redemption codes (URL-safe)
+        .route("/redeem", get(redeem_with_code))
+        // POST /redeem/key accepts permanent license keys (never in URL)
+        .route("/redeem/key", post(redeem_with_key))
+        // POST /redeem/code generates a new short-lived code from a license key
+        .route("/redeem/code", post(generate_redemption_code))
         .route("/validate", get(validate_license))
-        .route("/devices", get(list_devices))
+        // GET /license with license key in Authorization header
+        .route("/license", get(get_license_info))
         .route("/devices/deactivate", post(deactivate_device))
 }

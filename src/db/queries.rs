@@ -163,6 +163,8 @@ pub fn create_audit_log(
     resource_type: &str,
     resource_id: &str,
     details: Option<&serde_json::Value>,
+    org_id: Option<&str>,
+    project_id: Option<&str>,
     ip_address: Option<&str>,
     user_agent: Option<&str>,
 ) -> Result<AuditLog> {
@@ -171,8 +173,8 @@ pub fn create_audit_log(
     let details_str = details.map(|d| d.to_string());
 
     conn.execute(
-        "INSERT INTO audit_logs (id, timestamp, actor_type, actor_id, action, resource_type, resource_id, details, ip_address, user_agent)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO audit_logs (id, timestamp, actor_type, actor_id, action, resource_type, resource_id, details, org_id, project_id, ip_address, user_agent)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             &id,
             timestamp,
@@ -182,6 +184,8 @@ pub fn create_audit_log(
             resource_type,
             resource_id,
             &details_str,
+            org_id,
+            project_id,
             ip_address,
             user_agent
         ],
@@ -196,6 +200,8 @@ pub fn create_audit_log(
         resource_type: resource_type.to_string(),
         resource_id: resource_id.to_string(),
         details: details.cloned(),
+        org_id: org_id.map(String::from),
+        project_id: project_id.map(String::from),
         ip_address: ip_address.map(String::from),
         user_agent: user_agent.map(String::from),
     })
@@ -203,7 +209,7 @@ pub fn create_audit_log(
 
 pub fn query_audit_logs(conn: &Connection, query: &AuditLogQuery) -> Result<Vec<AuditLog>> {
     let mut sql = String::from(
-        "SELECT id, timestamp, actor_type, actor_id, action, resource_type, resource_id, details, ip_address, user_agent
+        "SELECT id, timestamp, actor_type, actor_id, action, resource_type, resource_id, details, org_id, project_id, ip_address, user_agent
          FROM audit_logs WHERE 1=1",
     );
     let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -227,6 +233,14 @@ pub fn query_audit_logs(conn: &Connection, query: &AuditLogQuery) -> Result<Vec<
     if let Some(ref resource_id) = query.resource_id {
         sql.push_str(" AND resource_id = ?");
         params_vec.push(Box::new(resource_id.clone()));
+    }
+    if let Some(ref org_id) = query.org_id {
+        sql.push_str(" AND org_id = ?");
+        params_vec.push(Box::new(org_id.clone()));
+    }
+    if let Some(ref project_id) = query.project_id {
+        sql.push_str(" AND project_id = ?");
+        params_vec.push(Box::new(project_id.clone()));
     }
     if let Some(from_ts) = query.from_timestamp {
         sql.push_str(" AND timestamp >= ?");
@@ -263,8 +277,10 @@ pub fn query_audit_logs(conn: &Connection, query: &AuditLogQuery) -> Result<Vec<
                 resource_type: row.get(5)?,
                 resource_id: row.get(6)?,
                 details: details_str.and_then(|s| serde_json::from_str(&s).ok()),
-                ip_address: row.get(8)?,
-                user_agent: row.get(9)?,
+                org_id: row.get(8)?,
+                project_id: row.get(9)?,
+                ip_address: row.get(10)?,
+                user_agent: row.get(11)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -481,9 +497,9 @@ pub fn create_project(
     let now = now();
 
     conn.execute(
-        "INSERT INTO projects (id, org_id, name, domain, private_key, public_key, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![&id, org_id, &input.name, &input.domain, private_key, public_key, now, now],
+        "INSERT INTO projects (id, org_id, name, domain, license_key_prefix, private_key, public_key, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![&id, org_id, &input.name, &input.domain, &input.license_key_prefix, private_key, public_key, now, now],
     )?;
 
     Ok(Project {
@@ -491,6 +507,7 @@ pub fn create_project(
         org_id: org_id.to_string(),
         name: input.name.clone(),
         domain: input.domain.clone(),
+        license_key_prefix: input.license_key_prefix.clone(),
         private_key: private_key.to_vec(),
         public_key: public_key.to_string(),
         stripe_config: None,
@@ -502,23 +519,24 @@ pub fn create_project(
 
 pub fn get_project_by_id(conn: &Connection, id: &str) -> Result<Option<Project>> {
     conn.query_row(
-        "SELECT id, org_id, name, domain, private_key, public_key, stripe_config, ls_config, created_at, updated_at
+        "SELECT id, org_id, name, domain, license_key_prefix, private_key, public_key, stripe_config, ls_config, created_at, updated_at
          FROM projects WHERE id = ?1",
         params![id],
         |row| {
-            let stripe_str: Option<String> = row.get(6)?;
-            let ls_str: Option<String> = row.get(7)?;
+            let stripe_str: Option<String> = row.get(7)?;
+            let ls_str: Option<String> = row.get(8)?;
             Ok(Project {
                 id: row.get(0)?,
                 org_id: row.get(1)?,
                 name: row.get(2)?,
                 domain: row.get(3)?,
-                private_key: row.get(4)?,
-                public_key: row.get(5)?,
+                license_key_prefix: row.get(4)?,
+                private_key: row.get(5)?,
+                public_key: row.get(6)?,
                 stripe_config: stripe_str.and_then(|s| serde_json::from_str(&s).ok()),
                 ls_config: ls_str.and_then(|s| serde_json::from_str(&s).ok()),
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
             })
         },
     )
@@ -528,25 +546,26 @@ pub fn get_project_by_id(conn: &Connection, id: &str) -> Result<Option<Project>>
 
 pub fn list_projects_for_org(conn: &Connection, org_id: &str) -> Result<Vec<Project>> {
     let mut stmt = conn.prepare(
-        "SELECT id, org_id, name, domain, private_key, public_key, stripe_config, ls_config, created_at, updated_at
+        "SELECT id, org_id, name, domain, license_key_prefix, private_key, public_key, stripe_config, ls_config, created_at, updated_at
          FROM projects WHERE org_id = ?1 ORDER BY created_at DESC",
     )?;
 
     let projects = stmt
         .query_map(params![org_id], |row| {
-            let stripe_str: Option<String> = row.get(6)?;
-            let ls_str: Option<String> = row.get(7)?;
+            let stripe_str: Option<String> = row.get(7)?;
+            let ls_str: Option<String> = row.get(8)?;
             Ok(Project {
                 id: row.get(0)?,
                 org_id: row.get(1)?,
                 name: row.get(2)?,
                 domain: row.get(3)?,
-                private_key: row.get(4)?,
-                public_key: row.get(5)?,
+                license_key_prefix: row.get(4)?,
+                private_key: row.get(5)?,
+                public_key: row.get(6)?,
                 stripe_config: stripe_str.and_then(|s| serde_json::from_str(&s).ok()),
                 ls_config: ls_str.and_then(|s| serde_json::from_str(&s).ok()),
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -567,6 +586,12 @@ pub fn update_project(conn: &Connection, id: &str, input: &UpdateProject) -> Res
         conn.execute(
             "UPDATE projects SET domain = ?1, updated_at = ?2 WHERE id = ?3",
             params![domain, now, id],
+        )?;
+    }
+    if let Some(ref license_key_prefix) = input.license_key_prefix {
+        conn.execute(
+            "UPDATE projects SET license_key_prefix = ?1, updated_at = ?2 WHERE id = ?3",
+            params![license_key_prefix, now, id],
         )?;
     }
     if let Some(ref stripe_config) = input.stripe_config {
@@ -801,7 +826,7 @@ pub fn delete_product(conn: &Connection, id: &str) -> Result<bool> {
 
 // ============ License Keys ============
 
-pub fn generate_license_key_string() -> String {
+pub fn generate_license_key_string(prefix: &str) -> String {
     use rand::Rng;
     let mut rng = rand::thread_rng();
     let chars: Vec<char> = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".chars().collect();
@@ -810,22 +835,23 @@ pub fn generate_license_key_string() -> String {
         (0..4).map(|_| chars[rng.gen_range(0..chars.len())]).collect()
     };
 
-    format!("PC-{}-{}-{}", part(), part(), part())
+    format!("{}-{}-{}-{}-{}", prefix, part(), part(), part(), part())
 }
 
 pub fn create_license_key(
     conn: &Connection,
     product_id: &str,
+    prefix: &str,
     input: &CreateLicenseKey,
 ) -> Result<LicenseKey> {
     let id = gen_id();
-    let key = generate_license_key_string();
+    let key = generate_license_key_string(prefix);
     let now = now();
 
     conn.execute(
-        "INSERT INTO license_keys (id, key, product_id, email, activation_count, revoked, revoked_jtis, created_at, expires_at)
-         VALUES (?1, ?2, ?3, ?4, 0, 0, '[]', ?5, ?6)",
-        params![&id, &key, product_id, &input.email, now, input.expires_at],
+        "INSERT INTO license_keys (id, key, product_id, email, activation_count, revoked, revoked_jtis, created_at, expires_at, updates_expires_at)
+         VALUES (?1, ?2, ?3, ?4, 0, 0, '[]', ?5, ?6, ?7)",
+        params![&id, &key, product_id, &input.email, now, input.expires_at, input.updates_expires_at],
     )?;
 
     Ok(LicenseKey {
@@ -838,12 +864,13 @@ pub fn create_license_key(
         revoked_jtis: vec![],
         created_at: now,
         expires_at: input.expires_at,
+        updates_expires_at: input.updates_expires_at,
     })
 }
 
 pub fn get_license_key_by_id(conn: &Connection, id: &str) -> Result<Option<LicenseKey>> {
     conn.query_row(
-        "SELECT id, key, product_id, email, activation_count, revoked, revoked_jtis, created_at, expires_at
+        "SELECT id, key, product_id, email, activation_count, revoked, revoked_jtis, created_at, expires_at, updates_expires_at
          FROM license_keys WHERE id = ?1",
         params![id],
         |row| {
@@ -858,6 +885,7 @@ pub fn get_license_key_by_id(conn: &Connection, id: &str) -> Result<Option<Licen
                 revoked_jtis: serde_json::from_str(&jtis_str).unwrap_or_default(),
                 created_at: row.get(7)?,
                 expires_at: row.get(8)?,
+                updates_expires_at: row.get(9)?,
             })
         },
     )
@@ -867,7 +895,7 @@ pub fn get_license_key_by_id(conn: &Connection, id: &str) -> Result<Option<Licen
 
 pub fn get_license_key_by_key(conn: &Connection, key: &str) -> Result<Option<LicenseKey>> {
     conn.query_row(
-        "SELECT id, key, product_id, email, activation_count, revoked, revoked_jtis, created_at, expires_at
+        "SELECT id, key, product_id, email, activation_count, revoked, revoked_jtis, created_at, expires_at, updates_expires_at
          FROM license_keys WHERE key = ?1",
         params![key],
         |row| {
@@ -882,6 +910,7 @@ pub fn get_license_key_by_key(conn: &Connection, key: &str) -> Result<Option<Lic
                 revoked_jtis: serde_json::from_str(&jtis_str).unwrap_or_default(),
                 created_at: row.get(7)?,
                 expires_at: row.get(8)?,
+                updates_expires_at: row.get(9)?,
             })
         },
     )
@@ -891,7 +920,7 @@ pub fn get_license_key_by_key(conn: &Connection, key: &str) -> Result<Option<Lic
 
 pub fn list_license_keys_for_project(conn: &Connection, project_id: &str) -> Result<Vec<LicenseKeyWithProduct>> {
     let mut stmt = conn.prepare(
-        "SELECT lk.id, lk.key, lk.product_id, lk.email, lk.activation_count, lk.revoked, lk.revoked_jtis, lk.created_at, lk.expires_at, p.name, p.project_id
+        "SELECT lk.id, lk.key, lk.product_id, lk.email, lk.activation_count, lk.revoked, lk.revoked_jtis, lk.created_at, lk.expires_at, lk.updates_expires_at, p.name, p.project_id
          FROM license_keys lk
          JOIN products p ON lk.product_id = p.id
          WHERE p.project_id = ?1
@@ -912,9 +941,10 @@ pub fn list_license_keys_for_project(conn: &Connection, project_id: &str) -> Res
                     revoked_jtis: serde_json::from_str(&jtis_str).unwrap_or_default(),
                     created_at: row.get(7)?,
                     expires_at: row.get(8)?,
+                    updates_expires_at: row.get(9)?,
                 },
-                product_name: row.get(9)?,
-                project_id: row.get(10)?,
+                product_name: row.get(10)?,
+                project_id: row.get(11)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -948,6 +978,85 @@ pub fn add_revoked_jti(conn: &Connection, license_id: &str, jti: &str) -> Result
         params![json, license_id],
     )?;
     Ok(())
+}
+
+// ============ Redemption Codes ============
+
+const REDEMPTION_CODE_TTL_SECONDS: i64 = 30 * 60; // 30 minutes
+
+pub fn generate_redemption_code_string() -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    // Use URL-safe base64-like characters, shorter than license keys
+    let chars: Vec<char> = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"
+        .chars()
+        .collect();
+
+    (0..16)
+        .map(|_| chars[rng.gen_range(0..chars.len())])
+        .collect()
+}
+
+pub fn create_redemption_code(
+    conn: &Connection,
+    license_key_id: &str,
+) -> Result<RedemptionCode> {
+    let id = gen_id();
+    let code = generate_redemption_code_string();
+    let now = now();
+    let expires_at = now + REDEMPTION_CODE_TTL_SECONDS;
+
+    conn.execute(
+        "INSERT INTO redemption_codes (id, code, license_key_id, expires_at, used, created_at)
+         VALUES (?1, ?2, ?3, ?4, 0, ?5)",
+        params![&id, &code, license_key_id, expires_at, now],
+    )?;
+
+    Ok(RedemptionCode {
+        id,
+        code,
+        license_key_id: license_key_id.to_string(),
+        expires_at,
+        used: false,
+        created_at: now,
+    })
+}
+
+pub fn get_redemption_code_by_code(conn: &Connection, code: &str) -> Result<Option<RedemptionCode>> {
+    conn.query_row(
+        "SELECT id, code, license_key_id, expires_at, used, created_at
+         FROM redemption_codes WHERE code = ?1",
+        params![code],
+        |row| {
+            Ok(RedemptionCode {
+                id: row.get(0)?,
+                code: row.get(1)?,
+                license_key_id: row.get(2)?,
+                expires_at: row.get(3)?,
+                used: row.get::<_, i32>(4)? != 0,
+                created_at: row.get(5)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+pub fn mark_redemption_code_used(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE redemption_codes SET used = 1 WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(())
+}
+
+pub fn cleanup_expired_redemption_codes(conn: &Connection) -> Result<usize> {
+    let now = now();
+    let deleted = conn.execute(
+        "DELETE FROM redemption_codes WHERE expires_at < ?1 OR used = 1",
+        params![now],
+    )?;
+    Ok(deleted)
 }
 
 // ============ Devices ============

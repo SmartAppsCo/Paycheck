@@ -20,6 +20,7 @@ pub struct Project {
     pub org_id: String,
     pub name: String,
     pub domain: String,
+    pub license_key_prefix: String,
     #[serde(skip_serializing)]
     pub private_key: Vec<u8>,
     pub public_key: String,
@@ -35,6 +36,7 @@ pub struct ProjectPublic {
     pub org_id: String,
     pub name: String,
     pub domain: String,
+    pub license_key_prefix: String,
     pub public_key: String,
     pub has_stripe: bool,
     pub has_lemonsqueezy: bool,
@@ -49,6 +51,7 @@ impl From<Project> for ProjectPublic {
             org_id: p.org_id,
             name: p.name,
             domain: p.domain,
+            license_key_prefix: p.license_key_prefix,
             public_key: p.public_key,
             has_stripe: p.stripe_config.is_some(),
             has_lemonsqueezy: p.ls_config.is_some(),
@@ -62,12 +65,19 @@ impl From<Project> for ProjectPublic {
 pub struct CreateProject {
     pub name: String,
     pub domain: String,
+    #[serde(default = "default_prefix")]
+    pub license_key_prefix: String,
+}
+
+fn default_prefix() -> String {
+    "PC".to_string()
 }
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateProject {
     pub name: Option<String>,
     pub domain: Option<String>,
+    pub license_key_prefix: Option<String>,
     pub stripe_config: Option<StripeConfig>,
     pub ls_config: Option<LemonSqueezyConfig>,
 }

@@ -4,7 +4,7 @@ use axum::{
     Json,
 };
 
-use crate::db::{queries, DbPool};
+use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
 use crate::jwt;
 use crate::middleware::OrgMemberContext;
@@ -26,7 +26,7 @@ fn extract_request_info(headers: &HeaderMap) -> (Option<String>, Option<String>)
 }
 
 pub async fn create_project(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
     Path(org_id): Path<String>,
     headers: HeaderMap,
@@ -34,7 +34,8 @@ pub async fn create_project(
 ) -> Result<Json<ProjectPublic>> {
     ctx.require_admin()?;
 
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
 
     // Generate Ed25519 key pair
     let (private_key, public_key) = jwt::generate_keypair();
@@ -43,7 +44,7 @@ pub async fn create_project(
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::OrgMember,
         Some(&ctx.member.id),
         "create_project",
@@ -53,6 +54,8 @@ pub async fn create_project(
             "name": input.name,
             "domain": input.domain,
         })),
+        Some(&org_id),
+        Some(&project.id),
         ip.as_deref(),
         ua.as_deref(),
     )?;
@@ -61,11 +64,11 @@ pub async fn create_project(
 }
 
 pub async fn list_projects(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
     Path(org_id): Path<String>,
 ) -> Result<Json<Vec<ProjectPublic>>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
     let projects = queries::list_projects_for_org(&conn, &org_id)?;
 
     // Filter based on access
@@ -89,10 +92,10 @@ pub async fn list_projects(
 }
 
 pub async fn get_project(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Path(path): Path<crate::middleware::OrgProjectPath>,
 ) -> Result<Json<ProjectPublic>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
     let project = queries::get_project_by_id(&conn, &path.project_id)?
         .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
 
@@ -104,7 +107,7 @@ pub async fn get_project(
 }
 
 pub async fn update_project(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
     Path(path): Path<crate::middleware::OrgProjectPath>,
     headers: HeaderMap,
@@ -114,13 +117,14 @@ pub async fn update_project(
         return Err(AppError::Forbidden("Insufficient permissions".into()));
     }
 
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
 
     queries::update_project(&conn, &path.project_id, &input)?;
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::OrgMember,
         Some(&ctx.member.id),
         "update_project",
@@ -132,6 +136,8 @@ pub async fn update_project(
             "stripe_updated": input.stripe_config.is_some(),
             "ls_updated": input.ls_config.is_some(),
         })),
+        Some(&path.org_id),
+        Some(&path.project_id),
         ip.as_deref(),
         ua.as_deref(),
     )?;
@@ -143,14 +149,15 @@ pub async fn update_project(
 }
 
 pub async fn delete_project(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
     Path(path): Path<crate::middleware::OrgProjectPath>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>> {
     ctx.require_admin()?;
 
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
 
     let existing = queries::get_project_by_id(&conn, &path.project_id)?
         .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
@@ -159,7 +166,7 @@ pub async fn delete_project(
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::OrgMember,
         Some(&ctx.member.id),
         "delete_project",
@@ -169,6 +176,8 @@ pub async fn delete_project(
             "name": existing.name,
             "domain": existing.domain,
         })),
+        Some(&path.org_id),
+        Some(&path.project_id),
         ip.as_deref(),
         ua.as_deref(),
     )?;

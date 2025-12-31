@@ -5,7 +5,7 @@ use axum::{
     response::Response,
 };
 
-use crate::db::{queries, DbPool};
+use crate::db::{queries, AppState};
 use crate::models::{Operator, OperatorRole};
 
 #[derive(Clone)]
@@ -32,7 +32,7 @@ impl OperatorContext {
 }
 
 pub async fn operator_auth(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
@@ -46,7 +46,7 @@ pub async fn operator_auth(
         .strip_prefix("Bearer ")
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let conn = pool.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conn = state.db.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let operator = queries::get_operator_by_api_key(&conn, api_key)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -58,7 +58,7 @@ pub async fn operator_auth(
 }
 
 pub async fn require_owner_role(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
@@ -72,7 +72,7 @@ pub async fn require_owner_role(
         .strip_prefix("Bearer ")
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let conn = pool.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conn = state.db.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let operator = queries::get_operator_by_api_key(&conn, api_key)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -88,7 +88,7 @@ pub async fn require_owner_role(
 }
 
 pub async fn require_admin_role(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
@@ -102,7 +102,7 @@ pub async fn require_admin_role(
         .strip_prefix("Bearer ")
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let conn = pool.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conn = state.db.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let operator = queries::get_operator_by_api_key(&conn, api_key)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?

@@ -11,6 +11,7 @@ pub struct LicenseKey {
     pub revoked_jtis: Vec<String>,
     pub created_at: i64,
     pub expires_at: Option<i64>,
+    pub updates_expires_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -25,4 +26,15 @@ pub struct LicenseKeyWithProduct {
 pub struct CreateLicenseKey {
     pub email: Option<String>,
     pub expires_at: Option<i64>,
+    pub updates_expires_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedemptionCode {
+    pub id: String,
+    pub code: String,
+    pub license_key_id: String,
+    pub expires_at: i64,
+    pub used: bool,
+    pub created_at: i64,
 }

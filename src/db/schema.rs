@@ -1,5 +1,6 @@
 use rusqlite::Connection;
 
+/// Initialize the main database schema (everything except audit logs)
 pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         r#"
@@ -13,23 +14,6 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             created_at INTEGER NOT NULL,
             created_by TEXT REFERENCES operators(id)
         );
-
-        -- Audit logs for all write operations
-        CREATE TABLE IF NOT EXISTS audit_logs (
-            id TEXT PRIMARY KEY,
-            timestamp INTEGER NOT NULL,
-            actor_type TEXT NOT NULL CHECK (actor_type IN ('operator', 'org_member', 'public', 'system')),
-            actor_id TEXT,
-            action TEXT NOT NULL,
-            resource_type TEXT NOT NULL,
-            resource_id TEXT NOT NULL,
-            details TEXT,
-            ip_address TEXT,
-            user_agent TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
-        CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_type, actor_id);
-        CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
 
         -- Organizations (customers - indie devs, companies)
         CREATE TABLE IF NOT EXISTS organizations (
@@ -59,6 +43,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
             name TEXT NOT NULL,
             domain TEXT NOT NULL,
+            license_key_prefix TEXT NOT NULL DEFAULT 'PC',
             private_key BLOB NOT NULL,
             public_key TEXT NOT NULL,
             stripe_config TEXT,
@@ -106,11 +91,25 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             revoked INTEGER NOT NULL DEFAULT 0,
             revoked_jtis TEXT NOT NULL DEFAULT '[]',
             created_at INTEGER NOT NULL,
-            expires_at INTEGER
+            expires_at INTEGER,
+            updates_expires_at INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_license_keys_product ON license_keys(product_id);
         CREATE INDEX IF NOT EXISTS idx_license_keys_key ON license_keys(key);
         CREATE INDEX IF NOT EXISTS idx_license_keys_email ON license_keys(email);
+
+        -- Redemption codes (short-lived codes for URL-safe license redemption)
+        CREATE TABLE IF NOT EXISTS redemption_codes (
+            id TEXT PRIMARY KEY,
+            code TEXT NOT NULL UNIQUE,
+            license_key_id TEXT NOT NULL REFERENCES license_keys(id) ON DELETE CASCADE,
+            expires_at INTEGER NOT NULL,
+            used INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_redemption_codes_code ON redemption_codes(code);
+        CREATE INDEX IF NOT EXISTS idx_redemption_codes_license ON redemption_codes(license_key_id);
+        CREATE INDEX IF NOT EXISTS idx_redemption_codes_expires ON redemption_codes(expires_at);
 
         -- Devices (activated devices for a license)
         CREATE TABLE IF NOT EXISTS devices (
@@ -137,6 +136,43 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             completed INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_payment_sessions_product ON payment_sessions(product_id);
+        "#,
+    )?;
+    Ok(())
+}
+
+/// Initialize the audit log database schema (separate DB file)
+/// Optimized for append-only workload with WAL mode
+pub fn init_audit_db(conn: &Connection) -> rusqlite::Result<()> {
+    // WAL mode: writes are sequential appends, much faster for append-only workloads
+    // synchronous=NORMAL: safe with WAL, faster than FULL
+    // journal_size_limit: prevent WAL from growing indefinitely
+    conn.execute_batch(
+        r#"
+        PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+        PRAGMA wal_autocheckpoint = 1000;
+        PRAGMA journal_size_limit = 67108864;
+
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id TEXT PRIMARY KEY,
+            timestamp INTEGER NOT NULL,
+            actor_type TEXT NOT NULL CHECK (actor_type IN ('operator', 'org_member', 'public', 'system')),
+            actor_id TEXT,
+            action TEXT NOT NULL,
+            resource_type TEXT NOT NULL,
+            resource_id TEXT NOT NULL,
+            details TEXT,
+            org_id TEXT,
+            project_id TEXT,
+            ip_address TEXT,
+            user_agent TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_type, actor_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_org ON audit_logs(org_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_project ON audit_logs(project_id);
         "#,
     )?;
     Ok(())

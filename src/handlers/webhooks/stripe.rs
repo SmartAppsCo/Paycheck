@@ -5,12 +5,11 @@ use axum::{
     response::IntoResponse,
 };
 
-use crate::db::{queries, DbPool};
-use crate::models::DeviceType;
+use crate::db::{queries, AppState};
 use crate::payments::{StripeClient, StripeWebhookEvent};
 
 pub async fn handle_stripe_webhook(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
@@ -48,7 +47,7 @@ pub async fn handle_stripe_webhook(
     };
 
     // Get project to verify signature
-    let conn = match pool.get() {
+    let conn = match state.db.get() {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("DB connection error: {}", e);
@@ -100,13 +99,30 @@ pub async fn handle_stripe_webhook(
         return (StatusCode::OK, "Already processed");
     }
 
-    // Create license key
+    // Get product to compute expirations
+    let product = match queries::get_product_by_id(&conn, &payment_session.product_id) {
+        Ok(Some(p)) => p,
+        Ok(None) => return (StatusCode::OK, "Product not found"),
+        Err(e) => {
+            tracing::error!("DB error: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+
+    // Compute expirations from product settings
+    let now = chrono::Utc::now().timestamp();
+    let expires_at = product.license_exp_days.map(|days| now + (days as i64) * 86400);
+    let updates_expires_at = product.updates_exp_days.map(|days| now + (days as i64) * 86400);
+
+    // Create license key with project's prefix
     let license = match queries::create_license_key(
         &conn,
         &payment_session.product_id,
+        &project.license_key_prefix,
         &crate::models::CreateLicenseKey {
             email: event.data.object.customer_email.clone(),
-            expires_at: None,
+            expires_at,
+            updates_expires_at,
         },
     ) {
         Ok(l) => l,

@@ -4,7 +4,7 @@ use axum::{
     Json,
 };
 
-use crate::db::{queries, DbPool};
+use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
 use crate::middleware::OrgMemberContext;
 use crate::models::{ActorType, CreateProjectMember, ProjectMemberWithDetails, UpdateProjectMember};
@@ -32,7 +32,7 @@ pub struct ProjectMemberPath {
 }
 
 pub async fn create_project_member(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
     Path(path): Path<crate::middleware::OrgProjectPath>,
     headers: HeaderMap,
@@ -42,7 +42,8 @@ pub async fn create_project_member(
         return Err(AppError::Forbidden("Insufficient permissions".into()));
     }
 
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
 
     // Verify the org member exists and belongs to the same org
     let target_member = queries::get_org_member_by_id(&conn, &input.org_member_id)?
@@ -65,7 +66,7 @@ pub async fn create_project_member(
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::OrgMember,
         Some(&ctx.member.id),
         "create_project_member",
@@ -76,6 +77,8 @@ pub async fn create_project_member(
             "project_id": path.project_id,
             "role": input.role,
         })),
+        Some(&path.org_id),
+        Some(&path.project_id),
         ip.as_deref(),
         ua.as_deref(),
     )?;
@@ -92,16 +95,16 @@ pub async fn create_project_member(
 }
 
 pub async fn list_project_members(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Path(path): Path<crate::middleware::OrgProjectPath>,
 ) -> Result<Json<Vec<ProjectMemberWithDetails>>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
     let members = queries::list_project_members(&conn, &path.project_id)?;
     Ok(Json(members))
 }
 
 pub async fn update_project_member(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
     Path(path): Path<ProjectMemberPath>,
     headers: HeaderMap,
@@ -111,13 +114,14 @@ pub async fn update_project_member(
         return Err(AppError::Forbidden("Insufficient permissions".into()));
     }
 
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
 
     queries::update_project_member(&conn, &path.id, &input)?;
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::OrgMember,
         Some(&ctx.member.id),
         "update_project_member",
@@ -126,6 +130,8 @@ pub async fn update_project_member(
         Some(&serde_json::json!({
             "role": input.role,
         })),
+        Some(&path.org_id),
+        Some(&path.project_id),
         ip.as_deref(),
         ua.as_deref(),
     )?;
@@ -134,7 +140,7 @@ pub async fn update_project_member(
 }
 
 pub async fn delete_project_member(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
     Path(path): Path<ProjectMemberPath>,
     headers: HeaderMap,
@@ -143,19 +149,22 @@ pub async fn delete_project_member(
         return Err(AppError::Forbidden("Insufficient permissions".into()));
     }
 
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
 
     queries::delete_project_member(&conn, &path.id)?;
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::OrgMember,
         Some(&ctx.member.id),
         "delete_project_member",
         "project_member",
         &path.id,
         None,
+        Some(&path.org_id),
+        Some(&path.project_id),
         ip.as_deref(),
         ua.as_deref(),
     )?;

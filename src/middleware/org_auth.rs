@@ -5,7 +5,7 @@ use axum::{
     response::Response,
 };
 
-use crate::db::{queries, DbPool};
+use crate::db::{queries, AppState};
 use crate::models::{OrgMember, OrgMemberRole, ProjectMemberRole};
 
 #[derive(Clone)]
@@ -42,7 +42,7 @@ impl OrgMemberContext {
 }
 
 pub async fn org_member_auth(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Path(org_id): Path<String>,
     mut request: Request,
     next: Next,
@@ -57,7 +57,7 @@ pub async fn org_member_auth(
         .strip_prefix("Bearer ")
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let conn = pool.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conn = state.db.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let member = queries::get_org_member_by_api_key(&conn, api_key)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -82,7 +82,7 @@ pub struct OrgProjectPath {
 }
 
 pub async fn org_member_project_auth(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Path(path): Path<OrgProjectPath>,
     mut request: Request,
     next: Next,
@@ -97,7 +97,7 @@ pub async fn org_member_project_auth(
         .strip_prefix("Bearer ")
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let conn = pool.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conn = state.db.get().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let member = queries::get_org_member_by_api_key(&conn, api_key)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?

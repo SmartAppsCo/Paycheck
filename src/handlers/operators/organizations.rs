@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::Serialize;
 
-use crate::db::{queries, DbPool};
+use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
 use crate::middleware::OperatorContext;
 use crate::models::{ActorType, CreateOrganization, OrgMemberRole, Organization, CreateOrgMember};
@@ -33,12 +33,13 @@ fn extract_request_info(headers: &HeaderMap) -> (Option<String>, Option<String>)
 }
 
 pub async fn create_organization(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OperatorContext>,
     headers: HeaderMap,
     Json(input): Json<CreateOrganization>,
 ) -> Result<Json<OrganizationCreated>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
     let organization = queries::create_organization(&conn, &input)?;
 
     // If owner email is provided, create the first org member as owner
@@ -61,7 +62,7 @@ pub async fn create_organization(
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::Operator,
         Some(&ctx.operator.id),
         "create_organization",
@@ -71,6 +72,8 @@ pub async fn create_organization(
             "name": input.name,
             "owner_email": input.owner_email,
         })),
+        Some(&organization.id),
+        None,
         ip.as_deref(),
         ua.as_deref(),
     )?;
@@ -81,29 +84,30 @@ pub async fn create_organization(
     }))
 }
 
-pub async fn list_organizations(State(pool): State<DbPool>) -> Result<Json<Vec<Organization>>> {
-    let conn = pool.get()?;
+pub async fn list_organizations(State(state): State<AppState>) -> Result<Json<Vec<Organization>>> {
+    let conn = state.db.get()?;
     let organizations = queries::list_organizations(&conn)?;
     Ok(Json(organizations))
 }
 
 pub async fn get_organization(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Organization>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
     let organization = queries::get_organization_by_id(&conn, &id)?
         .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
     Ok(Json(organization))
 }
 
 pub async fn delete_organization(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OperatorContext>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
 
     let existing = queries::get_organization_by_id(&conn, &id)?
         .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
@@ -112,7 +116,7 @@ pub async fn delete_organization(
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::Operator,
         Some(&ctx.operator.id),
         "delete_organization",
@@ -121,6 +125,8 @@ pub async fn delete_organization(
         Some(&serde_json::json!({
             "name": existing.name,
         })),
+        Some(&id),
+        None,
         ip.as_deref(),
         ua.as_deref(),
     )?;

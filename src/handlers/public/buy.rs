@@ -4,7 +4,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::db::{queries, DbPool};
+use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
 use crate::models::{CreatePaymentSession, DeviceType};
 use crate::payments::{LemonSqueezyClient, PaymentProvider, StripeClient};
@@ -27,10 +27,10 @@ pub struct BuyQuery {
 }
 
 pub async fn initiate_buy(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Query(query): Query<BuyQuery>,
 ) -> Result<Redirect> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
 
     // Validate device type
     let device_type = DeviceType::from_str(&query.device_type)

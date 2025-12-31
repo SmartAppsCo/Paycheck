@@ -1,12 +1,21 @@
 mod schema;
 pub mod queries;
 
-pub use schema::init_db;
+pub use schema::{init_audit_db, init_db};
 
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
+
+/// Application state holding both database pools
+#[derive(Clone)]
+pub struct AppState {
+    /// Main database pool (operators, orgs, projects, licenses, etc.)
+    pub db: DbPool,
+    /// Audit log database pool (separate file to isolate growth)
+    pub audit: DbPool,
+}
 
 pub fn create_pool(database_path: &str) -> Result<DbPool, r2d2::Error> {
     let manager = SqliteConnectionManager::file(database_path);

@@ -4,7 +4,7 @@ use axum::{
     Json,
 };
 
-use crate::db::{queries, DbPool};
+use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
 use crate::middleware::OrgMemberContext;
 use crate::models::{ActorType, CreateProduct, Product, UpdateProduct};
@@ -32,7 +32,7 @@ pub struct ProductPath {
 }
 
 pub async fn create_product(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
     Path(path): Path<crate::middleware::OrgProjectPath>,
     headers: HeaderMap,
@@ -42,12 +42,13 @@ pub async fn create_product(
         return Err(AppError::Forbidden("Insufficient permissions".into()));
     }
 
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
     let product = queries::create_product(&conn, &path.project_id, &input)?;
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::OrgMember,
         Some(&ctx.member.id),
         "create_product",
@@ -57,6 +58,8 @@ pub async fn create_product(
             "name": input.name,
             "tier": input.tier,
         })),
+        Some(&path.org_id),
+        Some(&path.project_id),
         ip.as_deref(),
         ua.as_deref(),
     )?;
@@ -65,19 +68,19 @@ pub async fn create_product(
 }
 
 pub async fn list_products(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Path(path): Path<crate::middleware::OrgProjectPath>,
 ) -> Result<Json<Vec<Product>>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
     let products = queries::list_products_for_project(&conn, &path.project_id)?;
     Ok(Json(products))
 }
 
 pub async fn get_product(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Path(path): Path<ProductPath>,
 ) -> Result<Json<Product>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
     let product = queries::get_product_by_id(&conn, &path.id)?
         .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
 
@@ -89,7 +92,7 @@ pub async fn get_product(
 }
 
 pub async fn update_product(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
     Path(path): Path<ProductPath>,
     headers: HeaderMap,
@@ -99,7 +102,8 @@ pub async fn update_product(
         return Err(AppError::Forbidden("Insufficient permissions".into()));
     }
 
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
 
     let existing = queries::get_product_by_id(&conn, &path.id)?
         .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
@@ -112,7 +116,7 @@ pub async fn update_product(
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::OrgMember,
         Some(&ctx.member.id),
         "update_product",
@@ -122,6 +126,8 @@ pub async fn update_product(
             "name": input.name,
             "tier": input.tier,
         })),
+        Some(&path.org_id),
+        Some(&path.project_id),
         ip.as_deref(),
         ua.as_deref(),
     )?;
@@ -133,7 +139,7 @@ pub async fn update_product(
 }
 
 pub async fn delete_product(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
     Path(path): Path<ProductPath>,
     headers: HeaderMap,
@@ -142,7 +148,8 @@ pub async fn delete_product(
         return Err(AppError::Forbidden("Insufficient permissions".into()));
     }
 
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
 
     let existing = queries::get_product_by_id(&conn, &path.id)?
         .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
@@ -155,7 +162,7 @@ pub async fn delete_product(
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::OrgMember,
         Some(&ctx.member.id),
         "delete_product",
@@ -164,6 +171,8 @@ pub async fn delete_product(
         Some(&serde_json::json!({
             "name": existing.name,
         })),
+        Some(&path.org_id),
+        Some(&path.project_id),
         ip.as_deref(),
         ua.as_deref(),
     )?;

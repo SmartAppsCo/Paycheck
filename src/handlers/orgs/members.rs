@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::Serialize;
 
-use crate::db::{queries, DbPool};
+use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
 use crate::middleware::OrgMemberContext;
 use crate::models::{ActorType, CreateOrgMember, OrgMember, UpdateOrgMember};
@@ -32,7 +32,7 @@ fn extract_request_info(headers: &HeaderMap) -> (Option<String>, Option<String>)
 }
 
 pub async fn create_org_member(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
     Path(org_id): Path<String>,
     headers: HeaderMap,
@@ -40,13 +40,14 @@ pub async fn create_org_member(
 ) -> Result<Json<OrgMemberCreated>> {
     ctx.require_owner()?;
 
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
     let api_key = queries::generate_api_key();
     let member = queries::create_org_member(&conn, &org_id, &input, &api_key)?;
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::OrgMember,
         Some(&ctx.member.id),
         "create_org_member",
@@ -56,6 +57,8 @@ pub async fn create_org_member(
             "email": input.email,
             "role": input.role,
         })),
+        Some(&org_id),
+        None,
         ip.as_deref(),
         ua.as_deref(),
     )?;
@@ -64,10 +67,10 @@ pub async fn create_org_member(
 }
 
 pub async fn list_org_members(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Path(org_id): Path<String>,
 ) -> Result<Json<Vec<OrgMember>>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
     let members = queries::list_org_members(&conn, &org_id)?;
     Ok(Json(members))
 }
@@ -79,10 +82,10 @@ pub struct OrgMemberPath {
 }
 
 pub async fn get_org_member(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Path(path): Path<OrgMemberPath>,
 ) -> Result<Json<OrgMember>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
     let member = queries::get_org_member_by_id(&conn, &path.id)?
         .ok_or_else(|| AppError::NotFound("Member not found".into()))?;
 
@@ -94,7 +97,7 @@ pub async fn get_org_member(
 }
 
 pub async fn update_org_member(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
     Path(path): Path<OrgMemberPath>,
     headers: HeaderMap,
@@ -102,7 +105,8 @@ pub async fn update_org_member(
 ) -> Result<Json<OrgMember>> {
     ctx.require_owner()?;
 
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
 
     let existing = queries::get_org_member_by_id(&conn, &path.id)?
         .ok_or_else(|| AppError::NotFound("Member not found".into()))?;
@@ -120,7 +124,7 @@ pub async fn update_org_member(
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::OrgMember,
         Some(&ctx.member.id),
         "update_org_member",
@@ -130,6 +134,8 @@ pub async fn update_org_member(
             "name": input.name,
             "role": input.role,
         })),
+        Some(&path.org_id),
+        None,
         ip.as_deref(),
         ua.as_deref(),
     )?;
@@ -141,14 +147,15 @@ pub async fn update_org_member(
 }
 
 pub async fn delete_org_member(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
     Path(path): Path<OrgMemberPath>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>> {
     ctx.require_owner()?;
 
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
 
     // Prevent self-deletion
     if path.id == ctx.member.id {
@@ -166,7 +173,7 @@ pub async fn delete_org_member(
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::OrgMember,
         Some(&ctx.member.id),
         "delete_org_member",
@@ -175,6 +182,8 @@ pub async fn delete_org_member(
         Some(&serde_json::json!({
             "email": existing.email,
         })),
+        Some(&path.org_id),
+        None,
         ip.as_deref(),
         ua.as_deref(),
     )?;

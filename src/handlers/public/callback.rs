@@ -1,13 +1,11 @@
 use axum::{
     extract::{Query, State},
     response::{Html, Redirect},
-    Json,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use crate::db::{queries, DbPool};
+use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
 use crate::jwt::{self, LicenseClaims};
 
@@ -29,10 +27,10 @@ pub struct CallbackResponse {
 
 /// Callback after payment - issues JWT to the customer
 pub async fn payment_callback(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Query(query): Query<CallbackQuery>,
 ) -> Result<CallbackResult> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
 
     // Get payment session
     let session = queries::get_payment_session(&conn, &query.session)?
@@ -107,12 +105,14 @@ pub async fn payment_callback(
         &device.jti,
     )?;
 
-    // If redirect URL provided, redirect with token
+    // If redirect URL provided, redirect with token and short-lived redemption code
+    // We use a redemption code instead of the license key to avoid exposing it in URL history
     if let Some(redirect_url) = query.redirect {
+        let redemption_code = queries::create_redemption_code(&conn, &license.id)?;
         let redirect_with_token = if redirect_url.contains('?') {
-            format!("{}&token={}&key={}", redirect_url, token, license.key)
+            format!("{}&token={}&code={}", redirect_url, token, redemption_code.code)
         } else {
-            format!("{}?token={}&key={}", redirect_url, token, license.key)
+            format!("{}?token={}&code={}", redirect_url, token, redemption_code.code)
         };
         return Ok(CallbackResult::Redirect(Redirect::temporary(&redirect_with_token)));
     }

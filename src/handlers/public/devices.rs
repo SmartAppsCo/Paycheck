@@ -1,81 +1,14 @@
-use axum::{
-    extract::{Query, State},
-    Json,
+use axum::extract::State;
+use axum::Json;
+use axum_extra::{
+    headers::{authorization::Bearer, Authorization},
+    TypedHeader,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-use crate::db::{queries, DbPool};
+use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
-
-#[derive(Debug, Deserialize)]
-pub struct DevicesQuery {
-    pub project_id: String,
-    pub key: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DeviceInfo {
-    pub device_id: String,
-    pub device_type: String,
-    pub name: Option<String>,
-    pub activated_at: i64,
-    pub last_seen_at: i64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DevicesResponse {
-    pub devices: Vec<DeviceInfo>,
-    pub device_limit: i32,
-}
-
-pub async fn list_devices(
-    State(pool): State<DbPool>,
-    Query(query): Query<DevicesQuery>,
-) -> Result<Json<DevicesResponse>> {
-    let conn = pool.get()?;
-
-    // Get the license key
-    let license = queries::get_license_key_by_key(&conn, &query.key)?
-        .ok_or_else(|| AppError::NotFound("License key not found".into()))?;
-
-    // Get the product to verify project and get device limit
-    let product = queries::get_product_by_id(&conn, &license.product_id)?
-        .ok_or_else(|| AppError::Internal("Product not found".into()))?;
-
-    // Verify project matches
-    if product.project_id != query.project_id {
-        return Err(AppError::NotFound("License key not found".into()));
-    }
-
-    // Get all devices for this license
-    let devices = queries::list_devices_for_license(&conn, &license.id)?;
-
-    let device_infos: Vec<DeviceInfo> = devices
-        .into_iter()
-        .map(|d| DeviceInfo {
-            device_id: d.device_id,
-            device_type: match d.device_type {
-                crate::models::DeviceType::Uuid => "uuid".to_string(),
-                crate::models::DeviceType::Machine => "machine".to_string(),
-            },
-            name: d.name,
-            activated_at: d.activated_at,
-            last_seen_at: d.last_seen_at,
-        })
-        .collect();
-
-    Ok(Json(DevicesResponse {
-        devices: device_infos,
-        device_limit: product.device_limit,
-    }))
-}
-
-#[derive(Debug, Deserialize)]
-pub struct DeactivateRequest {
-    pub project_id: String,
-    pub key: String,
-    pub device_id: String,
-}
+use crate::jwt;
 
 #[derive(Debug, Serialize)]
 pub struct DeactivateResponse {
@@ -83,34 +16,54 @@ pub struct DeactivateResponse {
     pub remaining_devices: i32,
 }
 
+/// POST /devices/deactivate - Self-deactivation
+/// Requires JWT in Authorization header - device can only deactivate itself
+/// For remote deactivation of lost devices, use the org admin API
 pub async fn deactivate_device(
-    State(pool): State<DbPool>,
-    Json(request): Json<DeactivateRequest>,
+    State(state): State<AppState>,
+    TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
 ) -> Result<Json<DeactivateResponse>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let token = auth.token();
 
-    // Get the license key
-    let license = queries::get_license_key_by_key(&conn, &request.key)?
-        .ok_or_else(|| AppError::NotFound("License key not found".into()))?;
+    // First, decode the token without verification to get the product_id
+    // We need this to look up the project and its public key
+    let unverified_claims = jwt::decode_unverified(token)?;
 
-    // Get the product to verify project
-    let product = queries::get_product_by_id(&conn, &license.product_id)?
-        .ok_or_else(|| AppError::Internal("Product not found".into()))?;
+    // Look up the product to get the project
+    let product = queries::get_product_by_id(&conn, &unverified_claims.product_id)?
+        .ok_or_else(|| AppError::BadRequest("Invalid token: product not found".into()))?;
 
-    // Verify project matches
-    if product.project_id != request.project_id {
-        return Err(AppError::NotFound("License key not found".into()));
+    // Get the project to get the public key
+    let project = queries::get_project_by_id(&conn, &product.project_id)?
+        .ok_or_else(|| AppError::Internal("Project not found".into()))?;
+
+    // Now verify the JWT signature with the project's public key
+    let verified_claims = jwt::verify_token(token, &project.public_key)?;
+
+    // Extract JTI from verified claims
+    let jti = verified_claims
+        .jwt_id
+        .ok_or_else(|| AppError::BadRequest("Invalid token: missing jti".into()))?;
+
+    // Look up the device by JTI
+    let device = queries::get_device_by_jti(&conn, &jti)?
+        .ok_or_else(|| AppError::NotFound("Device not found or already deactivated".into()))?;
+
+    // Get the license to add revoked JTI
+    let license = queries::get_license_key_by_id(&conn, &device.license_key_id)?
+        .ok_or_else(|| AppError::Internal("License not found".into()))?;
+
+    // Check if this JTI is already revoked
+    if license.revoked_jtis.contains(&jti) {
+        return Err(AppError::Forbidden("This device has already been deactivated".into()));
     }
 
-    // Find and delete the device
-    let device = queries::get_device_for_license(&conn, &license.id, &request.device_id)?
-        .ok_or_else(|| AppError::NotFound("Device not found".into()))?;
+    // Add the device's JTI to revoked list so the token can't be used anymore
+    queries::add_revoked_jti(&conn, &license.id, &jti)?;
 
-    // Add the device's JTI to revoked list so it can't be used anymore
-    queries::add_revoked_jti(&conn, &license.id, &device.jti)?;
-
-    // Delete the device
-    queries::delete_device_by_device_id(&conn, &license.id, &request.device_id)?;
+    // Delete the device record
+    queries::delete_device(&conn, &device.id)?;
 
     // Get remaining device count
     let remaining = queries::count_devices_for_license(&conn, &license.id)?;

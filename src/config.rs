@@ -5,6 +5,7 @@ pub struct Config {
     pub host: String,
     pub port: u16,
     pub database_path: String,
+    pub audit_database_path: String,
     pub base_url: String,
     pub bootstrap_operator_email: Option<String>,
     pub dev_mode: bool,
@@ -32,6 +33,8 @@ impl Config {
             port,
             database_path: env::var("DATABASE_PATH")
                 .unwrap_or_else(|_| "paycheck.db".to_string()),
+            audit_database_path: env::var("AUDIT_DATABASE_PATH")
+                .unwrap_or_else(|_| "paycheck_audit.db".to_string()),
             base_url,
             bootstrap_operator_email: env::var("BOOTSTRAP_OPERATOR_EMAIL").ok(),
             dev_mode,

@@ -16,10 +16,10 @@ use axum::{
     Router,
 };
 
-use crate::db::DbPool;
+use crate::db::AppState;
 use crate::middleware::{org_member_auth, org_member_project_auth};
 
-pub fn router(pool: DbPool) -> Router<DbPool> {
+pub fn router(state: AppState) -> Router<AppState> {
     // Org-level routes (members management)
     let org_routes = Router::new()
         .route("/orgs/{org_id}/members", post(create_org_member))
@@ -29,7 +29,7 @@ pub fn router(pool: DbPool) -> Router<DbPool> {
         .route("/orgs/{org_id}/members/{id}", delete(delete_org_member))
         .route("/orgs/{org_id}/projects", post(create_project))
         .route("/orgs/{org_id}/projects", get(list_projects))
-        .layer(middleware::from_fn_with_state(pool.clone(), org_member_auth));
+        .layer(middleware::from_fn_with_state(state.clone(), org_member_auth));
 
     // Project-level routes
     let project_routes = Router::new()
@@ -51,7 +51,10 @@ pub fn router(pool: DbPool) -> Router<DbPool> {
         .route("/orgs/{org_id}/projects/{project_id}/licenses", get(list_licenses))
         .route("/orgs/{org_id}/projects/{project_id}/licenses/{key}", get(get_license))
         .route("/orgs/{org_id}/projects/{project_id}/licenses/{key}/revoke", post(revoke_license))
-        .layer(middleware::from_fn_with_state(pool.clone(), org_member_project_auth));
+        .route("/orgs/{org_id}/projects/{project_id}/licenses/{key}/replace", post(replace_license))
+        // Device management (for remote deactivation of lost devices)
+        .route("/orgs/{org_id}/projects/{project_id}/licenses/{key}/devices/{device_id}", delete(deactivate_device_admin))
+        .layer(middleware::from_fn_with_state(state.clone(), org_member_project_auth));
 
     org_routes.merge(project_routes)
 }

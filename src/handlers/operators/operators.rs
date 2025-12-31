@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::Serialize;
 
-use crate::db::{queries, DbPool};
+use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
 use crate::middleware::OperatorContext;
 use crate::models::{ActorType, CreateOperator, Operator, UpdateOperator};
@@ -32,18 +32,19 @@ fn extract_request_info(headers: &HeaderMap) -> (Option<String>, Option<String>)
 }
 
 pub async fn create_operator(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OperatorContext>,
     headers: HeaderMap,
     Json(input): Json<CreateOperator>,
 ) -> Result<Json<OperatorCreated>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
     let api_key = queries::generate_api_key();
     let operator = queries::create_operator(&conn, &input, &api_key, Some(&ctx.operator.id))?;
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::Operator,
         Some(&ctx.operator.id),
         "create_operator",
@@ -53,6 +54,8 @@ pub async fn create_operator(
             "email": input.email,
             "role": input.role,
         })),
+        None,
+        None,
         ip.as_deref(),
         ua.as_deref(),
     )?;
@@ -60,30 +63,31 @@ pub async fn create_operator(
     Ok(Json(OperatorCreated { operator, api_key }))
 }
 
-pub async fn list_operators(State(pool): State<DbPool>) -> Result<Json<Vec<Operator>>> {
-    let conn = pool.get()?;
+pub async fn list_operators(State(state): State<AppState>) -> Result<Json<Vec<Operator>>> {
+    let conn = state.db.get()?;
     let operators = queries::list_operators(&conn)?;
     Ok(Json(operators))
 }
 
 pub async fn get_operator(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Operator>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
     let operator = queries::get_operator_by_id(&conn, &id)?
         .ok_or_else(|| AppError::NotFound("Operator not found".into()))?;
     Ok(Json(operator))
 }
 
 pub async fn update_operator(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OperatorContext>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Json(input): Json<UpdateOperator>,
 ) -> Result<Json<Operator>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
 
     // Prevent self-demotion
     if id == ctx.operator.id && input.role.is_some() {
@@ -99,7 +103,7 @@ pub async fn update_operator(
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::Operator,
         Some(&ctx.operator.id),
         "update_operator",
@@ -109,6 +113,8 @@ pub async fn update_operator(
             "name": input.name,
             "role": input.role,
         })),
+        None,
+        None,
         ip.as_deref(),
         ua.as_deref(),
     )?;
@@ -120,12 +126,13 @@ pub async fn update_operator(
 }
 
 pub async fn delete_operator(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Extension(ctx): Extension<OperatorContext>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>> {
-    let conn = pool.get()?;
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
 
     // Prevent self-deletion
     if id == ctx.operator.id {
@@ -139,7 +146,7 @@ pub async fn delete_operator(
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
-        &conn,
+        &audit_conn,
         ActorType::Operator,
         Some(&ctx.operator.id),
         "delete_operator",
@@ -148,6 +155,8 @@ pub async fn delete_operator(
         Some(&serde_json::json!({
             "email": existing.email,
         })),
+        None,
+        None,
         ip.as_deref(),
         ua.as_deref(),
     )?;

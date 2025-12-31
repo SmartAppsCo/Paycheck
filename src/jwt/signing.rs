@@ -1,7 +1,9 @@
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD as BASE64_URL, Engine};
+use base64::engine::general_purpose::STANDARD as BASE64;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use jwt_simple::prelude::*;
 use rand::rngs::OsRng;
+use serde::Deserialize;
 
 use crate::error::{AppError, Result};
 use super::LicenseClaims;
@@ -50,6 +52,31 @@ pub fn sign_claims(
         .map_err(|e| AppError::Internal(format!("Failed to sign token: {}", e)))?;
 
     Ok(token)
+}
+
+/// Decode a JWT without verification to extract claims
+/// Used to get product_id to look up the signing key
+/// MUST be followed by verify_token() before trusting any claims
+pub fn decode_unverified(token: &str) -> Result<LicenseClaims> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return Err(AppError::BadRequest("Invalid token format".into()));
+    }
+
+    let payload = BASE64_URL
+        .decode(parts[1])
+        .map_err(|_| AppError::BadRequest("Invalid token encoding".into()))?;
+
+    #[derive(Deserialize)]
+    struct TokenPayload {
+        #[serde(flatten)]
+        claims: LicenseClaims,
+    }
+
+    let payload: TokenPayload = serde_json::from_slice(&payload)
+        .map_err(|_| AppError::BadRequest("Invalid token payload".into()))?;
+
+    Ok(payload.claims)
 }
 
 /// Verify a JWT and extract claims
