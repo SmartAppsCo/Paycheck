@@ -669,7 +669,7 @@ async fn main() {
     // Build the application router
     let mut app = Router::new()
         // Public endpoints (no auth)
-        .merge(handlers::public::router())
+        .merge(handlers::public::router(config.rate_limit))
         // Webhook endpoints (provider-specific auth)
         .merge(handlers::webhooks::router())
         // Operator API (operator key auth)
@@ -704,10 +704,14 @@ async fn main() {
     tracing::info!("Paycheck server listening on {}", addr);
 
     // Run server with graceful shutdown
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .expect("Failed to start server");
+    // Use into_make_service_with_connect_info to enable IP-based rate limiting
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .expect("Failed to start server");
 
     // Cleanup on exit if ephemeral mode
     if cleanup_on_exit {

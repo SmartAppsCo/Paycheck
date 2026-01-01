@@ -16,8 +16,10 @@ use axum::routing::{get, post};
 use axum::Router;
 use serde::Serialize;
 
+use crate::config::RateLimitConfig;
 use crate::db::AppState;
 use crate::extractors::Json;
+use crate::rate_limit;
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -32,19 +34,30 @@ async fn health() -> Json<HealthResponse> {
     })
 }
 
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/health", get(health))
-        .route("/buy", get(initiate_buy))
+pub fn router(rate_limit_config: RateLimitConfig) -> Router<AppState> {
+    // Strict tier: external API calls
+    let strict_routes = Router::new()
+        .route("/buy", post(initiate_buy))
+        .layer(rate_limit::strict_layer(rate_limit_config.strict_rpm));
+
+    // Standard tier: crypto + DB operations
+    let standard_routes = Router::new()
         .route("/callback", get(payment_callback))
-        // GET /redeem accepts short-lived redemption codes (URL-safe)
         .route("/redeem", get(redeem_with_code))
-        // POST /redeem/key accepts permanent license keys (never in URL)
         .route("/redeem/key", post(redeem_with_key))
-        // POST /redeem/code generates a new short-lived code from a license key
         .route("/redeem/code", post(generate_redemption_code))
         .route("/validate", get(validate_license))
-        // GET /license with license key in Authorization header
         .route("/license", get(get_license_info))
         .route("/devices/deactivate", post(deactivate_device))
+        .layer(rate_limit::standard_layer(rate_limit_config.standard_rpm));
+
+    // Relaxed tier: lightweight operations
+    let relaxed_routes = Router::new()
+        .route("/health", get(health))
+        .layer(rate_limit::relaxed_layer(rate_limit_config.relaxed_rpm));
+
+    Router::new()
+        .merge(strict_routes)
+        .merge(standard_routes)
+        .merge(relaxed_routes)
 }

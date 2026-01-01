@@ -4,6 +4,27 @@ use std::path::Path;
 
 use crate::crypto::MasterKey;
 
+/// Rate limiting configuration for public endpoints
+#[derive(Clone, Copy, Debug)]
+pub struct RateLimitConfig {
+    /// Strict tier: requests per minute (for endpoints with external API calls like /buy)
+    pub strict_rpm: u32,
+    /// Standard tier: requests per minute (for most public endpoints)
+    pub standard_rpm: u32,
+    /// Relaxed tier: requests per minute (for lightweight endpoints like /health)
+    pub relaxed_rpm: u32,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            strict_rpm: 10,
+            standard_rpm: 30,
+            relaxed_rpm: 60,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Config {
     pub host: String,
@@ -23,6 +44,8 @@ pub struct Config {
     /// URL for the success page after payment (when no project redirect is configured).
     /// If not set, defaults to {base_url}/success
     pub success_page_url: String,
+    /// Rate limiting configuration for public endpoints
+    pub rate_limit: RateLimitConfig,
 }
 
 /// Check that a file has secure permissions (owner read-only, no write, no group/other access).
@@ -143,6 +166,23 @@ impl Config {
         let success_page_url = env::var("PAYCHECK_SUCCESS_PAGE_URL")
             .unwrap_or_else(|_| format!("{}/success", base_url));
 
+        // Rate limiting configuration
+        let rate_limit_defaults = RateLimitConfig::default();
+        let rate_limit = RateLimitConfig {
+            strict_rpm: env::var("RATE_LIMIT_STRICT_RPM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(rate_limit_defaults.strict_rpm),
+            standard_rpm: env::var("RATE_LIMIT_STANDARD_RPM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(rate_limit_defaults.standard_rpm),
+            relaxed_rpm: env::var("RATE_LIMIT_RELAXED_RPM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(rate_limit_defaults.relaxed_rpm),
+        };
+
         Self {
             host,
             port,
@@ -157,6 +197,7 @@ impl Config {
             audit_log_retention_days,
             master_key,
             success_page_url,
+            rate_limit,
         }
     }
 

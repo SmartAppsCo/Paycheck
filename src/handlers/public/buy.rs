@@ -1,14 +1,14 @@
-use axum::{extract::State, response::Redirect};
-use serde::Deserialize;
+use axum::extract::State;
+use serde::{Deserialize, Serialize};
 
 use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
-use crate::extractors::Query;
+use crate::extractors::Json;
 use crate::models::{CreatePaymentSession, DeviceType};
 use crate::payments::{LemonSqueezyClient, PaymentProvider, StripeClient};
 
 #[derive(Debug, Deserialize)]
-pub struct BuyQuery {
+pub struct BuyRequest {
     pub project_id: String,
     pub product_id: String,
     pub device_id: String,
@@ -30,22 +30,28 @@ pub struct BuyQuery {
     pub redirect: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct BuyResponse {
+    pub checkout_url: String,
+    pub session_id: String,
+}
+
 pub async fn initiate_buy(
     State(state): State<AppState>,
-    Query(query): Query<BuyQuery>,
-) -> Result<Redirect> {
+    Json(request): Json<BuyRequest>,
+) -> Result<Json<BuyResponse>> {
     let conn = state.db.get()?;
 
     // Validate device type
-    let device_type = query.device_type.parse::<DeviceType>()
+    let device_type = request.device_type.parse::<DeviceType>()
         .ok().ok_or_else(|| AppError::BadRequest("Invalid device_type".into()))?;
 
     // Get project
-    let project = queries::get_project_by_id(&conn, &query.project_id)?
+    let project = queries::get_project_by_id(&conn, &request.project_id)?
         .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
 
     // Validate redirect URL against project's allowlist
-    let validated_redirect = if let Some(ref redirect) = query.redirect {
+    let validated_redirect = if let Some(ref redirect) = request.redirect {
         if project.allowed_redirect_urls.is_empty() {
             return Err(AppError::BadRequest(
                 "Redirect URL provided but project has no allowed redirect URLs configured".into()
@@ -66,16 +72,16 @@ pub async fn initiate_buy(
         .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
 
     // Get product
-    let product = queries::get_product_by_id(&conn, &query.product_id)?
+    let product = queries::get_product_by_id(&conn, &request.product_id)?
         .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
 
     // Verify product belongs to project
-    if product.project_id != query.project_id {
+    if product.project_id != request.project_id {
         return Err(AppError::NotFound("Product not found".into()));
     }
 
     // Determine payment provider
-    let provider = if let Some(ref p) = query.provider {
+    let provider = if let Some(ref p) = request.provider {
         // Explicit provider specified in query
         p.parse::<PaymentProvider>()
             .ok().ok_or_else(|| AppError::BadRequest("Invalid provider".into()))?
@@ -105,10 +111,10 @@ pub async fn initiate_buy(
     let session = queries::create_payment_session(
         &conn,
         &CreatePaymentSession {
-            product_id: query.product_id.clone(),
-            device_id: query.device_id.clone(),
+            product_id: request.product_id.clone(),
+            device_id: request.device_id.clone(),
             device_type,
-            customer_id: query.customer_id.clone(),
+            customer_id: request.customer_id.clone(),
             redirect_url: validated_redirect,
         },
     )?;
@@ -123,16 +129,16 @@ pub async fn initiate_buy(
             let config = org.decrypt_stripe_config(&state.master_key)?
                 .ok_or_else(|| AppError::BadRequest("Stripe not configured".into()))?;
 
-            let price_cents = query.price_cents
+            let price_cents = request.price_cents
                 .ok_or_else(|| AppError::BadRequest("price_cents required for Stripe".into()))?;
-            let currency = query.currency.as_deref().unwrap_or("usd");
+            let currency = request.currency.as_deref().unwrap_or("usd");
 
             let client = StripeClient::new(&config);
             let (_, url) = client
                 .create_checkout_session(
                     &session.id,
-                    &query.project_id,
-                    &query.product_id,
+                    &request.project_id,
+                    &request.product_id,
                     &product.name,
                     price_cents,
                     currency,
@@ -146,15 +152,15 @@ pub async fn initiate_buy(
             let config = org.decrypt_ls_config(&state.master_key)?
                 .ok_or_else(|| AppError::BadRequest("LemonSqueezy not configured".into()))?;
 
-            let variant_id = query.variant_id.as_ref()
+            let variant_id = request.variant_id.as_ref()
                 .ok_or_else(|| AppError::BadRequest("variant_id required for LemonSqueezy".into()))?;
 
             let client = LemonSqueezyClient::new(&config);
             let (_, url) = client
                 .create_checkout(
                     &session.id,
-                    &query.project_id,
-                    &query.product_id,
+                    &request.project_id,
+                    &request.product_id,
                     variant_id,
                     &callback_url,
                 )
@@ -163,5 +169,8 @@ pub async fn initiate_buy(
         }
     };
 
-    Ok(Redirect::temporary(&checkout_url))
+    Ok(Json(BuyResponse {
+        checkout_url,
+        session_id: session.id,
+    }))
 }
