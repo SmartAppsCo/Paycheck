@@ -7,6 +7,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::crypto::MasterKey;
 use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
 use crate::jwt::{self, LicenseClaims};
@@ -87,6 +88,7 @@ pub async fn redeem_with_code(
     // Proceed with normal redemption logic
     redeem_license_internal(
         &conn,
+        &state.master_key,
         &license,
         &query.project_id,
         &query.device_id,
@@ -128,6 +130,7 @@ pub async fn redeem_with_key(
     // Proceed with normal redemption logic
     redeem_license_internal(
         &conn,
+        &state.master_key,
         &license,
         &body.project_id,
         &body.device_id,
@@ -139,6 +142,7 @@ pub async fn redeem_with_key(
 /// Internal function that handles the actual license redemption logic
 fn redeem_license_internal(
     conn: &rusqlite::Connection,
+    master_key: &MasterKey,
     license: &crate::models::LicenseKey,
     project_id: &str,
     device_id: &str,
@@ -211,10 +215,11 @@ fn redeem_license_internal(
         license_key: license.key.clone(),
     };
 
-    // Sign the JWT
+    // Decrypt the private key and sign the JWT
+    let private_key = master_key.decrypt_private_key(&project.id, &project.private_key)?;
     let token = jwt::sign_claims(
         &claims,
-        &project.private_key,
+        &private_key,
         &license.id,
         &project.domain,
         &jti,

@@ -126,9 +126,11 @@ pub async fn payment_callback(
         license_key: license.key.clone(),
     };
 
+    // Decrypt the private key and sign the JWT
+    let private_key = state.master_key.decrypt_private_key(&project.id, &project.private_key)?;
     let token = jwt::sign_claims(
         &claims,
-        &project.private_key,
+        &private_key,
         &license.id,
         &project.domain,
         &device.jti,

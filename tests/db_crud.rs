@@ -280,6 +280,7 @@ fn test_list_projects_for_org() {
 #[test]
 fn test_update_project_stripe_config() {
     let conn = setup_test_db();
+    let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
     let project = create_test_project(&conn, &org.id, "My App");
 
@@ -298,14 +299,17 @@ fn test_update_project_stripe_config() {
         default_provider: None,
     };
 
-    queries::update_project(&conn, &project.id, &update).expect("Update failed");
+    queries::update_project(&conn, &project.id, &update, &master_key).expect("Update failed");
 
     let updated = queries::get_project_by_id(&conn, &project.id)
         .expect("Query failed")
         .expect("Project not found");
 
-    assert!(updated.stripe_config.is_some());
-    assert_eq!(updated.stripe_config.unwrap().secret_key, "sk_test_xxx");
+    assert!(updated.has_stripe_config());
+    let decrypted = updated.decrypt_stripe_config(&master_key)
+        .expect("Decryption failed")
+        .expect("Config not found");
+    assert_eq!(decrypted.secret_key, "sk_test_xxx");
 }
 
 // ============ Product Tests ============

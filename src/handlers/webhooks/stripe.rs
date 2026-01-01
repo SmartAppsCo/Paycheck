@@ -5,6 +5,7 @@ use axum::{
     response::IntoResponse,
 };
 
+use crate::crypto::MasterKey;
 use crate::db::AppState;
 use crate::models::Project;
 use crate::payments::{
@@ -36,15 +37,19 @@ impl WebhookProvider for StripeWebhookProvider {
     fn verify_signature(
         &self,
         project: &Project,
+        master_key: &MasterKey,
         body: &Bytes,
         signature: &str,
     ) -> Result<bool, WebhookResult> {
         let stripe_config = project
-            .stripe_config
-            .as_ref()
+            .decrypt_stripe_config(master_key)
+            .map_err(|e| {
+                tracing::error!("Failed to decrypt Stripe config: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Config decryption failed")
+            })?
             .ok_or((StatusCode::OK, "Stripe not configured"))?;
 
-        let client = StripeClient::new(stripe_config);
+        let client = StripeClient::new(&stripe_config);
         client.verify_webhook_signature(body, signature).map_err(|e| {
             tracing::error!("Signature verification error: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Signature verification failed")

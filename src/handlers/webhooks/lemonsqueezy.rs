@@ -5,6 +5,7 @@ use axum::{
     response::IntoResponse,
 };
 
+use crate::crypto::MasterKey;
 use crate::db::AppState;
 use crate::models::Project;
 use crate::payments::{
@@ -37,15 +38,19 @@ impl WebhookProvider for LemonSqueezyWebhookProvider {
     fn verify_signature(
         &self,
         project: &Project,
+        master_key: &MasterKey,
         body: &Bytes,
         signature: &str,
     ) -> Result<bool, WebhookResult> {
         let ls_config = project
-            .ls_config
-            .as_ref()
+            .decrypt_ls_config(master_key)
+            .map_err(|e| {
+                tracing::error!("Failed to decrypt LemonSqueezy config: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Config decryption failed")
+            })?
             .ok_or((StatusCode::OK, "LemonSqueezy not configured"))?;
 
-        let client = LemonSqueezyClient::new(ls_config);
+        let client = LemonSqueezyClient::new(&ls_config);
         client.verify_webhook_signature(body, signature).map_err(|e| {
             tracing::error!("Signature verification error: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Signature verification failed")

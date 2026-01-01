@@ -116,8 +116,9 @@ impl FromRow for OrgMember {
 
 impl FromRow for Project {
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        let stripe_str: Option<String> = row.get(7)?;
-        let ls_str: Option<String> = row.get(8)?;
+        // Read config data as raw bytes (may be encrypted or legacy plaintext JSON)
+        let stripe_data: Option<Vec<u8>> = row.get(7)?;
+        let ls_data: Option<Vec<u8>> = row.get(8)?;
         Ok(Project {
             id: row.get(0)?,
             org_id: row.get(1)?,
@@ -126,8 +127,8 @@ impl FromRow for Project {
             license_key_prefix: row.get(4)?,
             private_key: row.get(5)?,
             public_key: row.get(6)?,
-            stripe_config: stripe_str.and_then(|s| serde_json::from_str(&s).ok()),
-            ls_config: ls_str.and_then(|s| serde_json::from_str(&s).ok()),
+            stripe_config_encrypted: stripe_data,
+            ls_config_encrypted: ls_data,
             default_provider: row.get(9)?,
             created_at: row.get(10)?,
             updated_at: row.get(11)?,

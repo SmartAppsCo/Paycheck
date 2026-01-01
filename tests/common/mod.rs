@@ -3,9 +3,16 @@
 use rusqlite::Connection;
 
 // Re-export the main library crate
+pub use paycheck::crypto::MasterKey;
 pub use paycheck::db::{init_audit_db, init_db, queries};
 pub use paycheck::jwt;
 pub use paycheck::models::*;
+
+/// Create a test master key (deterministic for testing)
+pub fn test_master_key() -> MasterKey {
+    // Use a fixed test key (32 bytes of zeros - ONLY for testing!)
+    MasterKey::from_bytes([0u8; 32])
+}
 
 /// Create an in-memory test database with schema initialized
 pub fn setup_test_db() -> Connection {

@@ -4,6 +4,7 @@
 //! including database operations, JWT handling, payment provider integration, and API handlers.
 
 pub mod config;
+pub mod crypto;
 pub mod db;
 pub mod error;
 pub mod handlers;

@@ -26,7 +26,22 @@ pub async fn create_project(
     // Generate Ed25519 key pair
     let (private_key, public_key) = jwt::generate_keypair();
 
-    let project = queries::create_project(&conn, &org_id, &input, &private_key, &public_key)?;
+    // Generate a temporary project ID for encryption (will be used as the actual ID)
+    let project_id = uuid::Uuid::new_v4().to_string();
+
+    // Encrypt the private key with envelope encryption
+    let encrypted_private_key = state
+        .master_key
+        .encrypt_private_key(&project_id, &private_key)?;
+
+    let project = queries::create_project_with_id(
+        &conn,
+        &project_id,
+        &org_id,
+        &input,
+        &encrypted_private_key,
+        &public_key,
+    )?;
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
@@ -107,7 +122,7 @@ pub async fn update_project(
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
-    queries::update_project(&conn, &path.project_id, &input)?;
+    queries::update_project(&conn, &path.project_id, &input, &state.master_key)?;
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(

@@ -6,6 +6,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use std::time::Duration;
 
 use paycheck::config::Config;
+use paycheck::crypto::MasterKey;
 use paycheck::db::{create_pool, init_audit_db, init_db, queries, AppState};
 use paycheck::handlers;
 use paycheck::jwt;
@@ -25,6 +26,18 @@ struct Cli {
     /// Delete databases on exit (dev mode only, useful for fresh starts)
     #[arg(long)]
     ephemeral: bool,
+
+    /// Rotate the master encryption key. Requires --old-key-file and --new-key-file.
+    #[arg(long)]
+    rotate_key: bool,
+
+    /// Path to the old master key file (for --rotate-key)
+    #[arg(long, requires = "rotate_key")]
+    old_key_file: Option<String>,
+
+    /// Path to the new master key file (for --rotate-key)
+    #[arg(long, requires = "rotate_key")]
+    new_key_file: Option<String>,
 }
 
 fn bootstrap_first_operator(state: &AppState, email: &str) {
@@ -186,13 +199,25 @@ fn seed_dev_data(state: &AppState) {
 
     // 4. Create project
     let (private_key, public_key) = jwt::generate_keypair();
+    let project_id = uuid::Uuid::new_v4().to_string();
+    let encrypted_private_key = state
+        .master_key
+        .encrypt_private_key(&project_id, &private_key)
+        .expect("Failed to encrypt project private key");
     let project_input = CreateProject {
         name: "Dev Project".to_string(),
         domain: "localhost".to_string(),
         license_key_prefix: "PC".to_string(),
     };
-    let project = queries::create_project(&conn, &org.id, &project_input, &private_key, &public_key)
-        .expect("Failed to create dev project");
+    let project = queries::create_project_with_id(
+        &conn,
+        &project_id,
+        &org.id,
+        &project_input,
+        &encrypted_private_key,
+        &public_key,
+    )
+    .expect("Failed to create dev project");
 
     queries::create_audit_log(
         &audit_conn,
@@ -269,6 +294,202 @@ fn seed_dev_data(state: &AppState) {
     println!();
 }
 
+
+/// Rotate the master encryption key.
+/// Decrypts all project private keys with the old key and re-encrypts with the new key.
+fn rotate_master_key(db_path: &str, old_key: &MasterKey, new_key: &MasterKey) -> Result<(), String> {
+    use paycheck::db::DbPool;
+    use r2d2::Pool;
+    use r2d2_sqlite::SqliteConnectionManager;
+
+    // Create a minimal DB pool just for rotation
+    let manager = SqliteConnectionManager::file(db_path);
+    let pool: DbPool = Pool::builder()
+        .max_size(1)
+        .build(manager)
+        .map_err(|e| format!("Failed to create database pool: {}", e))?;
+
+    let conn = pool
+        .get()
+        .map_err(|e| format!("Failed to get database connection: {}", e))?;
+
+    // Get all projects
+    let projects = queries::list_all_projects(&conn)
+        .map_err(|e| format!("Failed to list projects: {}", e))?;
+
+    if projects.is_empty() {
+        println!("No projects found. Nothing to rotate.");
+        return Ok(());
+    }
+
+    println!("Found {} project(s) to rotate.", projects.len());
+
+    let mut rotated = 0;
+    let mut errors = 0;
+
+    for project in &projects {
+        // Check if the key is encrypted
+        if !MasterKey::is_encrypted(&project.private_key) {
+            println!(
+                "  [SKIP] Project {} has unencrypted key (run without --rotate-key first to migrate)",
+                project.id
+            );
+            continue;
+        }
+
+        // Decrypt with old key
+        let plaintext = match old_key.decrypt_private_key(&project.id, &project.private_key) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!(
+                    "  [ERROR] Failed to decrypt project {} with old key: {}",
+                    project.id, e
+                );
+                errors += 1;
+                continue;
+            }
+        };
+
+        // Re-encrypt with new key
+        let new_ciphertext = match new_key.encrypt_private_key(&project.id, &plaintext) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!(
+                    "  [ERROR] Failed to re-encrypt project {} with new key: {}",
+                    project.id, e
+                );
+                errors += 1;
+                continue;
+            }
+        };
+
+        // Update private key in database
+        if let Err(e) = queries::update_project_private_key(&conn, &project.id, &new_ciphertext) {
+            eprintln!(
+                "  [ERROR] Failed to update project {} in database: {}",
+                project.id, e
+            );
+            errors += 1;
+            continue;
+        }
+
+        // Rotate payment configs if they exist and are encrypted
+        let mut config_error = false;
+
+        let new_stripe = if let Some(ref encrypted) = project.stripe_config_encrypted {
+            if MasterKey::is_encrypted(encrypted) {
+                match old_key.decrypt_private_key(&project.id, encrypted) {
+                    Ok(plaintext) => match new_key.encrypt_private_key(&project.id, &plaintext) {
+                        Ok(new_enc) => Some(new_enc),
+                        Err(e) => {
+                            eprintln!(
+                                "  [ERROR] Failed to re-encrypt Stripe config for project {}: {}",
+                                project.id, e
+                            );
+                            config_error = true;
+                            None
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!(
+                            "  [ERROR] Failed to decrypt Stripe config for project {}: {}",
+                            project.id, e
+                        );
+                        config_error = true;
+                        None
+                    }
+                }
+            } else {
+                // Unencrypted - just keep as is (will be migrated on startup)
+                Some(encrypted.clone())
+            }
+        } else {
+            None
+        };
+
+        let new_ls = if let Some(ref encrypted) = project.ls_config_encrypted {
+            if MasterKey::is_encrypted(encrypted) {
+                match old_key.decrypt_private_key(&project.id, encrypted) {
+                    Ok(plaintext) => match new_key.encrypt_private_key(&project.id, &plaintext) {
+                        Ok(new_enc) => Some(new_enc),
+                        Err(e) => {
+                            eprintln!(
+                                "  [ERROR] Failed to re-encrypt LemonSqueezy config for project {}: {}",
+                                project.id, e
+                            );
+                            config_error = true;
+                            None
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!(
+                            "  [ERROR] Failed to decrypt LemonSqueezy config for project {}: {}",
+                            project.id, e
+                        );
+                        config_error = true;
+                        None
+                    }
+                }
+            } else {
+                // Unencrypted - just keep as is (will be migrated on startup)
+                Some(encrypted.clone())
+            }
+        } else {
+            None
+        };
+
+        if config_error {
+            errors += 1;
+            continue;
+        }
+
+        // Update payment configs if any exist
+        if project.stripe_config_encrypted.is_some() || project.ls_config_encrypted.is_some() {
+            if let Err(e) = queries::update_project_payment_configs(
+                &conn,
+                &project.id,
+                new_stripe.as_deref(),
+                new_ls.as_deref(),
+            ) {
+                eprintln!(
+                    "  [ERROR] Failed to update payment configs for project {}: {}",
+                    project.id, e
+                );
+                errors += 1;
+                continue;
+            }
+        }
+
+        println!("  [OK] Rotated project: {} ({})", project.name, project.id);
+        rotated += 1;
+    }
+
+    println!();
+    println!("Rotation complete:");
+    println!("  Rotated: {}", rotated);
+    println!("  Errors:  {}", errors);
+    println!("  Skipped: {}", projects.len() - rotated - errors);
+
+    if errors > 0 {
+        return Err(format!(
+            "Rotation completed with {} error(s). Review output above.",
+            errors
+        ));
+    }
+
+    if rotated > 0 {
+        println!();
+        println!("SUCCESS: All keys rotated to new master key.");
+        println!();
+        println!("Next steps:");
+        println!("  1. Update PAYCHECK_MASTER_KEY_FILE to point to the new key file");
+        println!("  2. Securely delete the old key file");
+        println!("  3. Restart the server");
+    }
+
+    Ok(())
+}
+
 /// Spawns a background task that periodically cleans up expired redemption codes.
 /// Runs every 5 minutes to remove codes that have expired or been used.
 fn spawn_cleanup_task(state: AppState) {
@@ -306,6 +527,56 @@ async fn main() {
     // Parse CLI arguments
     let cli = Cli::parse();
 
+    // Handle key rotation command (before normal startup)
+    if cli.rotate_key {
+        use paycheck::config::load_master_key_from_file;
+
+        let old_key_file = cli.old_key_file.as_ref().expect(
+            "--rotate-key requires --old-key-file"
+        );
+        let new_key_file = cli.new_key_file.as_ref().expect(
+            "--rotate-key requires --new-key-file"
+        );
+
+        println!("Master Key Rotation");
+        println!("===================");
+        println!();
+
+        // Load old key
+        println!("Loading old key from: {}", old_key_file);
+        let old_key = load_master_key_from_file(old_key_file).unwrap_or_else(|e| {
+            eprintln!("Failed to load old key: {}", e);
+            std::process::exit(1);
+        });
+
+        // Load new key
+        println!("Loading new key from: {}", new_key_file);
+        let new_key = load_master_key_from_file(new_key_file).unwrap_or_else(|e| {
+            eprintln!("Failed to load new key: {}", e);
+            std::process::exit(1);
+        });
+
+        println!();
+
+        // Get database path from env or default
+        dotenvy::dotenv().ok();
+        let db_path = std::env::var("DATABASE_PATH")
+            .unwrap_or_else(|_| "paycheck.db".to_string());
+
+        println!("Using database: {}", db_path);
+        println!();
+
+        // Run rotation
+        if let Err(e) = rotate_master_key(&db_path, &old_key, &new_key) {
+            eprintln!();
+            eprintln!("ERROR: {}", e);
+            std::process::exit(1);
+        }
+
+        // Exit after rotation (don't start server)
+        return;
+    }
+
     // Initialize tracing
     tracing_subscriber::registry()
         .with(
@@ -342,6 +613,7 @@ async fn main() {
         audit: audit_pool,
         base_url: config.base_url.clone(),
         audit_log_enabled: config.audit_log_enabled,
+        master_key: config.master_key.clone(),
     };
 
     // Purge old audit logs on startup (0 = never purge)

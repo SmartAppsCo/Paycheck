@@ -3,6 +3,7 @@ use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use crate::crypto::MasterKey;
 use crate::error::{AppError, Result};
 use crate::models::*;
 
@@ -437,8 +438,41 @@ pub fn create_project(
         license_key_prefix: input.license_key_prefix.clone(),
         private_key: private_key.to_vec(),
         public_key: public_key.to_string(),
-        stripe_config: None,
-        ls_config: None,
+        stripe_config_encrypted: None,
+        ls_config_encrypted: None,
+        default_provider: None,
+        created_at: now,
+        updated_at: now,
+    })
+}
+
+/// Create a project with a specific ID (used when ID is needed before creation for encryption)
+pub fn create_project_with_id(
+    conn: &Connection,
+    id: &str,
+    org_id: &str,
+    input: &CreateProject,
+    private_key: &[u8],
+    public_key: &str,
+) -> Result<Project> {
+    let now = now();
+
+    conn.execute(
+        "INSERT INTO projects (id, org_id, name, domain, license_key_prefix, private_key, public_key, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![id, org_id, &input.name, &input.domain, &input.license_key_prefix, private_key, public_key, now, now],
+    )?;
+
+    Ok(Project {
+        id: id.to_string(),
+        org_id: org_id.to_string(),
+        name: input.name.clone(),
+        domain: input.domain.clone(),
+        license_key_prefix: input.license_key_prefix.clone(),
+        private_key: private_key.to_vec(),
+        public_key: public_key.to_string(),
+        stripe_config_encrypted: None,
+        ls_config_encrypted: None,
         default_provider: None,
         created_at: now,
         updated_at: now,
@@ -461,7 +495,44 @@ pub fn list_projects_for_org(conn: &Connection, org_id: &str) -> Result<Vec<Proj
     )
 }
 
-pub fn update_project(conn: &Connection, id: &str, input: &UpdateProject) -> Result<()> {
+/// List all projects (for migration purposes)
+pub fn list_all_projects(conn: &Connection) -> Result<Vec<Project>> {
+    query_all(
+        conn,
+        &format!("SELECT {} FROM projects ORDER BY created_at", PROJECT_COLS),
+        &[],
+    )
+}
+
+/// Update a project's private key (for migration from unencrypted to encrypted)
+pub fn update_project_private_key(conn: &Connection, id: &str, private_key: &[u8]) -> Result<()> {
+    conn.execute(
+        "UPDATE projects SET private_key = ?1, updated_at = ?2 WHERE id = ?3",
+        params![private_key, now(), id],
+    )?;
+    Ok(())
+}
+
+/// Update a project's encrypted payment configs (for migration/rotation)
+pub fn update_project_payment_configs(
+    conn: &Connection,
+    id: &str,
+    stripe_config: Option<&[u8]>,
+    ls_config: Option<&[u8]>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE projects SET stripe_config = ?1, ls_config = ?2, updated_at = ?3 WHERE id = ?4",
+        params![stripe_config, ls_config, now(), id],
+    )?;
+    Ok(())
+}
+
+pub fn update_project(
+    conn: &Connection,
+    id: &str,
+    input: &UpdateProject,
+    master_key: &MasterKey,
+) -> Result<()> {
     let now = now();
 
     if let Some(ref name) = input.name {
@@ -483,17 +554,21 @@ pub fn update_project(conn: &Connection, id: &str, input: &UpdateProject) -> Res
         )?;
     }
     if let Some(ref stripe_config) = input.stripe_config {
+        // Serialize to JSON and encrypt
         let json = serde_json::to_string(stripe_config)?;
+        let encrypted = master_key.encrypt_private_key(id, json.as_bytes())?;
         conn.execute(
             "UPDATE projects SET stripe_config = ?1, updated_at = ?2 WHERE id = ?3",
-            params![json, now, id],
+            params![encrypted, now, id],
         )?;
     }
     if let Some(ref ls_config) = input.ls_config {
+        // Serialize to JSON and encrypt
         let json = serde_json::to_string(ls_config)?;
+        let encrypted = master_key.encrypt_private_key(id, json.as_bytes())?;
         conn.execute(
             "UPDATE projects SET ls_config = ?1, updated_at = ?2 WHERE id = ?3",
-            params![json, now, id],
+            params![encrypted, now, id],
         )?;
     }
     if let Some(ref default_provider) = input.default_provider {

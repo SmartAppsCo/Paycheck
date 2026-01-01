@@ -63,8 +63,8 @@ pub async fn initiate_buy(
             .ok().ok_or_else(|| AppError::BadRequest("Invalid default_provider in project".into()))?
     } else {
         // Auto-detect: use the only configured provider, or error if both/neither
-        let has_stripe = project.stripe_config.is_some();
-        let has_ls = project.ls_config.is_some();
+        let has_stripe = project.has_stripe_config();
+        let has_ls = project.has_ls_config();
         match (has_stripe, has_ls) {
             (true, false) => PaymentProvider::Stripe,
             (false, true) => PaymentProvider::LemonSqueezy,
@@ -97,7 +97,7 @@ pub async fn initiate_buy(
     // Create checkout with the appropriate provider
     let checkout_url = match provider {
         PaymentProvider::Stripe => {
-            let config = project.stripe_config
+            let config = project.decrypt_stripe_config(&state.master_key)?
                 .ok_or_else(|| AppError::BadRequest("Stripe not configured".into()))?;
 
             let price_cents = query.price_cents
@@ -120,7 +120,7 @@ pub async fn initiate_buy(
             url
         }
         PaymentProvider::LemonSqueezy => {
-            let config = project.ls_config
+            let config = project.decrypt_ls_config(&state.master_key)?
                 .ok_or_else(|| AppError::BadRequest("LemonSqueezy not configured".into()))?;
 
             let variant_id = query.variant_id.as_ref()

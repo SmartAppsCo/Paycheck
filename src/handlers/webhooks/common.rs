@@ -9,6 +9,7 @@ use axum::{
 };
 use rusqlite::Connection;
 
+use crate::crypto::MasterKey;
 use crate::db::queries;
 use crate::models::{CreateLicenseKey, PaymentSession, Product, Project};
 use crate::util::LicenseExpirations;
@@ -68,6 +69,7 @@ pub trait WebhookProvider: Send + Sync {
     fn verify_signature(
         &self,
         project: &Project,
+        master_key: &MasterKey,
         body: &Bytes,
         signature: &str,
     ) -> Result<bool, WebhookResult>;
@@ -254,7 +256,7 @@ async fn handle_checkout<P: WebhookProvider>(
     };
 
     // Verify signature
-    match provider.verify_signature(&project, body, signature) {
+    match provider.verify_signature(&project, &state.master_key, body, signature) {
         Ok(true) => {}
         Ok(false) => return (StatusCode::UNAUTHORIZED, "Invalid signature"),
         Err(e) => return e,
@@ -340,7 +342,7 @@ async fn handle_renewal<P: WebhookProvider>(
     };
 
     // Verify signature
-    match provider.verify_signature(&project, body, signature) {
+    match provider.verify_signature(&project, &state.master_key, body, signature) {
         Ok(true) => {}
         Ok(false) => return (StatusCode::UNAUTHORIZED, "Invalid signature"),
         Err(e) => return e,
@@ -397,7 +399,7 @@ async fn handle_cancellation<P: WebhookProvider>(
     };
 
     // Verify signature
-    match provider.verify_signature(&project, body, signature) {
+    match provider.verify_signature(&project, &state.master_key, body, signature) {
         Ok(true) => {}
         Ok(false) => return (StatusCode::UNAUTHORIZED, "Invalid signature"),
         Err(e) => return e,
