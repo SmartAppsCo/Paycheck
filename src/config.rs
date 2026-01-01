@@ -20,6 +20,9 @@ pub struct Config {
     /// Master key for envelope encryption of project private keys.
     /// Required in production; auto-generated in dev mode if not set.
     pub master_key: MasterKey,
+    /// URL for the success page after payment (when no project redirect is configured).
+    /// If not set, defaults to {base_url}/success
+    pub success_page_url: String,
 }
 
 /// Check that a file has secure permissions (owner read-only, no write, no group/other access).
@@ -137,6 +140,9 @@ impl Config {
             }
         };
 
+        let success_page_url = env::var("PAYCHECK_SUCCESS_PAGE_URL")
+            .unwrap_or_else(|_| format!("{}/success", base_url));
+
         Self {
             host,
             port,
@@ -150,6 +156,7 @@ impl Config {
             audit_log_enabled,
             audit_log_retention_days,
             master_key,
+            success_page_url,
         }
     }
 

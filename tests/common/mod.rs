@@ -75,6 +75,7 @@ pub fn create_test_project(conn: &Connection, org_id: &str, name: &str) -> Proje
         name: name.to_string(),
         domain: format!("{}.example.com", name.to_lowercase().replace(' ', "-")),
         license_key_prefix: "TEST".to_string(),
+        allowed_redirect_urls: vec![],
     };
     let (private_key, public_key) = jwt::generate_keypair();
     queries::create_project(conn, org_id, &input, &private_key, &public_key)

@@ -24,6 +24,8 @@ pub struct AppState {
     pub audit_log_enabled: bool,
     /// Master key for envelope encryption of project private keys
     pub master_key: MasterKey,
+    /// URL for the success page after payment (when no project redirect is configured)
+    pub success_page_url: String,
 }
 
 pub fn create_pool(database_path: &str) -> Result<DbPool, r2d2::Error> {

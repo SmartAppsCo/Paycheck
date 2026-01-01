@@ -208,6 +208,7 @@ fn seed_dev_data(state: &AppState) {
         name: "Dev Project".to_string(),
         domain: "localhost".to_string(),
         license_key_prefix: "PC".to_string(),
+        allowed_redirect_urls: vec![],
     };
     let project = queries::create_project_with_id(
         &conn,
@@ -631,6 +632,7 @@ async fn main() {
         base_url: config.base_url.clone(),
         audit_log_enabled: config.audit_log_enabled,
         master_key: config.master_key.clone(),
+        success_page_url: config.success_page_url.clone(),
     };
 
     // Purge old audit logs on startup (0 = never purge)

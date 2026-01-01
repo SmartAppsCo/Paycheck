@@ -48,6 +48,7 @@ base64 = "0.22"
 sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
+urlencoding = "2"
 
 [dev-dependencies]
 tokio-test = "0.4"

@@ -53,6 +53,7 @@ fn operator_app() -> (Router, AppState) {
         base_url: "http://localhost:3000".to_string(),
         audit_log_enabled: false,
         master_key,
+        success_page_url: "http://localhost:3000/success".to_string(),
     };
 
     let app = handlers::operators::router(state.clone()).with_state(state.clone());
@@ -84,6 +85,7 @@ fn org_app() -> (Router, AppState) {
         base_url: "http://localhost:3000".to_string(),
         audit_log_enabled: false,
         master_key,
+        success_page_url: "http://localhost:3000/success".to_string(),
     };
 
     let app = handlers::orgs::router(state.clone()).with_state(state.clone());

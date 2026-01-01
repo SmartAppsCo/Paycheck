@@ -25,6 +25,8 @@ pub struct Project {
     #[serde(skip_serializing)]
     pub private_key: Vec<u8>,
     pub public_key: String,
+    /// Allowlist of URLs that can be used as post-payment redirects
+    pub allowed_redirect_urls: Vec<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -37,6 +39,7 @@ pub struct ProjectPublic {
     pub domain: String,
     pub license_key_prefix: String,
     pub public_key: String,
+    pub allowed_redirect_urls: Vec<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -50,6 +53,7 @@ impl From<Project> for ProjectPublic {
             domain: p.domain,
             license_key_prefix: p.license_key_prefix,
             public_key: p.public_key,
+            allowed_redirect_urls: p.allowed_redirect_urls,
             created_at: p.created_at,
             updated_at: p.updated_at,
         }
@@ -62,6 +66,8 @@ pub struct CreateProject {
     pub domain: String,
     #[serde(default = "default_prefix")]
     pub license_key_prefix: String,
+    #[serde(default)]
+    pub allowed_redirect_urls: Vec<String>,
 }
 
 fn default_prefix() -> String {
@@ -119,4 +125,5 @@ pub struct UpdateProject {
     pub name: Option<String>,
     pub domain: Option<String>,
     pub license_key_prefix: Option<String>,
+    pub allowed_redirect_urls: Option<Vec<String>>,
 }

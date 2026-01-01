@@ -475,11 +475,12 @@ pub fn create_project(
 ) -> Result<Project> {
     let id = gen_id();
     let now = now();
+    let redirect_urls_json = serde_json::to_string(&input.allowed_redirect_urls)?;
 
     conn.execute(
-        "INSERT INTO projects (id, org_id, name, domain, license_key_prefix, private_key, public_key, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![&id, org_id, &input.name, &input.domain, &input.license_key_prefix, private_key, public_key, now, now],
+        "INSERT INTO projects (id, org_id, name, domain, license_key_prefix, private_key, public_key, allowed_redirect_urls, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![&id, org_id, &input.name, &input.domain, &input.license_key_prefix, private_key, public_key, &redirect_urls_json, now, now],
     )?;
 
     Ok(Project {
@@ -490,6 +491,7 @@ pub fn create_project(
         license_key_prefix: input.license_key_prefix.clone(),
         private_key: private_key.to_vec(),
         public_key: public_key.to_string(),
+        allowed_redirect_urls: input.allowed_redirect_urls.clone(),
         created_at: now,
         updated_at: now,
     })
@@ -505,11 +507,12 @@ pub fn create_project_with_id(
     public_key: &str,
 ) -> Result<Project> {
     let now = now();
+    let redirect_urls_json = serde_json::to_string(&input.allowed_redirect_urls)?;
 
     conn.execute(
-        "INSERT INTO projects (id, org_id, name, domain, license_key_prefix, private_key, public_key, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![id, org_id, &input.name, &input.domain, &input.license_key_prefix, private_key, public_key, now, now],
+        "INSERT INTO projects (id, org_id, name, domain, license_key_prefix, private_key, public_key, allowed_redirect_urls, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![id, org_id, &input.name, &input.domain, &input.license_key_prefix, private_key, public_key, &redirect_urls_json, now, now],
     )?;
 
     Ok(Project {
@@ -520,6 +523,7 @@ pub fn create_project_with_id(
         license_key_prefix: input.license_key_prefix.clone(),
         private_key: private_key.to_vec(),
         public_key: public_key.to_string(),
+        allowed_redirect_urls: input.allowed_redirect_urls.clone(),
         created_at: now,
         updated_at: now,
     })
@@ -578,6 +582,13 @@ pub fn update_project(conn: &Connection, id: &str, input: &UpdateProject) -> Res
         conn.execute(
             "UPDATE projects SET license_key_prefix = ?1, updated_at = ?2 WHERE id = ?3",
             params![license_key_prefix, now, id],
+        )?;
+    }
+    if let Some(ref allowed_redirect_urls) = input.allowed_redirect_urls {
+        let json = serde_json::to_string(allowed_redirect_urls)?;
+        conn.execute(
+            "UPDATE projects SET allowed_redirect_urls = ?1, updated_at = ?2 WHERE id = ?3",
+            params![json, now, id],
         )?;
     }
     Ok(())
@@ -1066,9 +1077,9 @@ pub fn create_payment_session(conn: &Connection, input: &CreatePaymentSession) -
     let now = now();
 
     conn.execute(
-        "INSERT INTO payment_sessions (id, product_id, device_id, device_type, customer_id, created_at, completed)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
-        params![&id, &input.product_id, &input.device_id, input.device_type.as_ref(), &input.customer_id, now],
+        "INSERT INTO payment_sessions (id, product_id, device_id, device_type, customer_id, redirect_url, created_at, completed)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
+        params![&id, &input.product_id, &input.device_id, input.device_type.as_ref(), &input.customer_id, &input.redirect_url, now],
     )?;
 
     Ok(PaymentSession {
@@ -1077,6 +1088,7 @@ pub fn create_payment_session(conn: &Connection, input: &CreatePaymentSession) -
         device_id: input.device_id.clone(),
         device_type: input.device_type,
         customer_id: input.customer_id.clone(),
+        redirect_url: input.redirect_url.clone(),
         created_at: now,
         completed: false,
     })

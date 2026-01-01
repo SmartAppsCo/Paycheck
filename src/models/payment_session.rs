@@ -10,6 +10,8 @@ pub struct PaymentSession {
     pub device_type: DeviceType,
     /// Developer-managed customer identifier (flows through to license)
     pub customer_id: Option<String>,
+    /// Validated redirect URL (from project's allowlist)
+    pub redirect_url: Option<String>,
     pub created_at: i64,
     pub completed: bool,
 }
@@ -22,4 +24,7 @@ pub struct CreatePaymentSession {
     /// Developer-managed customer identifier (flows through to license)
     #[serde(default)]
     pub customer_id: Option<String>,
+    /// Validated redirect URL (must be in project's allowed_redirect_urls)
+    #[serde(default)]
+    pub redirect_url: Option<String>,
 }

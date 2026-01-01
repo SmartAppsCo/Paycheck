@@ -73,6 +73,7 @@ fn operator_app_with_payment_configs() -> (Router, String) {
         base_url: "http://localhost:3000".to_string(),
         audit_log_enabled: false,
         master_key,
+        success_page_url: "http://localhost:3000/success".to_string(),
     };
 
     // Note: Testing without auth middleware - auth is tested separately
@@ -172,6 +173,7 @@ async fn test_operator_get_payment_config_no_configs() {
         base_url: "http://localhost:3000".to_string(),
         audit_log_enabled: false,
         master_key,
+        success_page_url: "http://localhost:3000/success".to_string(),
     };
 
     let app = Router::new()

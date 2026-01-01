@@ -25,6 +25,9 @@ pub struct BuyQuery {
     pub price_cents: Option<u64>,
     #[serde(default)]
     pub currency: Option<String>,
+    /// Optional redirect URL after payment (must be in project's allowed_redirect_urls)
+    #[serde(default)]
+    pub redirect: Option<String>,
 }
 
 pub async fn initiate_buy(
@@ -40,6 +43,23 @@ pub async fn initiate_buy(
     // Get project
     let project = queries::get_project_by_id(&conn, &query.project_id)?
         .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+
+    // Validate redirect URL against project's allowlist
+    let validated_redirect = if let Some(ref redirect) = query.redirect {
+        if project.allowed_redirect_urls.is_empty() {
+            return Err(AppError::BadRequest(
+                "Redirect URL provided but project has no allowed redirect URLs configured".into()
+            ));
+        }
+        if !project.allowed_redirect_urls.contains(redirect) {
+            return Err(AppError::BadRequest(
+                "Redirect URL is not in project's allowed redirect URLs".into()
+            ));
+        }
+        Some(redirect.clone())
+    } else {
+        None
+    };
 
     // Get organization (payment config is at org level)
     let org = queries::get_organization_by_id(&conn, &project.org_id)?
@@ -89,6 +109,7 @@ pub async fn initiate_buy(
             device_id: query.device_id.clone(),
             device_type,
             customer_id: query.customer_id.clone(),
+            redirect_url: validated_redirect,
         },
     )?;
 

@@ -53,6 +53,7 @@ fn test_app() -> Router {
         base_url: "http://localhost:3000".to_string(),
         audit_log_enabled: false,
         master_key,
+        success_page_url: "http://localhost:3000/success".to_string(),
     };
 
     Router::new()

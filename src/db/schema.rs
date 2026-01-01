@@ -49,6 +49,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             license_key_prefix TEXT NOT NULL DEFAULT 'PC',
             private_key BLOB NOT NULL,
             public_key TEXT NOT NULL,
+            allowed_redirect_urls TEXT NOT NULL DEFAULT '[]',
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         );
@@ -141,6 +142,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             device_id TEXT NOT NULL,
             device_type TEXT NOT NULL CHECK (device_type IN ('uuid', 'machine')),
             customer_id TEXT,
+            redirect_url TEXT,
             created_at INTEGER NOT NULL,
             completed INTEGER NOT NULL DEFAULT 0
         );

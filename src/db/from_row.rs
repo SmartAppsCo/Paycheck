@@ -53,7 +53,7 @@ pub const ORG_MEMBER_COLS: &str =
     "id, org_id, email, name, role, api_key_hash, created_at";
 
 pub const PROJECT_COLS: &str =
-    "id, org_id, name, domain, license_key_prefix, private_key, public_key, created_at, updated_at";
+    "id, org_id, name, domain, license_key_prefix, private_key, public_key, allowed_redirect_urls, created_at, updated_at";
 
 pub const PROJECT_MEMBER_COLS: &str =
     "id, org_member_id, project_id, role, created_at";
@@ -68,7 +68,7 @@ pub const DEVICE_COLS: &str =
     "id, license_key_id, device_id, device_type, name, jti, activated_at, last_seen_at";
 
 pub const PAYMENT_SESSION_COLS: &str =
-    "id, product_id, device_id, device_type, customer_id, created_at, completed";
+    "id, product_id, device_id, device_type, customer_id, redirect_url, created_at, completed";
 
 pub const REDEMPTION_CODE_COLS: &str =
     "id, code, license_key_id, expires_at, used, created_at";
@@ -122,6 +122,7 @@ impl FromRow for OrgMember {
 
 impl FromRow for Project {
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        let redirect_urls_str: String = row.get(7)?;
         Ok(Project {
             id: row.get(0)?,
             org_id: row.get(1)?,
@@ -130,8 +131,9 @@ impl FromRow for Project {
             license_key_prefix: row.get(4)?,
             private_key: row.get(5)?,
             public_key: row.get(6)?,
-            created_at: row.get(7)?,
-            updated_at: row.get(8)?,
+            allowed_redirect_urls: serde_json::from_str(&redirect_urls_str).unwrap_or_default(),
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
         })
     }
 }
@@ -225,8 +227,9 @@ impl FromRow for PaymentSession {
             device_id: row.get(2)?,
             device_type: row.get::<_, String>(3)?.parse::<DeviceType>().unwrap(),
             customer_id: row.get(4)?,
-            created_at: row.get(5)?,
-            completed: row.get::<_, i32>(6)? != 0,
+            redirect_url: row.get(5)?,
+            created_at: row.get(6)?,
+            completed: row.get::<_, i32>(7)? != 0,
         })
     }
 }
