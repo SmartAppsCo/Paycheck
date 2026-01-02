@@ -1,0 +1,19 @@
+meta {
+  name: Remove Project Member
+  type: http
+  seq: 9
+}
+
+delete {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/members/{{project_member_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_api_key}}
+}
+
+docs {
+  Remove a member from a project.
+}

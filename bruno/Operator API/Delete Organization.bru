@@ -1,0 +1,19 @@
+meta {
+  name: Delete Organization
+  type: http
+  seq: 9
+}
+
+delete {
+  url: {{base_url}}/operators/organizations/{{org_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+docs {
+  Delete an organization and all its data.
+}

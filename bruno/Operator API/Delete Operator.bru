@@ -1,0 +1,20 @@
+meta {
+  name: Delete Operator
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{base_url}}/operators/{{operator_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+docs {
+  Delete an operator (requires owner role).
+  Cannot delete yourself.
+}

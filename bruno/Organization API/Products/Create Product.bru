@@ -1,0 +1,40 @@
+meta {
+  name: Create Product
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/products
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_api_key}}
+}
+
+body:json {
+  {
+    "name": "Pro License",
+    "tier": "pro",
+    "license_exp_days": 365,
+    "updates_exp_days": 365,
+    "activation_limit": 0,
+    "device_limit": 5,
+    "features": ["advanced-export", "cloud-sync", "priority-support"]
+  }
+}
+
+docs {
+  Create a new product/license tier.
+
+  Fields:
+  - name: Display name
+  - tier: Tier identifier (used in JWT claims)
+  - license_exp_days: When license expires (null = never)
+  - updates_exp_days: When update access ends (null = never)
+  - activation_limit: Max activations (0 = unlimited)
+  - device_limit: Max concurrent devices (0 = unlimited)
+  - features: Array of feature flags for hasFeature() checks
+}

@@ -1,0 +1,29 @@
+meta {
+  name: Update Operator
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{base_url}}/operators/{{operator_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+body:json {
+  {
+    "name": "Updated Name",
+    "role": "view"
+  }
+}
+
+docs {
+  Update an operator (requires owner role).
+  Cannot change your own role.
+
+  Both fields are optional.
+}

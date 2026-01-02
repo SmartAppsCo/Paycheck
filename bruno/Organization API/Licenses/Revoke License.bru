@@ -1,0 +1,27 @@
+meta {
+  name: Revoke License
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/licenses/{{license_key}}/revoke
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_api_key}}
+}
+
+docs {
+  Revoke a license (requires write access).
+
+  Sets the revoked flag - all tokens become invalid
+  on next online validation check.
+
+  For offline-only apps, revocation won't take effect
+  until the token expires naturally.
+
+  Returns: { "revoked": true }
+}

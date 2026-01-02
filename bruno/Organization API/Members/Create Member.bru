@@ -1,0 +1,40 @@
+meta {
+  name: Create Member
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/orgs/{{org_id}}/members
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_api_key}}
+}
+
+body:json {
+  {
+    "email": "member@example.com",
+    "name": "New Member",
+    "role": "member"
+  }
+}
+
+docs {
+  Create a new organization member (requires owner role).
+
+  Roles:
+  - owner: Full org access
+  - admin: Can manage projects/products
+  - member: Limited access
+
+  Returns:
+  {
+    "member": { ... },
+    "api_key": "NEW_API_KEY"
+  }
+
+  Save the api_key - it's only shown once!
+}

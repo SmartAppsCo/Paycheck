@@ -1,0 +1,41 @@
+meta {
+  name: Create License
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/licenses
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_api_key}}
+}
+
+body:json {
+  {
+    "product_id": "{{product_id}}",
+    "customer_id": "your-customer-123",
+    "count": 1
+  }
+}
+
+docs {
+  Create one or more licenses directly (for bulk/trial licenses).
+  Useful for gift cards, bulk purchases, or trial generation.
+
+  Required fields:
+  - product_id: Product to create licenses for
+
+  Optional fields:
+  - customer_id: Developer-managed customer identifier to link to your system
+  - license_exp_days: Override license expiration (days from now, null for perpetual)
+  - updates_exp_days: Override updates expiration (days from now)
+  - count: Number of licenses to create (1-100, default: 1)
+
+  If expiration fields are not specified, uses product defaults.
+
+  Returns: { "licenses": [{ "id", "key", "expires_at", "updates_expires_at" }] }
+}

@@ -1,0 +1,43 @@
+meta {
+  name: Refresh Token
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{base_url}}/refresh
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{jwt_token}}
+}
+
+docs {
+  Refresh an existing JWT to get a new token with updated expiration.
+
+  Accepts an existing JWT (even if expired) in the Authorization header.
+  Verifies the signature and JTI are valid, then issues a fresh JWT
+  with updated license_exp/updates_exp from the database.
+
+  This allows apps to get fresh tokens without storing the license key.
+
+  Headers:
+  - Authorization: Bearer <jwt_token>
+
+  No body required - the existing JWT provides all necessary context.
+
+  Returns:
+  {
+    "token": "NEW_JWT_TOKEN"
+  }
+
+  Errors:
+  - 401 Unauthorized: Invalid token, revoked license, expired license, or revoked JTI
+
+  Use cases:
+  - Refresh tokens before they expire to maintain session continuity
+  - Get updated license_exp/updates_exp values if they changed server-side
+  - Apps can store JWT instead of license key for refresh-based workflow
+}

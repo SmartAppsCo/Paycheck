@@ -1,0 +1,50 @@
+meta {
+  name: Stripe Webhook
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/webhook/stripe
+  body: json
+  auth: none
+}
+
+headers {
+  stripe-signature: t=1234567890,v1=signature_here
+}
+
+body:json {
+  {
+    "id": "evt_test123",
+    "type": "checkout.session.completed",
+    "data": {
+      "object": {
+        "id": "cs_test_session123",
+        "metadata": {
+          "project_id": "{{project_id}}",
+          "product_id": "{{product_id}}",
+          "device_id": "{{device_id}}",
+          "device_type": "uuid"
+        },
+        "customer_email": "customer@example.com",
+        "amount_total": 1999,
+        "currency": "usd"
+      }
+    }
+  }
+}
+
+docs {
+  Stripe webhook endpoint for payment events.
+  In production, Stripe sends this automatically.
+
+  For local testing, you'll need to:
+  1. Use Stripe CLI: stripe listen --forward-to localhost:3000/webhook/stripe
+  2. The CLI provides the webhook signing secret
+
+  This sample payload shows the structure but won't verify
+  without a valid signature. Use Stripe CLI for real testing.
+
+  Processes: checkout.session.completed events
+}

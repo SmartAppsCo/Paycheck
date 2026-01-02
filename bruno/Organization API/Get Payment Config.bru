@@ -1,0 +1,31 @@
+meta {
+  name: Get Payment Config (Masked)
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/orgs/{{org_id}}/payment-config
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_api_key}}
+}
+
+docs {
+  Get payment provider configuration for the organization (masked for security).
+  Requires admin role.
+
+  Payment configuration is set at the organization level and shared across all projects.
+
+  Response includes:
+  - org_id: Organization ID
+  - stripe_config: Masked Stripe configuration (secrets hidden)
+  - ls_config: Masked LemonSqueezy configuration (secrets hidden)
+  - default_provider: Default payment provider ("stripe" or "lemonsqueezy")
+
+  Sensitive fields (API keys, webhook secrets) are masked, showing only first 8 and last 4 characters.
+  Publishable keys and store IDs are shown in full (not sensitive).
+}

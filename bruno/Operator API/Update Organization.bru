@@ -1,0 +1,58 @@
+meta {
+  name: Update Organization
+  type: http
+  seq: 9
+}
+
+put {
+  url: {{base_url}}/operators/organizations/{{org_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+body:json {
+  {
+    "name": "Updated Org Name",
+    "stripe_config": {
+      "secret_key": "sk_test_xxx",
+      "publishable_key": "pk_test_xxx",
+      "webhook_secret": "whsec_xxx"
+    },
+    "ls_config": {
+      "api_key": "ls_xxx",
+      "store_id": "store_123",
+      "webhook_secret": "whsec_ls_xxx"
+    },
+    "default_provider": "stripe"
+  }
+}
+
+docs {
+  Update an organization (requires admin+ operator role).
+  All fields are optional - only include fields you want to update.
+
+  Fields:
+  - name: Organization display name
+  - stripe_config: Stripe payment configuration
+    - secret_key: Stripe secret API key (sk_test_xxx or sk_live_xxx)
+    - publishable_key: Stripe publishable key (pk_test_xxx or pk_live_xxx)
+    - webhook_secret: Stripe webhook signing secret (whsec_xxx)
+  - ls_config: LemonSqueezy payment configuration
+    - api_key: LemonSqueezy API key
+    - store_id: LemonSqueezy store ID
+    - webhook_secret: LemonSqueezy webhook signing secret
+  - default_provider: Default payment provider ("stripe" or "lemonsqueezy", or null to clear)
+
+  Payment configuration is encrypted at rest using envelope encryption.
+  All projects in this organization share the same payment configuration.
+
+  To clear a payment config, set it to null:
+  { "stripe_config": null }
+
+  To clear default_provider, set it to null:
+  { "default_provider": null }
+}

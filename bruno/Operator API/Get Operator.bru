@@ -1,0 +1,19 @@
+meta {
+  name: Get Operator
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/operators/{{operator_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+docs {
+  Get a specific operator by ID.
+}

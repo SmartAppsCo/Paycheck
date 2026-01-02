@@ -1,0 +1,38 @@
+meta {
+  name: Deactivate Device
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base_url}}/devices/deactivate
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{jwt_token}}
+}
+
+docs {
+  Self-deactivation: a device removes itself from the license.
+  Requires JWT in Authorization header - device can only deactivate itself.
+
+  For remote deactivation of lost devices, use the org admin API.
+
+  Headers:
+  - Authorization: Bearer <jwt_token>
+
+  No body required - the device to deactivate is determined from the JWT.
+
+  Returns:
+  {
+    "deactivated": true,
+    "remaining_devices": 4
+  }
+
+  Security:
+  - Only the device holding the JWT can deactivate itself
+  - Prevents attackers with just a license key from deactivating devices
+  - The JWT is revoked after deactivation (jti added to revoked list)
+}

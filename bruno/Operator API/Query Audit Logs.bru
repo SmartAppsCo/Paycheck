@@ -1,0 +1,27 @@
+meta {
+  name: Query Audit Logs
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{base_url}}/operators/audit-logs
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+docs {
+  Query audit logs (requires view+ role).
+
+  All query params are optional filters:
+  - actor_type: system, operator, org_member, project_member
+  - action: Action name (create, update, delete, etc.)
+  - resource_type: Resource type being acted on
+  - resource_id: Specific resource ID
+  - limit: Max results
+  - offset: Pagination offset
+}

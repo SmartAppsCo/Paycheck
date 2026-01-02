@@ -1,0 +1,31 @@
+meta {
+  name: Add Project Member
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/members
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_api_key}}
+}
+
+body:json {
+  {
+    "org_member_id": "member-id-here",
+    "role": "member"
+  }
+}
+
+docs {
+  Add an org member to a project with a specific role.
+
+  Roles:
+  - owner: Full project access
+  - admin: Can manage products/licenses
+  - member: Limited access
+}

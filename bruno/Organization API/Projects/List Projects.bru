@@ -1,0 +1,19 @@
+meta {
+  name: List Projects
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/orgs/{{org_id}}/projects
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_api_key}}
+}
+
+docs {
+  List all projects in an organization.
+}

@@ -1,0 +1,33 @@
+meta {
+  name: Payment Callback
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/callback?session={{session_id}}
+  body: none
+  auth: none
+}
+
+docs {
+  Called after payment completion to retrieve the license.
+
+  Required params:
+  - session: Payment session ID (from payment flow)
+
+  Optional params:
+  - redirect: URL to redirect to after success
+
+  Returns:
+  - Success: HTML page with license key + JWT, or redirect
+  - Pending: Auto-refresh HTML while payment processes
+
+  Response JSON (embedded in HTML or redirect):
+  {
+    "success": true,
+    "token": "JWT_TOKEN",
+    "license_key": "LICENSE_KEY",
+    "message": "Optional message"
+  }
+}

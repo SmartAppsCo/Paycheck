@@ -1,0 +1,28 @@
+meta {
+  name: Get Org Payment Config (Support)
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{base_url}}/operators/organizations/{{org_id}}/payment-config
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+docs {
+  Get full (unmasked) payment provider configuration for an organization.
+  This is for operator support staff to debug customer payment issues.
+
+  Returns the complete Stripe and LemonSqueezy API keys and webhook secrets.
+
+  Response includes:
+  - org_id: Organization ID
+  - org_name: Organization name
+  - stripe_config: Full Stripe configuration (unmasked)
+  - ls_config: Full LemonSqueezy configuration (unmasked)
+}

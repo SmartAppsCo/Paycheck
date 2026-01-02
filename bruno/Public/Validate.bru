@@ -1,0 +1,36 @@
+meta {
+  name: Validate License
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/validate?project_id={{project_id}}&jti={{jti}}
+  body: none
+  auth: none
+}
+
+docs {
+  Online validation check for licenses with online_checks enabled.
+  Checks revocation status, expiration, and updates last_seen timestamp.
+
+  Required params:
+  - project_id: The project identifier
+  - jti: JWT ID from the token's "jti" claim
+
+  Returns (valid):
+  {
+    "valid": true,
+    "reason": null,
+    "license_exp": 1735689600,
+    "updates_exp": 1735689600
+  }
+
+  Returns (invalid):
+  {
+    "valid": false,
+    "reason": "License has been revoked",
+    "license_exp": null,
+    "updates_exp": null
+  }
+}

@@ -1,0 +1,25 @@
+meta {
+  name: Get License
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/licenses/{{license_key}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_api_key}}
+}
+
+docs {
+  Get detailed info about a specific license.
+
+  Returns:
+  {
+    "license": { license with product info },
+    "devices": [ activated devices ]
+  }
+}

@@ -1,0 +1,19 @@
+meta {
+  name: Get Organization
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{base_url}}/operators/organizations/{{org_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+docs {
+  Get a specific organization by ID.
+}

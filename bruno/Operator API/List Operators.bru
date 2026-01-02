@@ -1,0 +1,21 @@
+meta {
+  name: List Operators
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/operators
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+docs {
+  List all operators (requires owner role).
+
+  Returns array of operator objects.
+}

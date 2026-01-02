@@ -1,0 +1,54 @@
+meta {
+  name: License Info
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{base_url}}/license?project_id={{project_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{license_key}}
+}
+
+docs {
+  Get complete license information including devices.
+  License key is passed in Authorization header, never exposed in URL.
+
+  Headers:
+  - Authorization: Bearer <license_key>
+
+  Query params:
+  - project_id: The project identifier
+
+  Returns:
+  {
+    "status": "active",
+    "email": "user@example.com",
+    "created_at": 1704067200,
+    "expires_at": null,
+    "updates_expires_at": 1735689600,
+    "activation_count": 3,
+    "activation_limit": 0,
+    "device_count": 2,
+    "device_limit": 5,
+    "devices": [
+      {
+        "device_id": "...",
+        "device_type": "uuid",
+        "name": "MacBook Pro",
+        "activated_at": 1704067200,
+        "last_seen_at": 1704153600
+      }
+    ]
+  }
+
+  Status values: "active", "expired", "revoked"
+  expires_at: when license access ends (null = perpetual)
+  updates_expires_at: when update access ends (null = lifetime updates)
+  activation_limit: 0 = unlimited
+  device_limit: 0 = unlimited
+}

@@ -1,0 +1,40 @@
+meta {
+  name: Create Operator
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/operators
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+body:json {
+  {
+    "email": "admin@example.com",
+    "name": "Admin User",
+    "role": "admin"
+  }
+}
+
+docs {
+  Create a new operator (requires owner role).
+
+  Roles:
+  - owner: Full access, can manage operators
+  - admin: Can create orgs, manage most things
+  - view: Read-only access
+
+  Returns:
+  {
+    "operator": { ... },
+    "api_key": "NEW_API_KEY"
+  }
+
+  Save the api_key - it's only shown once!
+}

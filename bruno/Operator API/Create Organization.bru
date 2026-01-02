@@ -1,0 +1,36 @@
+meta {
+  name: Create Organization
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/operators/organizations
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+body:json {
+  {
+    "name": "Acme Corp",
+    "owner_email": "owner@acme.com",
+    "owner_name": "Jane Doe"
+  }
+}
+
+docs {
+  Create a new organization (requires admin+ role).
+
+  If owner_email is provided, an org member with owner role
+  is created and their API key is returned.
+
+  Returns:
+  {
+    "organization": { ... },
+    "owner_api_key": "API_KEY_IF_OWNER_PROVIDED"
+  }
+}

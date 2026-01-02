@@ -1,0 +1,28 @@
+meta {
+  name: Update Product
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/products/{{product_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_api_key}}
+}
+
+body:json {
+  {
+    "name": "Pro License (Updated)",
+    "device_limit": 10,
+    "features": ["advanced-export", "cloud-sync", "priority-support", "beta-access"]
+  }
+}
+
+docs {
+  Update a product. All fields are optional.
+  Changes don't affect already-issued licenses.
+}

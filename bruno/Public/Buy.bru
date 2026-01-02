@@ -1,0 +1,57 @@
+meta {
+  name: Buy (Initiate Payment)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/buy
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "project_id": "{{project_id}}",
+    "product_id": "{{product_id}}",
+    "device_id": "{{device_id}}",
+    "device_type": "uuid",
+    "customer_id": null,
+    "provider": null,
+    "variant_id": null,
+    "price_cents": 1999,
+    "currency": "usd",
+    "redirect": null
+  }
+}
+
+docs {
+  Initiates a payment flow by creating a checkout session with the configured payment provider.
+
+  Request body:
+  - project_id: (required) The project identifier
+  - product_id: (required) The product to purchase
+  - device_id: (required) Client device identifier
+  - device_type: (required) "uuid" or "machine"
+  - customer_id: (optional) Developer-managed customer identifier to link to your system
+  - provider: (optional) Force "stripe" or "lemonsqueezy"
+  - variant_id: (optional) LemonSqueezy variant ID (required for LemonSqueezy)
+  - price_cents: (optional) Stripe price in cents (required for Stripe)
+  - currency: (optional) Currency code (default: usd)
+  - redirect: (optional) Redirect URL after payment (must be in project's allowed_redirect_urls)
+
+  Provider selection logic:
+  1. If 'provider' param specified -> use that
+  2. Else if organization has 'default_provider' set -> use that
+  3. Else if only one provider configured on org -> use it
+  4. Else -> error (must specify 'provider' param)
+
+  Payment configuration (Stripe/LemonSqueezy keys) is set at the organization level,
+  not per-project. All projects in an organization share the same payment providers.
+
+  Returns:
+  {
+    "checkout_url": "https://checkout.stripe.com/...",
+    "session_id": "session-uuid"
+  }
+}

@@ -1,0 +1,38 @@
+meta {
+  name: Redeem with Code
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/redeem?project_id={{project_id}}&code={{redemption_code}}&device_id={{device_id}}&device_type=uuid
+  body: none
+  auth: none
+}
+
+docs {
+  Online activation using a short-lived redemption code.
+  The redemption code is safe to appear in URLs as it expires in 30 minutes.
+
+  Required params:
+  - project_id: The project identifier
+  - code: Short-lived redemption code (NOT the permanent license key)
+  - device_id: Device identifier
+  - device_type: "uuid" or "machine"
+
+  Optional params:
+  - device_name: Human-readable device name
+
+  Returns:
+  {
+    "token": "JWT_TOKEN",
+    "license_exp": 1735689600,
+    "updates_exp": 1735689600,
+    "tier": "pro",
+    "features": ["feature1", "feature2"],
+    "redemption_code": "NEW_CODE_FOR_FUTURE_USE",
+    "redemption_code_expires_at": 1735691400
+  }
+
+  Note: A fresh redemption code is returned for future URL-based redemptions.
+}

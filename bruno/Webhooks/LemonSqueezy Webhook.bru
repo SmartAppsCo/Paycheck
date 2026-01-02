@@ -1,0 +1,53 @@
+meta {
+  name: LemonSqueezy Webhook
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/webhook/lemonsqueezy
+  body: json
+  auth: none
+}
+
+headers {
+  x-signature: hmac_signature_here
+}
+
+body:json {
+  {
+    "meta": {
+      "event_name": "order_created",
+      "custom_data": {
+        "project_id": "{{project_id}}",
+        "product_id": "{{product_id}}",
+        "device_id": "{{device_id}}",
+        "device_type": "uuid"
+      }
+    },
+    "data": {
+      "id": "order_123",
+      "attributes": {
+        "status": "paid",
+        "user_email": "customer@example.com",
+        "total": 1999,
+        "currency": "USD"
+      }
+    }
+  }
+}
+
+docs {
+  LemonSqueezy webhook endpoint for payment events.
+  In production, LemonSqueezy sends this automatically.
+
+  For local testing:
+  1. Use ngrok or similar to expose localhost
+  2. Configure webhook URL in LemonSqueezy dashboard
+  3. Copy the signing secret to your config
+
+  This sample payload shows the structure but won't verify
+  without a valid HMAC signature.
+
+  Processes: order_created events with "paid" status
+}

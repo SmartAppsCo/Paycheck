@@ -1,0 +1,41 @@
+meta {
+  name: Deactivate Device (Admin)
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/licenses/{{license_key}}/devices/{{device_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_api_key}}
+}
+
+docs {
+  Remote device deactivation for org admins.
+  Used for lost device recovery when user contacts support.
+
+  Requires write access to the project.
+
+  Path params:
+  - org_id: Organization ID
+  - project_id: Project ID
+  - license_key: The license key (e.g., PC-XXXX-XXXX-XXXX-XXXX)
+  - device_id: The device ID to deactivate
+
+  Returns:
+  {
+    "deactivated": true,
+    "device_id": "device-123",
+    "remaining_devices": 2
+  }
+
+  Notes:
+  - The device's JWT is revoked (jti added to revoked list)
+  - The device record is deleted
+  - Creates an audit log entry
+  - Use GET /licenses/{key} to list devices first
+}

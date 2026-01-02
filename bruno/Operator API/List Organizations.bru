@@ -1,0 +1,19 @@
+meta {
+  name: List Organizations
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{base_url}}/operators/organizations
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+docs {
+  List all organizations.
+}

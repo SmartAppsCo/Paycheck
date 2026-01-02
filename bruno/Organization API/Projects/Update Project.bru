@@ -1,0 +1,36 @@
+meta {
+  name: Update Project
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_api_key}}
+}
+
+body:json {
+  {
+    "name": "Updated App Name",
+    "domain": "newdomain.example.com",
+    "license_key_prefix": "MYAPP"
+  }
+}
+
+docs {
+  Update a project (requires write access).
+  All fields are optional.
+
+  Fields:
+  - name: Project display name
+  - domain: Project domain
+  - license_key_prefix: Prefix for generated license keys (e.g., "MYAPP" -> "MYAPP-XXXX-XXXX-XXXX-XXXX")
+
+  Note: Payment configuration (Stripe, LemonSqueezy) is managed at the organization level,
+  not per-project. Use PUT /operators/organizations/{org_id} to update payment settings.
+}

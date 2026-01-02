@@ -1,0 +1,18 @@
+meta {
+  name: Create License (Dev Only)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/dev/create-license
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "product_id": "{{product_id}}",
+    "customer_id": "your-user-123"
+  }
+}
