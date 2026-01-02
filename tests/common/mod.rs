@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 // Re-export the main library crate
 pub use paycheck::crypto::MasterKey;
-pub use paycheck::db::{init_audit_db, init_db, queries};
+pub use paycheck::db::{init_db, queries};
 pub use paycheck::jwt;
 pub use paycheck::models::*;
 
@@ -18,13 +18,6 @@ pub fn test_master_key() -> MasterKey {
 pub fn setup_test_db() -> Connection {
     let conn = Connection::open_in_memory().expect("Failed to create in-memory database");
     init_db(&conn).expect("Failed to initialize schema");
-    conn
-}
-
-/// Create an in-memory audit database with schema initialized
-pub fn setup_audit_db() -> Connection {
-    let conn = Connection::open_in_memory().expect("Failed to create in-memory audit database");
-    init_audit_db(&conn).expect("Failed to initialize audit schema");
     conn
 }
 
@@ -138,59 +131,4 @@ pub fn now() -> i64 {
 /// Get a future timestamp (days from now)
 pub fn future_timestamp(days: i64) -> i64 {
     now() + (days * 86400)
-}
-
-/// Get a past timestamp (days ago)
-pub fn past_timestamp(days: i64) -> i64 {
-    now() - (days * 86400)
-}
-
-/// Test data builder for creating complete test hierarchies
-pub struct TestDataBuilder {
-    pub conn: Connection,
-    pub master_key: MasterKey,
-}
-
-impl TestDataBuilder {
-    pub fn new() -> Self {
-        Self {
-            conn: setup_test_db(),
-            master_key: test_master_key(),
-        }
-    }
-
-    /// Create a complete test hierarchy: org -> project -> product -> license
-    pub fn create_full_hierarchy(&self) -> TestHierarchy {
-        let org = create_test_org(&self.conn, "Test Org");
-        let (member, member_api_key) =
-            create_test_org_member(&self.conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-        let project = create_test_project(&self.conn, &org.id, "Test Project", &self.master_key);
-        let product = create_test_product(&self.conn, &project.id, "Pro Plan", "pro");
-        let license = create_test_license(&self.conn, &project.id, &product.id, &project.license_key_prefix, Some(future_timestamp(365)), &self.master_key);
-
-        TestHierarchy {
-            org,
-            member,
-            member_api_key,
-            project,
-            product,
-            license,
-        }
-    }
-}
-
-impl Default for TestDataBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// A complete test hierarchy with all related entities
-pub struct TestHierarchy {
-    pub org: Organization,
-    pub member: OrgMember,
-    pub member_api_key: String,
-    pub project: Project,
-    pub product: Product,
-    pub license: LicenseKey,
 }

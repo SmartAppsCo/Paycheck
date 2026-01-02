@@ -9,7 +9,6 @@ use common::*;
 #[test]
 fn test_create_operator() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let (operator, api_key) = create_test_operator(&conn, "test@example.com", OperatorRole::Admin);
 
     assert!(!operator.id.is_empty());
@@ -22,7 +21,6 @@ fn test_create_operator() {
 #[test]
 fn test_get_operator_by_id() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let (created, _) = create_test_operator(&conn, "test@example.com", OperatorRole::Owner);
 
     let fetched = queries::get_operator_by_id(&conn, &created.id)
@@ -37,7 +35,6 @@ fn test_get_operator_by_id() {
 #[test]
 fn test_get_operator_by_api_key() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let (created, api_key) = create_test_operator(&conn, "test@example.com", OperatorRole::View);
 
     let fetched = queries::get_operator_by_api_key(&conn, &api_key)
@@ -50,7 +47,6 @@ fn test_get_operator_by_api_key() {
 #[test]
 fn test_get_operator_with_invalid_api_key_returns_none() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let _ = create_test_operator(&conn, "test@example.com", OperatorRole::Admin);
 
     let result = queries::get_operator_by_api_key(&conn, "invalid_key")
@@ -62,7 +58,6 @@ fn test_get_operator_with_invalid_api_key_returns_none() {
 #[test]
 fn test_list_operators() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     create_test_operator(&conn, "test1@example.com", OperatorRole::Owner);
     create_test_operator(&conn, "test2@example.com", OperatorRole::Admin);
     create_test_operator(&conn, "test3@example.com", OperatorRole::View);
@@ -75,7 +70,6 @@ fn test_list_operators() {
 #[test]
 fn test_update_operator() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let (operator, _) = create_test_operator(&conn, "test@example.com", OperatorRole::View);
 
     let update = UpdateOperator {
@@ -95,7 +89,6 @@ fn test_update_operator() {
 #[test]
 fn test_delete_operator() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let (operator, _) = create_test_operator(&conn, "test@example.com", OperatorRole::Admin);
 
     let deleted = queries::delete_operator(&conn, &operator.id).expect("Delete failed");
@@ -110,7 +103,6 @@ fn test_delete_operator() {
 #[test]
 fn test_create_organization() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Organization");
 
     assert!(!org.id.is_empty());
@@ -121,7 +113,6 @@ fn test_create_organization() {
 #[test]
 fn test_get_organization_by_id() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let created = create_test_org(&conn, "Test Org");
 
     let fetched = queries::get_organization_by_id(&conn, &created.id)
@@ -135,7 +126,6 @@ fn test_get_organization_by_id() {
 #[test]
 fn test_list_organizations() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     create_test_org(&conn, "Org 1");
     create_test_org(&conn, "Org 2");
 
@@ -146,7 +136,6 @@ fn test_list_organizations() {
 #[test]
 fn test_update_organization() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Original Name");
 
@@ -168,7 +157,6 @@ fn test_update_organization() {
 #[test]
 fn test_delete_organization() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let org = create_test_org(&conn, "To Delete");
 
     let deleted = queries::delete_organization(&conn, &org.id).expect("Delete failed");
@@ -183,7 +171,6 @@ fn test_delete_organization() {
 #[test]
 fn test_create_org_member() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
     let (member, api_key) = create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
 
@@ -197,7 +184,6 @@ fn test_create_org_member() {
 #[test]
 fn test_get_org_member_by_api_key() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
     let (created, api_key) = create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Admin);
 
@@ -212,7 +198,6 @@ fn test_get_org_member_by_api_key() {
 #[test]
 fn test_list_org_members() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
     create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
     create_test_org_member(&conn, &org.id, "admin@test.com", OrgMemberRole::Admin);
@@ -225,7 +210,6 @@ fn test_list_org_members() {
 #[test]
 fn test_unique_email_per_org() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
     create_test_org_member(&conn, &org.id, "same@test.com", OrgMemberRole::Owner);
 
@@ -243,7 +227,6 @@ fn test_unique_email_per_org() {
 #[test]
 fn test_same_email_different_orgs() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let org1 = create_test_org(&conn, "Org 1");
     let org2 = create_test_org(&conn, "Org 2");
 
@@ -305,7 +288,6 @@ fn test_list_projects_for_org() {
 fn test_update_org_stripe_config() {
     let conn = setup_test_db();
     let master_key = test_master_key();
-    let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
 
     let stripe_config = StripeConfig {
@@ -343,7 +325,6 @@ fn test_update_org_stripe_config() {
 fn test_update_org_lemonsqueezy_config() {
     let conn = setup_test_db();
     let master_key = test_master_key();
-    let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
 
     let ls_config = LemonSqueezyConfig {
@@ -380,7 +361,6 @@ fn test_update_org_lemonsqueezy_config() {
 #[test]
 fn test_update_org_both_payment_configs() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
 
@@ -429,7 +409,6 @@ fn test_update_org_both_payment_configs() {
 #[test]
 fn test_payment_config_wrong_key_fails() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let master_key = test_master_key();
     let wrong_key = MasterKey::from_bytes([1u8; 32]); // Different key
     let org = create_test_org(&conn, "Test Org");
@@ -560,7 +539,6 @@ fn test_delete_product() {
 #[test]
 fn test_delete_org_cascades_to_members() {
     let conn = setup_test_db();
-    let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
     let (member, _) = create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
 
