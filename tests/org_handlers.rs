@@ -71,7 +71,7 @@ mod product_tests {
         {
             let conn = state.db.get().unwrap();
             let org = create_test_org(&conn, "Test Org");
-            let (member, key) = create_test_org_member(&conn, &org.id, "admin@test.com", OrgMemberRole::Owner);
+            let (_member, key) = create_test_org_member(&conn, &org.id, "admin@test.com", OrgMemberRole::Owner);
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
 
             org_id = org.id;

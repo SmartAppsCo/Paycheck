@@ -1,5 +1,7 @@
 //! Test utilities and fixtures for Paycheck integration tests
 
+#![allow(dead_code)]
+
 use axum::routing::{get, post};
 use axum::Router;
 use r2d2::Pool;
