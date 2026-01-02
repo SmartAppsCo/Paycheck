@@ -16,7 +16,6 @@ pub struct LicenseClaims {
 
     // Metadata
     pub product_id: String,        // Product ID
-    pub license_key: String,       // License key for reference
 }
 
 impl LicenseClaims {

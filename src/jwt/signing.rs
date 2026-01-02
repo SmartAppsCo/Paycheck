@@ -86,6 +86,25 @@ pub fn verify_token(
     public_key_b64: &str,
     expected_audience: &str,
 ) -> Result<JWTClaims<LicenseClaims>> {
+    verify_token_internal(token, public_key_b64, expected_audience, false)
+}
+
+/// Verify a JWT signature but allow expired tokens (for refresh flow)
+/// Validates signature, issuer ("paycheck"), and audience - but NOT expiration
+pub fn verify_token_allow_expired(
+    token: &str,
+    public_key_b64: &str,
+    expected_audience: &str,
+) -> Result<JWTClaims<LicenseClaims>> {
+    verify_token_internal(token, public_key_b64, expected_audience, true)
+}
+
+fn verify_token_internal(
+    token: &str,
+    public_key_b64: &str,
+    expected_audience: &str,
+    allow_expired: bool,
+) -> Result<JWTClaims<LicenseClaims>> {
     let public_bytes = BASE64
         .decode(public_key_b64)
         .map_err(|e| AppError::Internal(format!("Invalid public key encoding: {}", e)))?;
@@ -107,6 +126,12 @@ pub fn verify_token(
     let mut options = VerificationOptions::default();
     options.allowed_issuers = Some(std::collections::HashSet::from(["paycheck".to_string()]));
     options.allowed_audiences = Some(std::collections::HashSet::from([expected_audience.to_string()]));
+
+    if allow_expired {
+        // Set a large time tolerance to effectively ignore expiration
+        // 10 years in seconds - allows tokens expired up to 10 years ago
+        options.time_tolerance = Some(Duration::from_secs(10 * 365 * 24 * 60 * 60));
+    }
 
     let claims = public_key
         .verify_token::<LicenseClaims>(token, Some(options))
@@ -140,7 +165,6 @@ mod tests {
             device_id: "device-789".to_string(),
             device_type: "uuid".to_string(),
             product_id: "product-abc".to_string(),
-            license_key: "PC-XXXX-XXXX-XXXX".to_string(),
         };
 
         let token = sign_claims(

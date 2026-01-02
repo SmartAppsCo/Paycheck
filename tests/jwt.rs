@@ -12,7 +12,6 @@ fn create_test_claims() -> LicenseClaims {
         device_id: "device-123".to_string(),
         device_type: "uuid".to_string(),
         product_id: "product-abc".to_string(),
-        license_key: "TEST-XXXX-XXXX-XXXX-XXXX".to_string(),
     }
 }
 
@@ -216,7 +215,6 @@ fn test_is_license_expired_future() {
         device_id: "".to_string(),
         device_type: "uuid".to_string(),
         product_id: "".to_string(),
-        license_key: "".to_string(),
     };
 
     assert!(!claims.is_license_expired(now), "Future expiration should not be expired");
@@ -233,7 +231,6 @@ fn test_is_license_expired_past() {
         device_id: "".to_string(),
         device_type: "uuid".to_string(),
         product_id: "".to_string(),
-        license_key: "".to_string(),
     };
 
     assert!(claims.is_license_expired(now), "Past expiration should be expired");
@@ -250,7 +247,6 @@ fn test_is_license_expired_perpetual() {
         device_id: "".to_string(),
         device_type: "uuid".to_string(),
         product_id: "".to_string(),
-        license_key: "".to_string(),
     };
 
     assert!(!claims.is_license_expired(now), "Perpetual license should not be expired");
@@ -267,7 +263,6 @@ fn test_covers_version_with_updates_exp() {
         device_id: "".to_string(),
         device_type: "uuid".to_string(),
         product_id: "".to_string(),
-        license_key: "".to_string(),
     };
 
     // Version released before updates expiration
@@ -287,7 +282,6 @@ fn test_covers_version_perpetual_updates() {
         device_id: "".to_string(),
         device_type: "uuid".to_string(),
         product_id: "".to_string(),
-        license_key: "".to_string(),
     };
 
     // Should cover any version
@@ -304,7 +298,6 @@ fn test_has_feature() {
         device_id: "".to_string(),
         device_type: "uuid".to_string(),
         product_id: "".to_string(),
-        license_key: "".to_string(),
     };
 
     assert!(claims.has_feature("export"), "Should have export feature");
@@ -322,7 +315,6 @@ fn test_has_feature_empty() {
         device_id: "".to_string(),
         device_type: "uuid".to_string(),
         product_id: "".to_string(),
-        license_key: "".to_string(),
     };
 
     assert!(!claims.has_feature("anything"), "Empty features should not have any feature");
@@ -341,7 +333,6 @@ fn test_sign_with_unicode_claims() {
         device_id: "デバイス".to_string(),
         device_type: "uuid".to_string(),
         product_id: "商品".to_string(),
-        license_key: "テスト-キー".to_string(),
     };
 
     let token = jwt::sign_claims(&claims, &private_key, "ライセンス", "アプリ.com", "JTI")
@@ -364,7 +355,6 @@ fn test_sign_with_special_characters() {
         device_id: "device<>&id".to_string(),
         device_type: "uuid".to_string(),
         product_id: "product@#$%".to_string(),
-        license_key: "KEY-{}-[]".to_string(),
     };
 
     let token = jwt::sign_claims(&claims, &private_key, "sub", "aud", "jti")
@@ -387,7 +377,6 @@ fn test_sign_with_empty_features() {
         device_id: "device".to_string(),
         device_type: "uuid".to_string(),
         product_id: "product".to_string(),
-        license_key: "key".to_string(),
     };
 
     let token = jwt::sign_claims(&claims, &private_key, "sub", "aud", "jti")
@@ -411,7 +400,6 @@ fn test_sign_with_many_features() {
         device_id: "device".to_string(),
         device_type: "uuid".to_string(),
         product_id: "product".to_string(),
-        license_key: "key".to_string(),
     };
 
     let token = jwt::sign_claims(&claims, &private_key, "sub", "aud", "jti")

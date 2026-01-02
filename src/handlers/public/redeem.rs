@@ -192,7 +192,6 @@ fn redeem_license_internal(
             DeviceType::Machine => "machine".to_string(),
         },
         product_id: product.id.clone(),
-        license_key: license.key.clone(),
     };
 
     // Decrypt the private key and sign the JWT

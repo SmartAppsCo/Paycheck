@@ -69,7 +69,7 @@ pub fn create_test_org_member(
     (member, api_key)
 }
 
-/// Create a test project with auto-generated keypair
+/// Create a test project with auto-generated keypair (unencrypted - for tests that don't need encryption)
 pub fn create_test_project(conn: &Connection, org_id: &str, name: &str) -> Project {
     let input = CreateProject {
         name: name.to_string(),
@@ -80,6 +80,39 @@ pub fn create_test_project(conn: &Connection, org_id: &str, name: &str) -> Proje
     let (private_key, public_key) = jwt::generate_keypair();
     queries::create_project(conn, org_id, &input, &private_key, &public_key)
         .expect("Failed to create test project")
+}
+
+/// Create a test project with encrypted private key (for tests that need to decrypt the key)
+pub fn create_test_project_encrypted(
+    conn: &Connection,
+    org_id: &str,
+    name: &str,
+    master_key: &MasterKey,
+) -> Project {
+    let input = CreateProject {
+        name: name.to_string(),
+        domain: format!("{}.example.com", name.to_lowercase().replace(' ', "-")),
+        license_key_prefix: "TEST".to_string(),
+        allowed_redirect_urls: vec![],
+    };
+    let (private_key, public_key) = jwt::generate_keypair();
+
+    // Need to create with a temp ID first, then update with encrypted key
+    let project = queries::create_project(conn, org_id, &input, &private_key, &public_key)
+        .expect("Failed to create test project");
+
+    // Now encrypt with the actual project ID and update
+    let encrypted_private_key = master_key
+        .encrypt_private_key(&project.id, &private_key)
+        .expect("Failed to encrypt private key");
+
+    queries::update_project_private_key(conn, &project.id, &encrypted_private_key)
+        .expect("Failed to update project private key");
+
+    Project {
+        private_key: encrypted_private_key,
+        ..project
+    }
 }
 
 /// Create a test product

@@ -1,4 +1,5 @@
 mod redeem;
+mod refresh;
 mod validate;
 mod devices;
 mod license;
@@ -6,6 +7,7 @@ mod buy;
 mod callback;
 
 pub use redeem::*;
+pub use refresh::*;
 pub use validate::*;
 pub use devices::*;
 pub use license::*;
@@ -46,6 +48,7 @@ pub fn router(rate_limit_config: RateLimitConfig) -> Router<AppState> {
         .route("/redeem", get(redeem_with_code))
         .route("/redeem/key", post(redeem_with_key))
         .route("/redeem/code", post(generate_redemption_code))
+        .route("/refresh", post(refresh_token))
         .route("/validate", get(validate_license))
         .route("/license", get(get_license_info))
         .route("/devices/deactivate", post(deactivate_device))
