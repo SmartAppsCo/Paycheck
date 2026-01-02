@@ -1,9 +1,11 @@
+mod audit_logs;
 mod members;
 mod projects;
 mod project_members;
 mod products;
 mod licenses;
 
+pub use audit_logs::*;
 pub use members::*;
 pub use projects::*;
 pub use project_members::*;
@@ -20,7 +22,7 @@ use crate::db::AppState;
 use crate::middleware::{org_member_auth, org_member_project_auth};
 
 pub fn router(state: AppState) -> Router<AppState> {
-    // Org-level routes (members management, payment config)
+    // Org-level routes (members management, payment config, audit logs)
     let org_routes = Router::new()
         .route("/orgs/{org_id}/members", post(create_org_member))
         .route("/orgs/{org_id}/members", get(list_org_members))
@@ -31,6 +33,8 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/orgs/{org_id}/projects", get(list_projects))
         // Payment config (at org level, masked for customers to verify their settings)
         .route("/orgs/{org_id}/payment-config", get(get_payment_config))
+        // Audit logs (org-scoped, any org member can view their org's logs)
+        .route("/orgs/{org_id}/audit-logs", get(query_org_audit_logs))
         .layer(middleware::from_fn_with_state(state.clone(), org_member_auth));
 
     // Project-level routes
