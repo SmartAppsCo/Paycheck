@@ -298,24 +298,20 @@ fn seed_dev_data(state: &AppState) {
 
 /// Rotate the master encryption key.
 /// Decrypts all project private keys with the old key and re-encrypts with the new key.
+/// Uses a transaction to ensure all-or-nothing semantics.
 fn rotate_master_key(db_path: &str, old_key: &MasterKey, new_key: &MasterKey) -> Result<(), String> {
-    use paycheck::db::DbPool;
-    use r2d2::Pool;
-    use r2d2_sqlite::SqliteConnectionManager;
+    use rusqlite::Connection;
 
-    // Create a minimal DB pool just for rotation
-    let manager = SqliteConnectionManager::file(db_path);
-    let pool: DbPool = Pool::builder()
-        .max_size(1)
-        .build(manager)
-        .map_err(|e| format!("Failed to create database pool: {}", e))?;
+    let mut conn = Connection::open(db_path)
+        .map_err(|e| format!("Failed to open database: {}", e))?;
 
-    let conn = pool
-        .get()
-        .map_err(|e| format!("Failed to get database connection: {}", e))?;
+    // Start transaction - any error will cause automatic rollback when conn is dropped
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("Failed to start transaction: {}", e))?;
 
     // Get all projects
-    let projects = queries::list_all_projects(&conn)
+    let projects = queries::list_all_projects(&tx)
         .map_err(|e| format!("Failed to list projects: {}", e))?;
 
     if projects.is_empty() {
@@ -325,185 +321,119 @@ fn rotate_master_key(db_path: &str, old_key: &MasterKey, new_key: &MasterKey) ->
 
     println!("Found {} project(s) to rotate.", projects.len());
 
-    let mut rotated = 0;
-    let mut errors = 0;
-
     for project in &projects {
-        // Check if the key is encrypted
-        if !MasterKey::is_encrypted(&project.private_key) {
-            println!(
-                "  [SKIP] Project {} has unencrypted key (run without --rotate-key first to migrate)",
-                project.id
-            );
-            continue;
-        }
-
         // Decrypt with old key
-        let plaintext = match old_key.decrypt_private_key(&project.id, &project.private_key) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!(
-                    "  [ERROR] Failed to decrypt project {} with old key: {}",
-                    project.id, e
-                );
-                errors += 1;
-                continue;
-            }
-        };
+        let plaintext = old_key
+            .decrypt_private_key(&project.id, &project.private_key)
+            .map_err(|e| format!("Failed to decrypt project {}: {}", project.id, e))?;
 
         // Re-encrypt with new key
-        let new_ciphertext = match new_key.encrypt_private_key(&project.id, &plaintext) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!(
-                    "  [ERROR] Failed to re-encrypt project {} with new key: {}",
-                    project.id, e
-                );
-                errors += 1;
-                continue;
-            }
-        };
+        let new_ciphertext = new_key
+            .encrypt_private_key(&project.id, &plaintext)
+            .map_err(|e| format!("Failed to re-encrypt project {}: {}", project.id, e))?;
 
         // Update private key in database
-        if let Err(e) = queries::update_project_private_key(&conn, &project.id, &new_ciphertext) {
-            eprintln!(
-                "  [ERROR] Failed to update project {} in database: {}",
-                project.id, e
-            );
-            errors += 1;
-            continue;
-        }
+        queries::update_project_private_key(&tx, &project.id, &new_ciphertext)
+            .map_err(|e| format!("Failed to update project {} in database: {}", project.id, e))?;
 
-        println!("  [OK] Rotated project: {} ({})", project.name, project.id);
-        rotated += 1;
+        println!("  [OK] Project: {} ({})", project.name, project.id);
     }
 
     // Rotate organization payment configs
-    let organizations = queries::list_organizations(&conn)
+    let organizations = queries::list_organizations(&tx)
         .map_err(|e| format!("Failed to list organizations: {}", e))?;
 
-    println!();
-    println!("Found {} organization(s) with potential payment configs.", organizations.len());
+    let orgs_with_configs: Vec<_> = organizations
+        .iter()
+        .filter(|o| o.stripe_config_encrypted.is_some() || o.ls_config_encrypted.is_some())
+        .collect();
 
-    let mut org_rotated = 0;
-    let mut org_errors = 0;
+    if !orgs_with_configs.is_empty() {
+        println!();
+        println!("Found {} organization(s) with payment configs.", orgs_with_configs.len());
 
-    for org in &organizations {
-        let mut config_error = false;
-
-        let new_stripe = if let Some(ref encrypted) = org.stripe_config_encrypted {
-            if MasterKey::is_encrypted(encrypted) {
-                match old_key.decrypt_private_key(&org.id, encrypted) {
-                    Ok(plaintext) => match new_key.encrypt_private_key(&org.id, &plaintext) {
-                        Ok(new_enc) => Some(new_enc),
-                        Err(e) => {
-                            eprintln!(
-                                "  [ERROR] Failed to re-encrypt Stripe config for org {}: {}",
-                                org.id, e
-                            );
-                            config_error = true;
-                            None
-                        }
-                    },
-                    Err(e) => {
-                        eprintln!(
-                            "  [ERROR] Failed to decrypt Stripe config for org {}: {}",
-                            org.id, e
-                        );
-                        config_error = true;
-                        None
-                    }
-                }
+        for org in &orgs_with_configs {
+            let new_stripe = if let Some(ref encrypted) = org.stripe_config_encrypted {
+                let plaintext = old_key
+                    .decrypt_private_key(&org.id, encrypted)
+                    .map_err(|e| format!("Failed to decrypt Stripe config for org {}: {}", org.id, e))?;
+                let new_enc = new_key
+                    .encrypt_private_key(&org.id, &plaintext)
+                    .map_err(|e| format!("Failed to re-encrypt Stripe config for org {}: {}", org.id, e))?;
+                Some(new_enc)
             } else {
-                Some(encrypted.clone())
-            }
-        } else {
-            None
-        };
+                None
+            };
 
-        let new_ls = if let Some(ref encrypted) = org.ls_config_encrypted {
-            if MasterKey::is_encrypted(encrypted) {
-                match old_key.decrypt_private_key(&org.id, encrypted) {
-                    Ok(plaintext) => match new_key.encrypt_private_key(&org.id, &plaintext) {
-                        Ok(new_enc) => Some(new_enc),
-                        Err(e) => {
-                            eprintln!(
-                                "  [ERROR] Failed to re-encrypt LemonSqueezy config for org {}: {}",
-                                org.id, e
-                            );
-                            config_error = true;
-                            None
-                        }
-                    },
-                    Err(e) => {
-                        eprintln!(
-                            "  [ERROR] Failed to decrypt LemonSqueezy config for org {}: {}",
-                            org.id, e
-                        );
-                        config_error = true;
-                        None
-                    }
-                }
+            let new_ls = if let Some(ref encrypted) = org.ls_config_encrypted {
+                let plaintext = old_key
+                    .decrypt_private_key(&org.id, encrypted)
+                    .map_err(|e| format!("Failed to decrypt LemonSqueezy config for org {}: {}", org.id, e))?;
+                let new_enc = new_key
+                    .encrypt_private_key(&org.id, &plaintext)
+                    .map_err(|e| format!("Failed to re-encrypt LemonSqueezy config for org {}: {}", org.id, e))?;
+                Some(new_enc)
             } else {
-                Some(encrypted.clone())
-            }
-        } else {
-            None
-        };
+                None
+            };
 
-        if config_error {
-            org_errors += 1;
-            errors += 1;
-            continue;
-        }
-
-        // Update payment configs if any exist
-        let has_payment_configs =
-            org.stripe_config_encrypted.is_some() || org.ls_config_encrypted.is_some();
-        if has_payment_configs {
-            if queries::update_organization_payment_configs(
-                &conn,
+            queries::update_organization_payment_configs(
+                &tx,
                 &org.id,
                 new_stripe.as_deref(),
                 new_ls.as_deref(),
             )
-            .is_err()
-            {
-                eprintln!(
-                    "  [ERROR] Failed to update payment configs for org {}",
-                    org.id
-                );
-                org_errors += 1;
-                errors += 1;
-                continue;
-            }
-            println!("  [OK] Rotated payment config for org: {} ({})", org.name, org.id);
-            org_rotated += 1;
+            .map_err(|e| format!("Failed to update payment configs for org {}: {}", org.id, e))?;
+
+            println!("  [OK] Org: {} ({})", org.name, org.id);
         }
     }
 
+    // Rotate license keys
+    let license_rows = queries::list_all_license_key_rows(&tx)
+        .map_err(|e| format!("Failed to list license keys: {}", e))?;
+
+    if !license_rows.is_empty() {
+        println!();
+        println!("Found {} license key(s) to rotate.", license_rows.len());
+
+        for row in &license_rows {
+            // Decrypt with old key (using project_id as DEK info)
+            let plaintext = old_key
+                .decrypt_private_key(&row.project_id, &row.encrypted_key)
+                .map_err(|e| format!("Failed to decrypt license key {}: {}", row.id, e))?;
+
+            // Re-encrypt with new key
+            let new_encrypted = new_key
+                .encrypt_private_key(&row.project_id, &plaintext)
+                .map_err(|e| format!("Failed to re-encrypt license key {}: {}", row.id, e))?;
+
+            // Update in database
+            queries::update_license_key_encrypted(&tx, &row.id, &new_encrypted)
+                .map_err(|e| format!("Failed to update license key {}: {}", row.id, e))?;
+        }
+
+        println!("  [OK] {} license key(s) rotated", license_rows.len());
+    }
+
+    // Commit the transaction
+    tx.commit()
+        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
+
     println!();
-    println!("Rotation complete:");
-    println!("  Rotated: {}", rotated);
-    println!("  Errors:  {}", errors);
-    println!("  Skipped: {}", projects.len() - rotated - errors);
-
-    if errors > 0 {
-        return Err(format!(
-            "Rotation completed with {} error(s). Review output above.",
-            errors
-        ));
+    println!("SUCCESS: All keys rotated to new master key.");
+    println!("  {} project(s)", projects.len());
+    if !orgs_with_configs.is_empty() {
+        println!("  {} organization payment config(s)", orgs_with_configs.len());
     }
-
-    if rotated > 0 {
-        println!();
-        println!("SUCCESS: All keys rotated to new master key.");
-        println!();
-        println!("Next steps:");
-        println!("  1. Update PAYCHECK_MASTER_KEY_FILE to point to the new key file");
-        println!("  2. Securely delete the old key file");
-        println!("  3. Restart the server");
+    if !license_rows.is_empty() {
+        println!("  {} license key(s)", license_rows.len());
     }
+    println!();
+    println!("Next steps:");
+    println!("  1. Update PAYCHECK_MASTER_KEY_FILE to point to the new key file");
+    println!("  2. Securely delete the old key file");
+    println!("  3. Restart the server");
 
     Ok(())
 }

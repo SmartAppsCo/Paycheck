@@ -573,7 +573,7 @@ pub fn list_all_projects(conn: &Connection) -> Result<Vec<Project>> {
     )
 }
 
-/// Update a project's private key (for migration from unencrypted to encrypted)
+/// Update a project's private key (for key rotation)
 pub fn update_project_private_key(conn: &Connection, id: &str, private_key: &[u8]) -> Result<()> {
     conn.execute(
         "UPDATE projects SET private_key = ?1, updated_at = ?2 WHERE id = ?3",
@@ -964,6 +964,29 @@ pub fn extend_license_expiration(
     conn.execute(
         "UPDATE license_keys SET expires_at = ?1, updates_expires_at = ?2 WHERE id = ?3",
         params![new_expires_at, new_updates_expires_at, license_id],
+    )?;
+    Ok(())
+}
+
+/// List all license key rows in raw encrypted form (for key rotation).
+/// Returns the encrypted data without decryption.
+pub fn list_all_license_key_rows(conn: &Connection) -> Result<Vec<LicenseKeyRow>> {
+    query_all(
+        conn,
+        &format!("SELECT {} FROM license_keys ORDER BY created_at", LICENSE_KEY_COLS),
+        &[],
+    )
+}
+
+/// Update a license key's encrypted key (for key rotation).
+pub fn update_license_key_encrypted(
+    conn: &Connection,
+    id: &str,
+    encrypted_key: &[u8],
+) -> Result<()> {
+    conn.execute(
+        "UPDATE license_keys SET encrypted_key = ?1 WHERE id = ?2",
+        params![encrypted_key, id],
     )?;
     Ok(())
 }

@@ -27,7 +27,7 @@ const NONCE_SIZE: usize = 12;
 /// Master key size (256 bits for AES-256)
 const MASTER_KEY_SIZE: usize = 32;
 
-/// Magic bytes to identify encrypted keys (helps detect unencrypted legacy keys)
+/// Magic bytes to identify encrypted data
 const ENCRYPTED_MAGIC: &[u8] = b"ENC1";
 
 /// Holds the master encryption key for envelope encryption.
@@ -142,11 +142,6 @@ impl MasterKey {
 
         Ok(plaintext)
     }
-
-    /// Check if data appears to be encrypted (has magic bytes).
-    pub fn is_encrypted(data: &[u8]) -> bool {
-        data.len() >= ENCRYPTED_MAGIC.len() && &data[..ENCRYPTED_MAGIC.len()] == ENCRYPTED_MAGIC
-    }
 }
 
 /// Hash a secret for database lookups (license keys, API keys, redemption codes).
@@ -196,9 +191,6 @@ mod tests {
             .encrypt_private_key(project_id, &private_key)
             .unwrap();
 
-        // Verify it's marked as encrypted
-        assert!(MasterKey::is_encrypted(&encrypted));
-
         let decrypted = master_key
             .decrypt_private_key(project_id, &encrypted)
             .unwrap();
@@ -235,20 +227,6 @@ mod tests {
         // Try to decrypt with wrong project ID
         let result = master_key.decrypt_private_key("project-2", &encrypted);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_is_encrypted_detection() {
-        // Unencrypted 32-byte key (raw Ed25519)
-        let raw_key = [0u8; 32];
-        assert!(!MasterKey::is_encrypted(&raw_key));
-
-        // Encrypted key has magic bytes
-        let master_key = MasterKey::from_base64(&MasterKey::generate()).unwrap();
-        let encrypted = master_key
-            .encrypt_private_key("project-1", &raw_key)
-            .unwrap();
-        assert!(MasterKey::is_encrypted(&encrypted));
     }
 
     #[test]
