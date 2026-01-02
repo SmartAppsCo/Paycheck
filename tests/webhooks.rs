@@ -1,5 +1,8 @@
 //! Webhook signature verification tests
 
+mod common;
+
+use common::*;
 use paycheck::models::{LemonSqueezyConfig, StripeConfig};
 use paycheck::payments::{LemonSqueezyClient, StripeClient};
 
@@ -315,4 +318,152 @@ fn test_stripe_unicode_in_payload() {
         .expect("Verification should not error");
 
     assert!(result, "Unicode payload with valid signature should be accepted");
+}
+
+// ============ Webhook Replay Attack Prevention Tests ============
+
+/// Test that replaying a renewal webhook does NOT extend the license twice.
+/// This is a regression test for the LemonSqueezy replay vulnerability.
+/// The test is provider-agnostic - it tests the underlying process_renewal logic.
+#[test]
+fn test_renewal_webhook_replay_prevented() {
+    use axum::http::StatusCode;
+    use paycheck::handlers::webhooks::common::process_renewal;
+
+    let conn = setup_test_db();
+    let master_key = test_master_key();
+
+    // Create test hierarchy
+    let org = create_test_org(&conn, "Test Org");
+    let project = create_test_project(&conn, &org.id, "Test Project");
+    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+    // Create license with short expiration (7 days from now)
+    let initial_expiration = now() + (7 * 86400);
+    let license = create_test_license(
+        &conn,
+        &project.id,
+        &product.id,
+        &project.license_key_prefix,
+        Some(initial_expiration),
+        &master_key,
+    );
+
+    // Simulate a renewal webhook with a unique event ID
+    let event_id = "invoice_12345";
+    let subscription_id = "sub_test_123";
+
+    // First renewal should succeed and extend the license
+    let (status1, _msg1) = process_renewal(
+        &conn,
+        "test_provider",
+        &product,
+        &license.id,
+        &license.key,
+        subscription_id,
+        Some(event_id),
+    );
+    assert_eq!(status1, StatusCode::OK, "First renewal should succeed");
+
+    // Check license was extended (product has 365 day license_exp_days)
+    let updated_license = queries::get_license_key_by_id(&conn, &license.id, &master_key)
+        .expect("Query should succeed")
+        .expect("License should exist");
+    let first_expiration = updated_license.expires_at.expect("Should have expiration");
+    assert!(
+        first_expiration > initial_expiration,
+        "License expiration should be extended after first renewal"
+    );
+
+    // Wait a moment to ensure timestamps differ
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
+    // Replay the SAME webhook (same event_id)
+    let (status2, msg2) = process_renewal(
+        &conn,
+        "test_provider",
+        &product,
+        &license.id,
+        &license.key,
+        subscription_id,
+        Some(event_id), // Same event ID = replay
+    );
+
+    // Replay should be rejected (idempotent - already processed)
+    assert_eq!(
+        status2,
+        StatusCode::OK,
+        "Replay should return OK (idempotent)"
+    );
+    assert!(
+        msg2.contains("Already processed") || msg2.contains("Duplicate"),
+        "Replay should indicate already processed, got: {}",
+        msg2
+    );
+
+    // Verify license expiration was NOT extended again
+    let final_license = queries::get_license_key_by_id(&conn, &license.id, &master_key)
+        .expect("Query should succeed")
+        .expect("License should exist");
+    let final_expiration = final_license.expires_at.expect("Should have expiration");
+
+    assert_eq!(
+        first_expiration, final_expiration,
+        "License expiration should NOT change on replay"
+    );
+}
+
+/// Test that different event IDs are processed independently (not blocked as replays)
+#[test]
+fn test_different_renewal_events_both_processed() {
+    use axum::http::StatusCode;
+    use paycheck::handlers::webhooks::common::process_renewal;
+
+    let conn = setup_test_db();
+    let master_key = test_master_key();
+
+    // Create test hierarchy
+    let org = create_test_org(&conn, "Test Org");
+    let project = create_test_project(&conn, &org.id, "Test Project");
+    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+    let initial_expiration = now() + (7 * 86400);
+    let license = create_test_license(
+        &conn,
+        &project.id,
+        &product.id,
+        &project.license_key_prefix,
+        Some(initial_expiration),
+        &master_key,
+    );
+
+    let subscription_id = "sub_test_123";
+
+    // First renewal event
+    let (status1, _) = process_renewal(
+        &conn,
+        "test_provider",
+        &product,
+        &license.id,
+        &license.key,
+        subscription_id,
+        Some("invoice_001"),
+    );
+    assert_eq!(status1, StatusCode::OK);
+
+    // Second renewal event (different event ID - legitimate new renewal)
+    let (status2, msg2) = process_renewal(
+        &conn,
+        "test_provider",
+        &product,
+        &license.id,
+        &license.key,
+        subscription_id,
+        Some("invoice_002"), // Different event ID
+    );
+    assert_eq!(status2, StatusCode::OK);
+    assert!(
+        !msg2.contains("Already processed"),
+        "Different event should be processed, not rejected as duplicate"
+    );
 }

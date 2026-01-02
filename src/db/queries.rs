@@ -667,16 +667,19 @@ pub fn list_project_members(conn: &Connection, project_id: &str) -> Result<Vec<P
     )
 }
 
-pub fn update_project_member(conn: &Connection, id: &str, input: &UpdateProjectMember) -> Result<()> {
-    conn.execute(
-        "UPDATE project_members SET role = ?1 WHERE id = ?2",
-        params![input.role.as_ref(), id],
+pub fn update_project_member(conn: &Connection, id: &str, project_id: &str, input: &UpdateProjectMember) -> Result<bool> {
+    let affected = conn.execute(
+        "UPDATE project_members SET role = ?1 WHERE id = ?2 AND project_id = ?3",
+        params![input.role.as_ref(), id, project_id],
     )?;
-    Ok(())
+    Ok(affected > 0)
 }
 
-pub fn delete_project_member(conn: &Connection, id: &str) -> Result<bool> {
-    let deleted = conn.execute("DELETE FROM project_members WHERE id = ?1", params![id])?;
+pub fn delete_project_member(conn: &Connection, id: &str, project_id: &str) -> Result<bool> {
+    let deleted = conn.execute(
+        "DELETE FROM project_members WHERE id = ?1 AND project_id = ?2",
+        params![id, project_id],
+    )?;
     Ok(deleted > 0)
 }
 
@@ -1338,6 +1341,22 @@ pub fn mark_payment_session_completed(conn: &Connection, id: &str) -> Result<()>
         params![id],
     )?;
     Ok(())
+}
+
+// ============ Webhook Event Deduplication ============
+
+/// Atomically record a webhook event, returning true if this is a new event.
+/// Returns false if the event was already processed (replay attack prevention).
+///
+/// Uses INSERT OR IGNORE for atomicity - if the (provider, event_id) pair
+/// already exists, the insert is silently ignored and we return false.
+pub fn try_record_webhook_event(conn: &Connection, provider: &str, event_id: &str) -> Result<bool> {
+    let id = gen_id();
+    let affected = conn.execute(
+        "INSERT OR IGNORE INTO webhook_events (id, provider, event_id, created_at) VALUES (?1, ?2, ?3, ?4)",
+        params![id, provider, event_id, now()],
+    )?;
+    Ok(affected > 0)
 }
 
 // ============ Audit Log Maintenance ============

@@ -130,6 +130,8 @@ fn parse_subscription_payment(
         // Initial payment comes via order_created
         is_renewal: true,
         is_paid: invoice.status == "paid",
+        // Use invoice ID (data.id) as unique event identifier for replay prevention
+        event_id: Some(event.data.id.clone()),
     }))
 }
 

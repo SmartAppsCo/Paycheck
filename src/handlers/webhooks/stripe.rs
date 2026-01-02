@@ -124,6 +124,8 @@ fn parse_invoice_paid(event: &StripeWebhookEvent) -> Result<WebhookEvent, Webhoo
         subscription_id,
         is_renewal,
         is_paid: invoice.status == "paid",
+        // Use invoice ID as unique event identifier for replay prevention
+        event_id: Some(invoice.id),
     }))
 }
 

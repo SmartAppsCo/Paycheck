@@ -154,6 +154,16 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             license_key_id TEXT REFERENCES license_keys(id) ON DELETE SET NULL
         );
         CREATE INDEX IF NOT EXISTS idx_payment_sessions_product ON payment_sessions(product_id);
+
+        -- Webhook events (for replay attack prevention)
+        CREATE TABLE IF NOT EXISTS webhook_events (
+            id TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE(provider, event_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_webhook_events_lookup ON webhook_events(provider, event_id);
         "#,
     )?;
     Ok(())

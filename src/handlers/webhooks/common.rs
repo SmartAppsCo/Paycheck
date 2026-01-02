@@ -35,6 +35,8 @@ pub struct RenewalData {
     /// Whether this is an actual renewal vs initial subscription creation
     pub is_renewal: bool,
     pub is_paid: bool,
+    /// Unique event/invoice ID for replay prevention
+    pub event_id: Option<String>,
 }
 
 /// Data extracted from a subscription cancellation event.
@@ -173,6 +175,9 @@ pub fn process_checkout(
 }
 
 /// Process a subscription renewal event - extends license expiration.
+///
+/// The `event_id` parameter is used for replay attack prevention - if the same
+/// event_id is processed twice, the second call returns "Already processed".
 pub fn process_renewal(
     conn: &Connection,
     provider: &str,
@@ -180,7 +185,25 @@ pub fn process_renewal(
     license_id: &str,
     license_key: &str,
     subscription_id: &str,
+    event_id: Option<&str>,
 ) -> WebhookResult {
+    // Replay attack prevention: check if we've already processed this event
+    if let Some(eid) = event_id {
+        match queries::try_record_webhook_event(conn, provider, eid) {
+            Ok(true) => {
+                // New event - proceed with processing
+            }
+            Ok(false) => {
+                // Already processed - idempotent response
+                return (StatusCode::OK, "Already processed");
+            }
+            Err(e) => {
+                tracing::error!("Failed to record webhook event: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+            }
+        }
+    }
+
     let now = chrono::Utc::now().timestamp();
     let exps = LicenseExpirations::from_product(product, now);
 
@@ -389,7 +412,7 @@ async fn handle_renewal<P: WebhookProvider>(
         Err(e) => return e,
     }
 
-    process_renewal(&conn, provider.provider_name(), &product, &license.id, &license.key, &data.subscription_id)
+    process_renewal(&conn, provider.provider_name(), &product, &license.id, &license.key, &data.subscription_id, data.event_id.as_deref())
 }
 
 async fn handle_cancellation<P: WebhookProvider>(

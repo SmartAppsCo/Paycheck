@@ -104,7 +104,10 @@ pub async fn update_project_member(
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
-    queries::update_project_member(&conn, &path.id, &input)?;
+    let updated = queries::update_project_member(&conn, &path.id, &path.project_id, &input)?;
+    if !updated {
+        return Err(AppError::NotFound("Project member not found".into()));
+    }
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
@@ -140,7 +143,10 @@ pub async fn delete_project_member(
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
-    queries::delete_project_member(&conn, &path.id)?;
+    let deleted = queries::delete_project_member(&conn, &path.id, &path.project_id)?;
+    if !deleted {
+        return Err(AppError::NotFound("Project member not found".into()));
+    }
 
     let (ip, ua) = extract_request_info(&headers);
     queries::create_audit_log(
