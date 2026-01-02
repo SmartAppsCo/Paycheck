@@ -1,10 +1,18 @@
 //! Test utilities and fixtures for Paycheck integration tests
 
+use axum::routing::{get, post};
+use axum::Router;
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
 
 // Re-export the main library crate
 pub use paycheck::crypto::MasterKey;
-pub use paycheck::db::{init_db, queries};
+pub use paycheck::db::{init_audit_db, init_db, queries, AppState};
+pub use paycheck::handlers::public::{
+    deactivate_device, generate_redemption_code, get_license_info, initiate_buy, payment_callback,
+    redeem_with_code, redeem_with_key, validate_license,
+};
 pub use paycheck::jwt;
 pub use paycheck::models::*;
 
@@ -147,4 +155,164 @@ pub fn now() -> i64 {
 /// Get a future timestamp (days from now)
 pub fn future_timestamp(days: i64) -> i64 {
     now() + (days * 86400)
+}
+
+/// Get a past timestamp (days ago)
+pub fn past_timestamp(days: i64) -> i64 {
+    now() - (days * 86400)
+}
+
+/// Create an AppState for testing with in-memory databases
+pub fn create_test_app_state() -> AppState {
+    let master_key = test_master_key();
+
+    let manager = SqliteConnectionManager::memory();
+    let pool = Pool::builder().max_size(4).build(manager).unwrap();
+    {
+        let conn = pool.get().unwrap();
+        init_db(&conn).unwrap();
+    }
+
+    let audit_manager = SqliteConnectionManager::memory();
+    let audit_pool = Pool::builder().max_size(4).build(audit_manager).unwrap();
+    {
+        let conn = audit_pool.get().unwrap();
+        init_audit_db(&conn).unwrap();
+    }
+
+    AppState {
+        db: pool,
+        audit: audit_pool,
+        base_url: "http://localhost:3000".to_string(),
+        audit_log_enabled: false,
+        master_key,
+        success_page_url: "http://localhost:3000/success".to_string(),
+    }
+}
+
+/// Create a Router with all public endpoints (without rate limiting for tests)
+pub fn public_app(state: AppState) -> Router {
+    Router::new()
+        .route("/buy", post(initiate_buy))
+        .route("/callback", get(payment_callback))
+        .route("/redeem", get(redeem_with_code))
+        .route("/redeem/key", post(redeem_with_key))
+        .route("/redeem/code", post(generate_redemption_code))
+        .route("/validate", get(validate_license))
+        .route("/license", get(get_license_info))
+        .route("/devices/deactivate", post(deactivate_device))
+        .with_state(state)
+}
+
+/// Create a test payment session
+pub fn create_test_payment_session(
+    conn: &Connection,
+    product_id: &str,
+    device_id: &str,
+    device_type: DeviceType,
+    customer_id: Option<&str>,
+    redirect_url: Option<&str>,
+) -> PaymentSession {
+    let input = CreatePaymentSession {
+        product_id: product_id.to_string(),
+        device_id: device_id.to_string(),
+        device_type,
+        customer_id: customer_id.map(|s| s.to_string()),
+        redirect_url: redirect_url.map(|s| s.to_string()),
+    };
+    queries::create_payment_session(conn, &input).expect("Failed to create test payment session")
+}
+
+/// Mark a payment session as completed and associate it with a license
+pub fn complete_payment_session(conn: &Connection, session_id: &str, license_key_id: &str) {
+    queries::try_claim_payment_session(conn, session_id)
+        .expect("Failed to claim payment session");
+    queries::set_payment_session_license(conn, session_id, license_key_id)
+        .expect("Failed to set payment session license");
+}
+
+/// Set up Stripe config for an organization
+pub fn setup_stripe_config(conn: &Connection, org_id: &str, master_key: &MasterKey) {
+    let config = StripeConfig {
+        secret_key: "sk_test_xxx".to_string(),
+        publishable_key: "pk_test_xxx".to_string(),
+        webhook_secret: "whsec_test_secret".to_string(),
+    };
+    let config_json = serde_json::to_vec(&config).expect("Failed to serialize Stripe config");
+    let encrypted = master_key
+        .encrypt_private_key(org_id, &config_json)
+        .expect("Failed to encrypt Stripe config");
+    queries::update_organization_payment_configs(conn, org_id, Some(&encrypted), None)
+        .expect("Failed to set Stripe config");
+}
+
+/// Set up LemonSqueezy config for an organization
+pub fn setup_lemonsqueezy_config(conn: &Connection, org_id: &str, master_key: &MasterKey) {
+    let config = LemonSqueezyConfig {
+        api_key: "lskey_test_xxx".to_string(),
+        store_id: "12345".to_string(),
+        webhook_secret: "ls_test_secret".to_string(),
+    };
+    let config_json = serde_json::to_vec(&config).expect("Failed to serialize LS config");
+    let encrypted = master_key
+        .encrypt_private_key(org_id, &config_json)
+        .expect("Failed to encrypt LS config");
+    queries::update_organization_payment_configs(conn, org_id, None, Some(&encrypted))
+        .expect("Failed to set LemonSqueezy config");
+}
+
+/// Set up both Stripe and LemonSqueezy configs for an organization
+pub fn setup_both_payment_configs(conn: &Connection, org_id: &str, master_key: &MasterKey) {
+    let stripe_config = StripeConfig {
+        secret_key: "sk_test_xxx".to_string(),
+        publishable_key: "pk_test_xxx".to_string(),
+        webhook_secret: "whsec_test_secret".to_string(),
+    };
+    let stripe_json =
+        serde_json::to_vec(&stripe_config).expect("Failed to serialize Stripe config");
+    let stripe_encrypted = master_key
+        .encrypt_private_key(org_id, &stripe_json)
+        .expect("Failed to encrypt Stripe config");
+
+    let ls_config = LemonSqueezyConfig {
+        api_key: "lskey_test_xxx".to_string(),
+        store_id: "12345".to_string(),
+        webhook_secret: "ls_test_secret".to_string(),
+    };
+    let ls_json = serde_json::to_vec(&ls_config).expect("Failed to serialize LS config");
+    let ls_encrypted = master_key
+        .encrypt_private_key(org_id, &ls_json)
+        .expect("Failed to encrypt LS config");
+
+    queries::update_organization_payment_configs(
+        conn,
+        org_id,
+        Some(&stripe_encrypted),
+        Some(&ls_encrypted),
+    )
+    .expect("Failed to set payment configs");
+}
+
+/// Create a test license with subscription info (for renewal/cancellation tests)
+pub fn create_test_license_with_subscription(
+    conn: &Connection,
+    project_id: &str,
+    product_id: &str,
+    prefix: &str,
+    expires_at: Option<i64>,
+    provider: &str,
+    subscription_id: &str,
+    master_key: &MasterKey,
+) -> LicenseKey {
+    let input = CreateLicenseKey {
+        customer_id: Some("test-customer".to_string()),
+        expires_at,
+        updates_expires_at: expires_at,
+        payment_provider: Some(provider.to_string()),
+        payment_provider_customer_id: Some("cust_test".to_string()),
+        payment_provider_subscription_id: Some(subscription_id.to_string()),
+        payment_provider_order_id: Some("order_test".to_string()),
+    };
+    queries::create_license_key(conn, project_id, product_id, prefix, &input, master_key)
+        .expect("Failed to create test license with subscription")
 }

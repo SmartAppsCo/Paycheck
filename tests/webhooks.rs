@@ -1,8 +1,11 @@
-//! Webhook signature verification tests
+//! Webhook signature verification and business logic tests
 
 mod common;
 
 use common::*;
+use paycheck::handlers::webhooks::common::{
+    process_cancellation, process_checkout, process_renewal, CheckoutData,
+};
 use paycheck::models::{LemonSqueezyConfig, StripeConfig};
 use paycheck::payments::{LemonSqueezyClient, StripeClient};
 
@@ -435,7 +438,6 @@ fn test_renewal_webhook_replay_prevented() {
 #[test]
 fn test_different_renewal_events_both_processed() {
     use axum::http::StatusCode;
-    use paycheck::handlers::webhooks::common::process_renewal;
 
     let conn = setup_test_db();
     let master_key = test_master_key();
@@ -484,4 +486,1238 @@ fn test_different_renewal_events_both_processed() {
         !msg2.contains("Already processed"),
         "Different event should be processed, not rejected as duplicate"
     );
+}
+
+// ============ Checkout Business Logic Tests ============
+
+#[test]
+fn test_checkout_creates_license_and_device() {
+    use axum::http::StatusCode;
+
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+
+    let org = create_test_org(&conn, "Test Org");
+    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+    // Create payment session
+    let session = create_test_payment_session(
+        &conn,
+        &product.id,
+        "test-device-123",
+        DeviceType::Uuid,
+        Some("cust_test"),
+        None,
+    );
+
+    let checkout_data = CheckoutData {
+        session_id: session.id.clone(),
+        project_id: project.id.clone(),
+        customer_id: Some("cust_stripe".to_string()),
+        subscription_id: Some("sub_123".to_string()),
+        order_id: Some("cs_test_123".to_string()),
+    };
+
+    let (status, msg) = process_checkout(
+        &mut conn,
+        "stripe",
+        &project,
+        &session,
+        &product,
+        &checkout_data,
+        &master_key,
+    );
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(msg, "OK");
+
+    // Verify license was created
+    let updated_session = queries::get_payment_session(&conn, &session.id)
+        .unwrap()
+        .unwrap();
+    assert!(updated_session.completed);
+    assert!(updated_session.license_key_id.is_some());
+
+    // Verify license has correct metadata
+    let license_id = updated_session.license_key_id.unwrap();
+    let license = queries::get_license_key_by_id(&conn, &license_id, &master_key)
+        .unwrap()
+        .unwrap();
+    assert_eq!(license.payment_provider.as_deref(), Some("stripe"));
+    assert_eq!(
+        license.payment_provider_subscription_id.as_deref(),
+        Some("sub_123")
+    );
+    assert_eq!(
+        license.payment_provider_order_id.as_deref(),
+        Some("cs_test_123")
+    );
+
+    // Verify device was created
+    let devices = queries::list_devices_for_license(&conn, &license_id).unwrap();
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].device_id, "test-device-123");
+}
+
+#[test]
+fn test_checkout_concurrent_webhooks_create_only_one_license() {
+    use axum::http::StatusCode;
+
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+
+    let org = create_test_org(&conn, "Test Org");
+    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+    let session = create_test_payment_session(
+        &conn,
+        &product.id,
+        "test-device",
+        DeviceType::Uuid,
+        None,
+        None,
+    );
+
+    let checkout_data = CheckoutData {
+        session_id: session.id.clone(),
+        project_id: project.id.clone(),
+        customer_id: None,
+        subscription_id: None,
+        order_id: None,
+    };
+
+    // First call should succeed
+    let (status1, msg1) = process_checkout(
+        &mut conn,
+        "stripe",
+        &project,
+        &session,
+        &product,
+        &checkout_data,
+        &master_key,
+    );
+    assert_eq!(status1, StatusCode::OK);
+    assert_eq!(msg1, "OK");
+
+    // Second call with same session should be rejected
+    let (status2, msg2) = process_checkout(
+        &mut conn,
+        "stripe",
+        &project,
+        &session,
+        &product,
+        &checkout_data,
+        &master_key,
+    );
+    assert_eq!(status2, StatusCode::OK);
+    assert_eq!(msg2, "Already processed");
+
+    // Verify only one license exists for the session
+    let updated_session = queries::get_payment_session(&conn, &session.id)
+        .unwrap()
+        .unwrap();
+    let license_id = updated_session.license_key_id.unwrap();
+    let devices = queries::list_devices_for_license(&conn, &license_id).unwrap();
+    assert_eq!(devices.len(), 1, "Only one device should exist");
+}
+
+#[test]
+fn test_checkout_creates_license_with_product_expirations() {
+    use axum::http::StatusCode;
+
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+
+    let org = create_test_org(&conn, "Test Org");
+    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+
+    // Create product with specific expirations
+    let input = CreateProduct {
+        name: "Pro Plan".to_string(),
+        tier: "pro".to_string(),
+        license_exp_days: Some(30),  // 30 days
+        updates_exp_days: Some(180), // 180 days
+        activation_limit: 5,
+        device_limit: 3,
+        features: vec![],
+    };
+    let product = queries::create_product(&conn, &project.id, &input).unwrap();
+
+    let session = create_test_payment_session(
+        &conn,
+        &product.id,
+        "test-device",
+        DeviceType::Uuid,
+        None,
+        None,
+    );
+
+    let checkout_data = CheckoutData {
+        session_id: session.id.clone(),
+        project_id: project.id.clone(),
+        customer_id: None,
+        subscription_id: None,
+        order_id: None,
+    };
+
+    let before = now();
+    let (status, _) = process_checkout(
+        &mut conn,
+        "stripe",
+        &project,
+        &session,
+        &product,
+        &checkout_data,
+        &master_key,
+    );
+    assert_eq!(status, StatusCode::OK);
+
+    let updated_session = queries::get_payment_session(&conn, &session.id)
+        .unwrap()
+        .unwrap();
+    let license = queries::get_license_key_by_id(
+        &conn,
+        &updated_session.license_key_id.unwrap(),
+        &master_key,
+    )
+    .unwrap()
+    .unwrap();
+
+    // License should expire in ~30 days
+    let license_exp = license.expires_at.unwrap();
+    assert!(license_exp >= before + (30 * 86400) - 5);
+    assert!(license_exp <= before + (30 * 86400) + 5);
+
+    // Updates should expire in ~180 days
+    let updates_exp = license.updates_expires_at.unwrap();
+    assert!(updates_exp >= before + (180 * 86400) - 5);
+    assert!(updates_exp <= before + (180 * 86400) + 5);
+}
+
+#[test]
+fn test_checkout_perpetual_license() {
+    use axum::http::StatusCode;
+
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+
+    let org = create_test_org(&conn, "Test Org");
+    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+
+    // Create product with no expiration (perpetual)
+    let input = CreateProduct {
+        name: "Lifetime".to_string(),
+        tier: "lifetime".to_string(),
+        license_exp_days: None, // Perpetual
+        updates_exp_days: None,
+        activation_limit: 5,
+        device_limit: 3,
+        features: vec![],
+    };
+    let product = queries::create_product(&conn, &project.id, &input).unwrap();
+
+    let session = create_test_payment_session(
+        &conn,
+        &product.id,
+        "test-device",
+        DeviceType::Uuid,
+        None,
+        None,
+    );
+
+    let checkout_data = CheckoutData {
+        session_id: session.id.clone(),
+        project_id: project.id.clone(),
+        customer_id: None,
+        subscription_id: None,
+        order_id: None,
+    };
+
+    let (status, _) = process_checkout(
+        &mut conn,
+        "stripe",
+        &project,
+        &session,
+        &product,
+        &checkout_data,
+        &master_key,
+    );
+    assert_eq!(status, StatusCode::OK);
+
+    let updated_session = queries::get_payment_session(&conn, &session.id)
+        .unwrap()
+        .unwrap();
+    let license = queries::get_license_key_by_id(
+        &conn,
+        &updated_session.license_key_id.unwrap(),
+        &master_key,
+    )
+    .unwrap()
+    .unwrap();
+
+    assert!(license.expires_at.is_none(), "Perpetual license has no expiration");
+    assert!(
+        license.updates_expires_at.is_none(),
+        "Perpetual license has no updates expiration"
+    );
+}
+
+// ============ Renewal Business Logic Tests ============
+
+#[test]
+fn test_renewal_extends_license_expiration() {
+    use axum::http::StatusCode;
+
+    let conn = setup_test_db();
+    let master_key = test_master_key();
+
+    let org = create_test_org(&conn, "Test Org");
+    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+    // Create license expiring soon
+    let initial_exp = now() + (7 * 86400); // 7 days from now
+    let license = create_test_license(
+        &conn,
+        &project.id,
+        &product.id,
+        &project.license_key_prefix,
+        Some(initial_exp),
+        &master_key,
+    );
+
+    let (status, _) = process_renewal(
+        &conn,
+        "stripe",
+        &product,
+        &license.id,
+        &license.key,
+        "sub_123",
+        Some("invoice_001"),
+    );
+    assert_eq!(status, StatusCode::OK);
+
+    let updated = queries::get_license_key_by_id(&conn, &license.id, &master_key)
+        .unwrap()
+        .unwrap();
+    let new_exp = updated.expires_at.unwrap();
+
+    // Product has 365-day license_exp_days, so new exp should be ~365 days from now
+    let expected_min = now() + (365 * 86400) - 10;
+    let expected_max = now() + (365 * 86400) + 10;
+    assert!(
+        new_exp >= expected_min && new_exp <= expected_max,
+        "License should be extended by product expiration (365 days), got {} days",
+        (new_exp - now()) / 86400
+    );
+}
+
+#[test]
+fn test_renewal_without_event_id_always_processes() {
+    use axum::http::StatusCode;
+
+    let conn = setup_test_db();
+    let master_key = test_master_key();
+
+    let org = create_test_org(&conn, "Test Org");
+    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+    let license = create_test_license(
+        &conn,
+        &project.id,
+        &product.id,
+        &project.license_key_prefix,
+        Some(now() + 86400),
+        &master_key,
+    );
+
+    // First call without event_id
+    let (status1, msg1) = process_renewal(
+        &conn,
+        "stripe",
+        &product,
+        &license.id,
+        &license.key,
+        "sub_123",
+        None, // No event_id - no replay prevention
+    );
+    assert_eq!(status1, StatusCode::OK);
+    assert_eq!(msg1, "OK");
+
+    // Second call also processes (no replay prevention)
+    let (status2, msg2) = process_renewal(
+        &conn,
+        "stripe",
+        &product,
+        &license.id,
+        &license.key,
+        "sub_123",
+        None,
+    );
+    assert_eq!(status2, StatusCode::OK);
+    assert_eq!(msg2, "OK");
+}
+
+// ============ Cancellation Business Logic Tests ============
+
+#[test]
+fn test_cancellation_returns_ok_without_modifying_license() {
+    use axum::http::StatusCode;
+
+    let conn = setup_test_db();
+    let master_key = test_master_key();
+
+    let org = create_test_org(&conn, "Test Org");
+    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+    let original_exp = now() + (30 * 86400);
+    let license = create_test_license(
+        &conn,
+        &project.id,
+        &product.id,
+        &project.license_key_prefix,
+        Some(original_exp),
+        &master_key,
+    );
+
+    let (status, msg) = process_cancellation("stripe", &license.key, license.expires_at, "sub_123");
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(msg, "OK");
+
+    // Verify license was NOT modified
+    let unchanged = queries::get_license_key_by_id(&conn, &license.id, &master_key)
+        .unwrap()
+        .unwrap();
+    assert_eq!(unchanged.expires_at, Some(original_exp));
+    assert!(!unchanged.revoked);
+}
+
+// ============ Stripe HTTP Handler Tests ============
+
+use axum::{body::Body, http::Request, routing::post, Router};
+use paycheck::handlers::webhooks::{handle_lemonsqueezy_webhook, handle_stripe_webhook};
+use serde_json::json;
+use tower::ServiceExt;
+
+fn webhook_app(state: paycheck::db::AppState) -> Router {
+    Router::new()
+        .route("/webhook/stripe", post(handle_stripe_webhook))
+        .route("/webhook/lemonsqueezy", post(handle_lemonsqueezy_webhook))
+        .with_state(state)
+}
+
+#[tokio::test]
+async fn test_stripe_webhook_checkout_completed_creates_license() {
+    let state = create_test_app_state();
+    let master_key = test_master_key();
+
+    let session_id: String;
+    let project_id: String;
+
+    {
+        let conn = state.db.get().unwrap();
+        let org = create_test_org(&conn, "Test Org");
+        setup_stripe_config(&conn, &org.id, &master_key);
+
+        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+        let session = create_test_payment_session(
+            &conn,
+            &product.id,
+            "test-device",
+            DeviceType::Uuid,
+            None,
+            None,
+        );
+
+        session_id = session.id.clone();
+        project_id = project.id.clone();
+    }
+
+    let payload = json!({
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_test_123",
+                "payment_status": "paid",
+                "customer": "cus_test",
+                "subscription": "sub_test_123",
+                "metadata": {
+                    "paycheck_session_id": session_id,
+                    "project_id": project_id
+                }
+            }
+        }
+    });
+    let payload_bytes = serde_json::to_vec(&payload).unwrap();
+    let timestamp = current_timestamp();
+    let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+    let signature_header = format!("t={},v1={}", timestamp, signature);
+
+    let app = webhook_app(state.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/stripe")
+                .header("content-type", "application/json")
+                .header("stripe-signature", signature_header)
+                .body(Body::from(payload_bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    // Verify license was created
+    let conn = state.db.get().unwrap();
+    let session = queries::get_payment_session(&conn, &session_id)
+        .unwrap()
+        .unwrap();
+    assert!(session.completed);
+    assert!(session.license_key_id.is_some());
+
+    let license =
+        queries::get_license_key_by_id(&conn, &session.license_key_id.unwrap(), &master_key)
+            .unwrap()
+            .unwrap();
+    assert_eq!(license.payment_provider.as_deref(), Some("stripe"));
+    assert_eq!(
+        license.payment_provider_subscription_id.as_deref(),
+        Some("sub_test_123")
+    );
+}
+
+#[tokio::test]
+async fn test_stripe_webhook_missing_signature_returns_error() {
+    let state = create_test_app_state();
+
+    let payload = json!({
+        "type": "checkout.session.completed",
+        "data": {"object": {}}
+    });
+
+    let app = webhook_app(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/stripe")
+                .header("content-type", "application/json")
+                // No stripe-signature header!
+                .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_stripe_webhook_invalid_signature_returns_unauthorized() {
+    let state = create_test_app_state();
+    let master_key = test_master_key();
+
+    let session_id: String;
+    let project_id: String;
+
+    {
+        let conn = state.db.get().unwrap();
+        let org = create_test_org(&conn, "Test Org");
+        setup_stripe_config(&conn, &org.id, &master_key);
+        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let session = create_test_payment_session(
+            &conn,
+            &product.id,
+            "test-device",
+            DeviceType::Uuid,
+            None,
+            None,
+        );
+        session_id = session.id.clone();
+        project_id = project.id.clone();
+    }
+
+    let payload = json!({
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_test_123",
+                "payment_status": "paid",
+                "metadata": {
+                    "paycheck_session_id": session_id,
+                    "project_id": project_id
+                }
+            }
+        }
+    });
+    let payload_bytes = serde_json::to_vec(&payload).unwrap();
+    let timestamp = current_timestamp();
+    // Sign with wrong secret
+    let signature = compute_stripe_signature(&payload_bytes, "wrong_secret", &timestamp);
+    let signature_header = format!("t={},v1={}", timestamp, signature);
+
+    let app = webhook_app(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/stripe")
+                .header("content-type", "application/json")
+                .header("stripe-signature", signature_header)
+                .body(Body::from(payload_bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_stripe_webhook_unpaid_checkout_ignored() {
+    let state = create_test_app_state();
+    let master_key = test_master_key();
+
+    let session_id: String;
+    let project_id: String;
+
+    {
+        let conn = state.db.get().unwrap();
+        let org = create_test_org(&conn, "Test Org");
+        setup_stripe_config(&conn, &org.id, &master_key);
+        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let session = create_test_payment_session(
+            &conn,
+            &product.id,
+            "test-device",
+            DeviceType::Uuid,
+            None,
+            None,
+        );
+        session_id = session.id.clone();
+        project_id = project.id.clone();
+    }
+
+    let payload = json!({
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_test_123",
+                "payment_status": "unpaid", // NOT paid
+                "metadata": {
+                    "paycheck_session_id": session_id,
+                    "project_id": project_id
+                }
+            }
+        }
+    });
+    let payload_bytes = serde_json::to_vec(&payload).unwrap();
+    let timestamp = current_timestamp();
+    let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+    let signature_header = format!("t={},v1={}", timestamp, signature);
+
+    let app = webhook_app(state.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/stripe")
+                .header("content-type", "application/json")
+                .header("stripe-signature", signature_header)
+                .body(Body::from(payload_bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Returns OK but event is ignored
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    // Session should NOT be completed
+    let conn = state.db.get().unwrap();
+    let session = queries::get_payment_session(&conn, &session_id)
+        .unwrap()
+        .unwrap();
+    assert!(!session.completed);
+}
+
+#[tokio::test]
+async fn test_stripe_webhook_invoice_paid_extends_license() {
+    let state = create_test_app_state();
+    let master_key = test_master_key();
+
+    let license_id: String;
+    let original_exp: i64;
+
+    {
+        let conn = state.db.get().unwrap();
+        let org = create_test_org(&conn, "Test Org");
+        setup_stripe_config(&conn, &org.id, &master_key);
+        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+        // Create license with subscription
+        original_exp = now() + (7 * 86400);
+        let license = create_test_license_with_subscription(
+            &conn,
+            &project.id,
+            &product.id,
+            &project.license_key_prefix,
+            Some(original_exp),
+            "stripe",
+            "sub_test_renewal",
+            &master_key,
+        );
+        license_id = license.id.clone();
+    }
+
+    let payload = json!({
+        "type": "invoice.paid",
+        "data": {
+            "object": {
+                "id": "in_test_123",
+                "subscription": "sub_test_renewal",
+                "billing_reason": "subscription_cycle",
+                "status": "paid"
+            }
+        }
+    });
+    let payload_bytes = serde_json::to_vec(&payload).unwrap();
+    let timestamp = current_timestamp();
+    let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+    let signature_header = format!("t={},v1={}", timestamp, signature);
+
+    let app = webhook_app(state.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/stripe")
+                .header("content-type", "application/json")
+                .header("stripe-signature", signature_header)
+                .body(Body::from(payload_bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    // Verify license was extended
+    let conn = state.db.get().unwrap();
+    let license = queries::get_license_key_by_id(&conn, &license_id, &master_key)
+        .unwrap()
+        .unwrap();
+    let new_exp = license.expires_at.unwrap();
+    assert!(
+        new_exp > original_exp,
+        "License should be extended from {} to {}",
+        original_exp,
+        new_exp
+    );
+}
+
+#[tokio::test]
+async fn test_stripe_webhook_subscription_deleted_returns_ok() {
+    let state = create_test_app_state();
+    let master_key = test_master_key();
+
+    let license_id: String;
+    let original_exp: i64;
+
+    {
+        let conn = state.db.get().unwrap();
+        let org = create_test_org(&conn, "Test Org");
+        setup_stripe_config(&conn, &org.id, &master_key);
+        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+        original_exp = now() + (30 * 86400);
+        let license = create_test_license_with_subscription(
+            &conn,
+            &project.id,
+            &product.id,
+            &project.license_key_prefix,
+            Some(original_exp),
+            "stripe",
+            "sub_cancel_test",
+            &master_key,
+        );
+        license_id = license.id.clone();
+    }
+
+    let payload = json!({
+        "type": "customer.subscription.deleted",
+        "data": {
+            "object": {
+                "id": "sub_cancel_test",
+                "customer": "cus_test",
+                "status": "canceled"
+            }
+        }
+    });
+    let payload_bytes = serde_json::to_vec(&payload).unwrap();
+    let timestamp = current_timestamp();
+    let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+    let signature_header = format!("t={},v1={}", timestamp, signature);
+
+    let app = webhook_app(state.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/stripe")
+                .header("content-type", "application/json")
+                .header("stripe-signature", signature_header)
+                .body(Body::from(payload_bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    // License should be unchanged (expires naturally)
+    let conn = state.db.get().unwrap();
+    let license = queries::get_license_key_by_id(&conn, &license_id, &master_key)
+        .unwrap()
+        .unwrap();
+    assert_eq!(license.expires_at, Some(original_exp));
+    assert!(!license.revoked);
+}
+
+#[tokio::test]
+async fn test_stripe_webhook_unknown_event_ignored() {
+    let state = create_test_app_state();
+    let master_key = test_master_key();
+
+    {
+        let conn = state.db.get().unwrap();
+        let org = create_test_org(&conn, "Test Org");
+        setup_stripe_config(&conn, &org.id, &master_key);
+    }
+
+    let payload = json!({
+        "type": "payment_intent.created",
+        "data": {"object": {"id": "pi_test"}}
+    });
+    let payload_bytes = serde_json::to_vec(&payload).unwrap();
+    let timestamp = current_timestamp();
+    let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+    let signature_header = format!("t={},v1={}", timestamp, signature);
+
+    let app = webhook_app(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/stripe")
+                .header("content-type", "application/json")
+                .header("stripe-signature", signature_header)
+                .body(Body::from(payload_bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Unknown events are ignored with 200 OK
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+}
+
+// ============ LemonSqueezy HTTP Handler Tests ============
+
+#[tokio::test]
+async fn test_lemonsqueezy_webhook_order_created_creates_license() {
+    let state = create_test_app_state();
+    let master_key = test_master_key();
+
+    let session_id: String;
+    let project_id: String;
+
+    {
+        let conn = state.db.get().unwrap();
+        let org = create_test_org(&conn, "Test Org");
+        setup_lemonsqueezy_config(&conn, &org.id, &master_key);
+
+        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+        let session = create_test_payment_session(
+            &conn,
+            &product.id,
+            "test-device-ls",
+            DeviceType::Machine,
+            None,
+            None,
+        );
+
+        session_id = session.id.clone();
+        project_id = project.id.clone();
+    }
+
+    let payload = json!({
+        "meta": {
+            "event_name": "order_created",
+            "custom_data": {
+                "paycheck_session_id": session_id,
+                "project_id": project_id
+            }
+        },
+        "data": {
+            "id": "order_123",
+            "attributes": {
+                "status": "paid",
+                "customer_id": 12345,
+                "first_order_item": {
+                    "subscription_id": 67890
+                }
+            }
+        }
+    });
+    let payload_bytes = serde_json::to_vec(&payload).unwrap();
+    let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_test_secret");
+
+    let app = webhook_app(state.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/lemonsqueezy")
+                .header("content-type", "application/json")
+                .header("x-signature", signature)
+                .body(Body::from(payload_bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    // Verify license was created
+    let conn = state.db.get().unwrap();
+    let session = queries::get_payment_session(&conn, &session_id)
+        .unwrap()
+        .unwrap();
+    assert!(session.completed);
+    assert!(session.license_key_id.is_some());
+
+    let license =
+        queries::get_license_key_by_id(&conn, &session.license_key_id.unwrap(), &master_key)
+            .unwrap()
+            .unwrap();
+    assert_eq!(license.payment_provider.as_deref(), Some("lemonsqueezy"));
+}
+
+#[tokio::test]
+async fn test_lemonsqueezy_webhook_missing_signature_returns_error() {
+    let state = create_test_app_state();
+
+    let payload = json!({
+        "meta": {"event_name": "order_created"},
+        "data": {"id": "123", "attributes": {}}
+    });
+
+    let app = webhook_app(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/lemonsqueezy")
+                .header("content-type", "application/json")
+                // No x-signature header!
+                .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_lemonsqueezy_webhook_invalid_signature_returns_unauthorized() {
+    let state = create_test_app_state();
+    let master_key = test_master_key();
+
+    {
+        let conn = state.db.get().unwrap();
+        let org = create_test_org(&conn, "Test Org");
+        setup_lemonsqueezy_config(&conn, &org.id, &master_key);
+        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let session = create_test_payment_session(
+            &conn,
+            &product.id,
+            "test-device",
+            DeviceType::Uuid,
+            None,
+            None,
+        );
+
+        // Use session_id and project_id in payload
+        let payload = json!({
+            "meta": {
+                "event_name": "order_created",
+                "custom_data": {
+                    "paycheck_session_id": session.id,
+                    "project_id": project.id
+                }
+            },
+            "data": {
+                "id": "order_123",
+                "attributes": {
+                    "status": "paid"
+                }
+            }
+        });
+        let payload_bytes = serde_json::to_vec(&payload).unwrap();
+        // Sign with wrong secret
+        let signature = compute_lemonsqueezy_signature(&payload_bytes, "wrong_secret");
+
+        let app = webhook_app(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/webhook/lemonsqueezy")
+                    .header("content-type", "application/json")
+                    .header("x-signature", signature)
+                    .body(Body::from(payload_bytes))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+    }
+}
+
+#[tokio::test]
+async fn test_lemonsqueezy_webhook_subscription_payment_extends_license() {
+    let state = create_test_app_state();
+    let master_key = test_master_key();
+
+    let license_id: String;
+    let original_exp: i64;
+
+    {
+        let conn = state.db.get().unwrap();
+        let org = create_test_org(&conn, "Test Org");
+        setup_lemonsqueezy_config(&conn, &org.id, &master_key);
+        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+        original_exp = now() + (7 * 86400);
+        let license = create_test_license_with_subscription(
+            &conn,
+            &project.id,
+            &product.id,
+            &project.license_key_prefix,
+            Some(original_exp),
+            "lemonsqueezy",
+            "12345", // subscription_id as string
+            &master_key,
+        );
+        license_id = license.id.clone();
+    }
+
+    let payload = json!({
+        "meta": {
+            "event_name": "subscription_payment_success"
+        },
+        "data": {
+            "id": "invoice_ls_123",
+            "attributes": {
+                "subscription_id": 12345,
+                "customer_id": 67890,
+                "status": "paid"
+            }
+        }
+    });
+    let payload_bytes = serde_json::to_vec(&payload).unwrap();
+    let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_test_secret");
+
+    let app = webhook_app(state.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/lemonsqueezy")
+                .header("content-type", "application/json")
+                .header("x-signature", signature)
+                .body(Body::from(payload_bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    // Verify license was extended
+    let conn = state.db.get().unwrap();
+    let license = queries::get_license_key_by_id(&conn, &license_id, &master_key)
+        .unwrap()
+        .unwrap();
+    let new_exp = license.expires_at.unwrap();
+    assert!(new_exp > original_exp);
+}
+
+#[tokio::test]
+async fn test_lemonsqueezy_webhook_subscription_cancelled_returns_ok() {
+    let state = create_test_app_state();
+    let master_key = test_master_key();
+
+    let license_id: String;
+    let original_exp: i64;
+
+    {
+        let conn = state.db.get().unwrap();
+        let org = create_test_org(&conn, "Test Org");
+        setup_lemonsqueezy_config(&conn, &org.id, &master_key);
+        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+        original_exp = now() + (30 * 86400);
+        let license = create_test_license_with_subscription(
+            &conn,
+            &project.id,
+            &product.id,
+            &project.license_key_prefix,
+            Some(original_exp),
+            "lemonsqueezy",
+            "sub_ls_cancel",
+            &master_key,
+        );
+        license_id = license.id.clone();
+    }
+
+    let payload = json!({
+        "meta": {
+            "event_name": "subscription_cancelled"
+        },
+        "data": {
+            "id": "sub_ls_cancel",
+            "attributes": {
+                "customer_id": 12345,
+                "status": "cancelled"
+            }
+        }
+    });
+    let payload_bytes = serde_json::to_vec(&payload).unwrap();
+    let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_test_secret");
+
+    let app = webhook_app(state.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/lemonsqueezy")
+                .header("content-type", "application/json")
+                .header("x-signature", signature)
+                .body(Body::from(payload_bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    // License should be unchanged
+    let conn = state.db.get().unwrap();
+    let license = queries::get_license_key_by_id(&conn, &license_id, &master_key)
+        .unwrap()
+        .unwrap();
+    assert_eq!(license.expires_at, Some(original_exp));
+}
+
+#[tokio::test]
+async fn test_webhook_provider_not_configured_returns_ok() {
+    let state = create_test_app_state();
+    let master_key = test_master_key();
+
+    let session_id: String;
+    let project_id: String;
+
+    {
+        let conn = state.db.get().unwrap();
+        let org = create_test_org(&conn, "Test Org");
+        // NO payment config set!
+        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let session = create_test_payment_session(
+            &conn,
+            &product.id,
+            "test-device",
+            DeviceType::Uuid,
+            None,
+            None,
+        );
+        session_id = session.id.clone();
+        project_id = project.id.clone();
+    }
+
+    let payload = json!({
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_test_123",
+                "payment_status": "paid",
+                "metadata": {
+                    "paycheck_session_id": session_id,
+                    "project_id": project_id
+                }
+            }
+        }
+    });
+    let payload_bytes = serde_json::to_vec(&payload).unwrap();
+    let timestamp = current_timestamp();
+    let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+    let signature_header = format!("t={},v1={}", timestamp, signature);
+
+    let app = webhook_app(state.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/stripe")
+                .header("content-type", "application/json")
+                .header("stripe-signature", signature_header)
+                .body(Body::from(payload_bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Returns OK with "not configured" message (graceful degradation)
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    // Session should NOT be completed
+    let conn = state.db.get().unwrap();
+    let session = queries::get_payment_session(&conn, &session_id)
+        .unwrap()
+        .unwrap();
+    assert!(!session.completed);
 }
