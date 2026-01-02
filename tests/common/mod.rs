@@ -69,8 +69,8 @@ pub fn create_test_org_member(
     (member, api_key)
 }
 
-/// Create a test project with auto-generated keypair (unencrypted - for tests that don't need encryption)
-pub fn create_test_project(conn: &Connection, org_id: &str, name: &str) -> Project {
+/// Create a test project with auto-generated keypair and encrypted private key
+pub fn create_test_project(conn: &Connection, org_id: &str, name: &str, master_key: &MasterKey) -> Project {
     let input = CreateProject {
         name: name.to_string(),
         domain: format!("{}.example.com", name.to_lowercase().replace(' ', "-")),
@@ -78,41 +78,8 @@ pub fn create_test_project(conn: &Connection, org_id: &str, name: &str) -> Proje
         allowed_redirect_urls: vec![],
     };
     let (private_key, public_key) = jwt::generate_keypair();
-    queries::create_project(conn, org_id, &input, &private_key, &public_key)
+    queries::create_project(conn, org_id, &input, &private_key, &public_key, master_key)
         .expect("Failed to create test project")
-}
-
-/// Create a test project with encrypted private key (for tests that need to decrypt the key)
-pub fn create_test_project_encrypted(
-    conn: &Connection,
-    org_id: &str,
-    name: &str,
-    master_key: &MasterKey,
-) -> Project {
-    let input = CreateProject {
-        name: name.to_string(),
-        domain: format!("{}.example.com", name.to_lowercase().replace(' ', "-")),
-        license_key_prefix: "TEST".to_string(),
-        allowed_redirect_urls: vec![],
-    };
-    let (private_key, public_key) = jwt::generate_keypair();
-
-    // Need to create with a temp ID first, then update with encrypted key
-    let project = queries::create_project(conn, org_id, &input, &private_key, &public_key)
-        .expect("Failed to create test project");
-
-    // Now encrypt with the actual project ID and update
-    let encrypted_private_key = master_key
-        .encrypt_private_key(&project.id, &private_key)
-        .expect("Failed to encrypt private key");
-
-    queries::update_project_private_key(conn, &project.id, &encrypted_private_key)
-        .expect("Failed to update project private key");
-
-    Project {
-        private_key: encrypted_private_key,
-        ..project
-    }
 }
 
 /// Create a test product
@@ -197,7 +164,7 @@ impl TestDataBuilder {
         let org = create_test_org(&self.conn, "Test Org");
         let (member, member_api_key) =
             create_test_org_member(&self.conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-        let project = create_test_project(&self.conn, &org.id, "Test Project");
+        let project = create_test_project(&self.conn, &org.id, "Test Project", &self.master_key);
         let product = create_test_product(&self.conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(&self.conn, &project.id, &product.id, &project.license_key_prefix, Some(future_timestamp(365)), &self.master_key);
 

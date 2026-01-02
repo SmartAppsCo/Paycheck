@@ -335,7 +335,7 @@ fn test_renewal_webhook_replay_prevented() {
 
     // Create test hierarchy
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project");
+    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
 
     // Create license with short expiration (7 days from now)
@@ -424,7 +424,7 @@ fn test_different_renewal_events_both_processed() {
 
     // Create test hierarchy
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project");
+    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
 
     let initial_expiration = now() + (7 * 86400);

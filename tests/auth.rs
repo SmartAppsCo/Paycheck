@@ -571,7 +571,7 @@ mod org_member_auth {
             create_test_org_member(&conn, &org1.id, "user@org1.com", OrgMemberRole::Owner);
 
         // Create a project in org2
-        let project2 = create_test_project(&conn, &org2.id, "Org2 Project");
+        let project2 = create_test_project(&conn, &org2.id, "Org2 Project", &state.master_key);
 
         // Try to access org2's project with org1's key
         let response = app
@@ -855,7 +855,7 @@ mod project_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         // Create a member with no project membership
         let (_member, member_key) =
@@ -882,7 +882,7 @@ mod project_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
         let (_member, member_key) =
             create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
@@ -914,7 +914,7 @@ mod project_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         let (member, member_key) =
             create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
@@ -947,7 +947,7 @@ mod project_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         let (member, member_key) =
             create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
@@ -982,7 +982,7 @@ mod project_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         let (member, member_key) =
             create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
@@ -1020,7 +1020,7 @@ mod project_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         let (member, member_key) =
             create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
@@ -1057,7 +1057,7 @@ mod project_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         let (member, member_key) =
             create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
@@ -1095,7 +1095,7 @@ mod project_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         let (member, member_key) =
             create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
@@ -1128,7 +1128,7 @@ mod project_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         let (member, member_key) =
             create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
@@ -1165,7 +1165,7 @@ mod project_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         // Admin org member - no project_members entry needed
         let (_admin, admin_key) =
@@ -1198,7 +1198,7 @@ mod project_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         let (_owner, owner_key) =
             create_test_org_member(&conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
@@ -1230,7 +1230,7 @@ mod project_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         let (_admin, admin_key) =
             create_test_org_member(&conn, &org.id, "admin@org.com", OrgMemberRole::Admin);
@@ -1264,8 +1264,8 @@ mod cross_project_boundaries {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project1 = create_test_project(&conn, &org.id, "Project 1");
-        let project2 = create_test_project(&conn, &org.id, "Project 2");
+        let project1 = create_test_project(&conn, &org.id, "Project 1", &state.master_key);
+        let project2 = create_test_project(&conn, &org.id, "Project 2", &state.master_key);
 
         // Create product in project1
         let product = create_test_product(&conn, &project1.id, "Product 1", "pro");
@@ -1299,8 +1299,8 @@ mod cross_project_boundaries {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project1 = create_test_project(&conn, &org.id, "Project 1");
-        let project2 = create_test_project(&conn, &org.id, "Project 2");
+        let project1 = create_test_project(&conn, &org.id, "Project 1", &state.master_key);
+        let project2 = create_test_project(&conn, &org.id, "Project 2", &state.master_key);
 
         let product = create_test_product(&conn, &project1.id, "Product 1", "pro");
         let license = create_test_license(&conn, &project1.id, &product.id, &project1.license_key_prefix, None, &state.master_key);
@@ -1333,8 +1333,8 @@ mod cross_project_boundaries {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project1 = create_test_project(&conn, &org.id, "Project 1");
-        let project2 = create_test_project(&conn, &org.id, "Project 2");
+        let project1 = create_test_project(&conn, &org.id, "Project 1", &state.master_key);
+        let project2 = create_test_project(&conn, &org.id, "Project 2", &state.master_key);
 
         let (member, member_key) =
             create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
@@ -1390,7 +1390,7 @@ mod license_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
         let _product = create_test_product(&conn, &project.id, "Pro", "pro");
 
         let (member, member_key) =
@@ -1427,7 +1427,7 @@ mod license_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         let (member, member_key) =
             create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
@@ -1462,7 +1462,7 @@ mod license_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
         let product = create_test_product(&conn, &project.id, "Pro", "pro");
         let license = create_test_license(&conn, &project.id, &product.id, &project.license_key_prefix, None, &state.master_key);
 
@@ -1499,7 +1499,7 @@ mod license_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
         let product = create_test_product(&conn, &project.id, "Pro", "pro");
         let license = create_test_license(&conn, &project.id, &product.id, &project.license_key_prefix, None, &state.master_key);
 
@@ -1545,7 +1545,7 @@ mod device_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
         let product = create_test_product(&conn, &project.id, "Pro", "pro");
         let license = create_test_license(&conn, &project.id, &product.id, &project.license_key_prefix, None, &state.master_key);
         let device = create_test_device(&conn, &license.id, "device-123", DeviceType::Uuid);
@@ -1583,7 +1583,7 @@ mod device_permissions {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
         let product = create_test_product(&conn, &project.id, "Pro", "pro");
         let license = create_test_license(&conn, &project.id, &product.id, &project.license_key_prefix, None, &state.master_key);
         let device = create_test_device(&conn, &license.id, "device-123", DeviceType::Uuid);
@@ -1629,7 +1629,7 @@ mod project_member_management {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         let (member, member_key) =
             create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
@@ -1670,7 +1670,7 @@ mod project_member_management {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         let (member, member_key) =
             create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
@@ -1711,7 +1711,7 @@ mod project_member_management {
         let conn = state.db.get().unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project");
+        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
 
         let (member, member_key) =
             create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);

@@ -516,21 +516,25 @@ pub fn delete_org_member(conn: &Connection, id: &str) -> Result<bool> {
 
 // ============ Projects ============
 
+/// Create a project, encrypting the private key with envelope encryption.
+/// The project ID is generated internally and used as the encryption context.
 pub fn create_project(
     conn: &Connection,
     org_id: &str,
     input: &CreateProject,
     private_key: &[u8],
     public_key: &str,
+    master_key: &MasterKey,
 ) -> Result<Project> {
     let id = gen_id();
     let now = now();
     let redirect_urls_json = serde_json::to_string(&input.allowed_redirect_urls)?;
+    let encrypted_private_key = master_key.encrypt_private_key(&id, private_key)?;
 
     conn.execute(
         "INSERT INTO projects (id, org_id, name, domain, license_key_prefix, private_key, public_key, allowed_redirect_urls, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![&id, org_id, &input.name, &input.domain, &input.license_key_prefix, private_key, public_key, &redirect_urls_json, now, now],
+        params![&id, org_id, &input.name, &input.domain, &input.license_key_prefix, &encrypted_private_key, public_key, &redirect_urls_json, now, now],
     )?;
 
     Ok(Project {
@@ -539,39 +543,7 @@ pub fn create_project(
         name: input.name.clone(),
         domain: input.domain.clone(),
         license_key_prefix: input.license_key_prefix.clone(),
-        private_key: private_key.to_vec(),
-        public_key: public_key.to_string(),
-        allowed_redirect_urls: input.allowed_redirect_urls.clone(),
-        created_at: now,
-        updated_at: now,
-    })
-}
-
-/// Create a project with a specific ID (used when ID is needed before creation for encryption)
-pub fn create_project_with_id(
-    conn: &Connection,
-    id: &str,
-    org_id: &str,
-    input: &CreateProject,
-    private_key: &[u8],
-    public_key: &str,
-) -> Result<Project> {
-    let now = now();
-    let redirect_urls_json = serde_json::to_string(&input.allowed_redirect_urls)?;
-
-    conn.execute(
-        "INSERT INTO projects (id, org_id, name, domain, license_key_prefix, private_key, public_key, allowed_redirect_urls, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![id, org_id, &input.name, &input.domain, &input.license_key_prefix, private_key, public_key, &redirect_urls_json, now, now],
-    )?;
-
-    Ok(Project {
-        id: id.to_string(),
-        org_id: org_id.to_string(),
-        name: input.name.clone(),
-        domain: input.domain.clone(),
-        license_key_prefix: input.license_key_prefix.clone(),
-        private_key: private_key.to_vec(),
+        private_key: encrypted_private_key,
         public_key: public_key.to_string(),
         allowed_redirect_urls: input.allowed_redirect_urls.clone(),
         created_at: now,

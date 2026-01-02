@@ -132,29 +132,16 @@ fn test_project_private_key_rotation_works() {
     // Create org and project with old key
     let org = create_test_org(&conn, "Test Org");
 
-    // Create project - need to encrypt private key with old_key
+    // Create project - encryption happens internally with correct project ID
     let (private_key_bytes, public_key) = jwt::generate_keypair();
-    let encrypted_private_key = old_key
-        .encrypt_private_key("temp", &private_key_bytes)
-        .unwrap();
-
     let input = CreateProject {
         name: "Test Project".to_string(),
         domain: "test.example.com".to_string(),
         license_key_prefix: "TEST".to_string(),
         allowed_redirect_urls: vec![],
     };
-
-    // Insert project with encrypted key
-    let project = queries::create_project(&conn, &org.id, &input, &encrypted_private_key, &public_key)
+    let project = queries::create_project(&conn, &org.id, &input, &private_key_bytes, &public_key, &old_key)
         .expect("Failed to create project");
-
-    // Re-encrypt with the correct project ID (the encryption was done with "temp")
-    // Let's fix this by directly updating with properly encrypted key
-    let proper_encrypted = old_key
-        .encrypt_private_key(&project.id, &private_key_bytes)
-        .unwrap();
-    queries::update_project_private_key(&conn, &project.id, &proper_encrypted).unwrap();
 
     // Verify we can decrypt with old key
     let fetched = queries::get_project_by_id(&conn, &project.id)
@@ -289,7 +276,7 @@ fn test_license_key_unreadable_without_rotation() {
     // Create org, project, product with old key
     let org = create_test_org(&conn, "Test Org");
 
-    // Create project with properly encrypted private key
+    // Create project - encryption happens internally with correct project ID
     let (private_key_bytes, public_key) = jwt::generate_keypair();
     let input = CreateProject {
         name: "Test Project".to_string(),
@@ -297,14 +284,8 @@ fn test_license_key_unreadable_without_rotation() {
         license_key_prefix: "TEST".to_string(),
         allowed_redirect_urls: vec![],
     };
-    let project = queries::create_project(&conn, &org.id, &input, &private_key_bytes, &public_key)
+    let project = queries::create_project(&conn, &org.id, &input, &private_key_bytes, &public_key, &old_key)
         .expect("Failed to create project");
-
-    // Re-encrypt private key properly with old_key
-    let encrypted_private = old_key
-        .encrypt_private_key(&project.id, &private_key_bytes)
-        .unwrap();
-    queries::update_project_private_key(&conn, &project.id, &encrypted_private).unwrap();
 
     let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
 
@@ -375,10 +356,8 @@ fn test_license_key_should_be_readable_after_rotation() {
         license_key_prefix: "TEST".to_string(),
         allowed_redirect_urls: vec![],
     };
-    let project = queries::create_project(&conn, &org.id, &input, &private_key_bytes, &public_key)
+    let project = queries::create_project(&conn, &org.id, &input, &private_key_bytes, &public_key, &old_key)
         .unwrap();
-    let encrypted_private = old_key.encrypt_private_key(&project.id, &private_key_bytes).unwrap();
-    queries::update_project_private_key(&conn, &project.id, &encrypted_private).unwrap();
 
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(

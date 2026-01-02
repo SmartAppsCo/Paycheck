@@ -11,7 +11,7 @@ fn test_create_device() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
 
@@ -30,7 +30,7 @@ fn test_create_device_machine_type() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
 
@@ -56,7 +56,7 @@ fn test_create_device_without_name() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
 
@@ -81,7 +81,7 @@ fn test_get_device_by_jti() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
     let created = create_test_device(&conn, &license.id, "device-123", DeviceType::Uuid);
@@ -110,7 +110,7 @@ fn test_get_device_for_license() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
     let created = create_test_device(&conn, &license.id, "device-123", DeviceType::Uuid);
@@ -129,7 +129,7 @@ fn test_get_device_for_license_wrong_device_id() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
     create_test_device(&conn, &license.id, "device-123", DeviceType::Uuid);
@@ -146,7 +146,7 @@ fn test_get_device_for_license_wrong_license() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license1 = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
     let license2 = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
@@ -164,7 +164,7 @@ fn test_list_devices_for_license() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
 
@@ -183,7 +183,7 @@ fn test_list_devices_for_license_empty() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
 
@@ -200,7 +200,7 @@ fn test_device_id_unique_per_license() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
 
@@ -226,7 +226,7 @@ fn test_same_device_id_different_licenses() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license1 = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
     let license2 = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
@@ -247,7 +247,7 @@ fn test_jti_unique_across_devices() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
 
@@ -266,7 +266,7 @@ fn test_delete_device() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
     let device = create_test_device(&conn, &license.id, "device-123", DeviceType::Uuid);
@@ -293,7 +293,7 @@ fn test_delete_license_cascades_to_devices() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
     let device = create_test_device(&conn, &license.id, "device-123", DeviceType::Uuid);
@@ -312,7 +312,7 @@ fn test_count_devices_for_license() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
 

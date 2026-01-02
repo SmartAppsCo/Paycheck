@@ -11,7 +11,7 @@ fn test_create_license_key() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
 
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", Some(future_timestamp(365)), &master_key);
@@ -30,7 +30,7 @@ fn test_license_key_format() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
 
     // Create a few licenses to verify format is consistent
@@ -53,7 +53,7 @@ fn test_license_key_uniqueness() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
 
     // Create many licenses and verify they're all unique
@@ -69,7 +69,7 @@ fn test_create_license_with_customer_id() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
 
     let input = CreateLicenseKey {
@@ -93,7 +93,7 @@ fn test_create_license_with_payment_provider() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
 
     let input = CreateLicenseKey {
@@ -121,7 +121,7 @@ fn test_get_license_key_by_id() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let created = create_test_license(&conn, &project.id, &product.id, "TEST", Some(future_timestamp(365)), &master_key);
 
@@ -139,7 +139,7 @@ fn test_get_license_key_by_key() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let created = create_test_license(&conn, &project.id, &product.id, "TEST", Some(future_timestamp(365)), &master_key);
 
@@ -156,7 +156,7 @@ fn test_get_license_key_by_subscription() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
 
     let input = CreateLicenseKey {
@@ -184,7 +184,7 @@ fn test_get_license_key_by_subscription_wrong_provider() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
 
     let input = CreateLicenseKey {
@@ -212,7 +212,7 @@ fn test_list_license_keys_for_project() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product1 = create_test_product(&conn, &project.id, "Free", "free");
     let product2 = create_test_product(&conn, &project.id, "Pro", "pro");
 
@@ -237,7 +237,7 @@ fn test_increment_activation_count() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
 
@@ -259,7 +259,7 @@ fn test_revoke_license_key() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
 
@@ -279,7 +279,7 @@ fn test_add_revoked_jti() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
 
@@ -302,7 +302,7 @@ fn test_extend_license_expiration() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
 
     let old_exp = future_timestamp(30);
@@ -327,7 +327,7 @@ fn test_create_redemption_code() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
 
@@ -347,7 +347,7 @@ fn test_get_redemption_code_by_code() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
     let created = queries::create_redemption_code(&conn, &license.id)
@@ -367,7 +367,7 @@ fn test_mark_redemption_code_used() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
     let code = queries::create_redemption_code(&conn, &license.id)
@@ -391,7 +391,7 @@ fn test_license_with_expiration() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
 
     let exp = future_timestamp(365);
@@ -405,7 +405,7 @@ fn test_license_without_expiration() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
 
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
@@ -420,7 +420,7 @@ fn test_delete_product_cascades_to_licenses() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
 
@@ -435,7 +435,7 @@ fn test_delete_license_cascades_to_redemption_codes() {
     let conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, "TEST", None, &master_key);
     let code = queries::create_redemption_code(&conn, &license.id)

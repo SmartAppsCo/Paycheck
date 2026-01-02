@@ -42,7 +42,7 @@ fn setup_refresh_test() -> (Router, String, String, String, String) {
 
         // Create test hierarchy with encrypted project key
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project_encrypted(&conn, &org.id, "Test Project", &master_key);
+        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
@@ -275,7 +275,7 @@ async fn test_refresh_with_revoked_license_fails() {
         paycheck::db::init_db(&conn).unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project_encrypted(&conn, &org.id, "Test Project", &master_key);
+        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
@@ -357,7 +357,7 @@ async fn test_refresh_with_revoked_jti_fails() {
         paycheck::db::init_db(&conn).unwrap();
 
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project_encrypted(&conn, &org.id, "Test Project", &master_key);
+        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,

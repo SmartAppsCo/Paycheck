@@ -25,7 +25,7 @@ fn test_app() -> Router {
 
     // Create test data
     let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project");
+    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
     let _product = create_test_product(&conn, &project.id, "Pro", "pro");
 
     // Create app state

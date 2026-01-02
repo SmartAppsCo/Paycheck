@@ -199,24 +199,19 @@ fn seed_dev_data(state: &AppState) {
 
     // 4. Create project
     let (private_key, public_key) = jwt::generate_keypair();
-    let project_id = uuid::Uuid::new_v4().to_string();
-    let encrypted_private_key = state
-        .master_key
-        .encrypt_private_key(&project_id, &private_key)
-        .expect("Failed to encrypt project private key");
     let project_input = CreateProject {
         name: "Dev Project".to_string(),
         domain: "localhost".to_string(),
         license_key_prefix: "PC".to_string(),
         allowed_redirect_urls: vec![],
     };
-    let project = queries::create_project_with_id(
+    let project = queries::create_project(
         &conn,
-        &project_id,
         &org.id,
         &project_input,
-        &encrypted_private_key,
+        &private_key,
         &public_key,
+        &state.master_key,
     )
     .expect("Failed to create dev project");
 
