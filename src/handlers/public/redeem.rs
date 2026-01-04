@@ -14,7 +14,12 @@ use crate::util::{LicenseExpirations, extract_bearer_token};
 /// Query parameters for GET /redeem (using short-lived redemption code)
 #[derive(Debug, Deserialize)]
 pub struct RedeemCodeQuery {
-    pub project_id: String,
+    /// Public key - identifies the project (preferred)
+    #[serde(default)]
+    pub public_key: Option<String>,
+    /// Project ID - deprecated, use public_key instead
+    #[serde(default)]
+    pub project_id: Option<String>,
     /// Short-lived redemption code (not the permanent license key)
     pub code: String,
     pub device_id: String,
@@ -26,7 +31,12 @@ pub struct RedeemCodeQuery {
 /// Request body for POST /redeem/key (using permanent license key)
 #[derive(Debug, Deserialize)]
 pub struct RedeemKeyBody {
-    pub project_id: String,
+    /// Public key - identifies the project (preferred)
+    #[serde(default)]
+    pub public_key: Option<String>,
+    /// Project ID - deprecated, use public_key instead
+    #[serde(default)]
+    pub project_id: Option<String>,
     /// Permanent license key - can be in body OR Authorization header
     #[serde(default)]
     pub key: Option<String>,
@@ -49,6 +59,25 @@ pub struct RedeemResponse {
     pub redemption_code_expires_at: i64,
 }
 
+/// Resolve project ID from public_key or project_id, returning an error if neither is provided.
+fn resolve_project_id(
+    conn: &rusqlite::Connection,
+    public_key: Option<&str>,
+    project_id: Option<&str>,
+) -> Result<String> {
+    if let Some(public_key) = public_key {
+        let project = queries::get_project_by_public_key(conn, public_key)?
+            .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+        Ok(project.id)
+    } else if let Some(project_id) = project_id {
+        Ok(project_id.to_string())
+    } else {
+        Err(AppError::BadRequest(
+            "Either public_key or project_id is required".into(),
+        ))
+    }
+}
+
 /// GET /redeem - Redeem using a short-lived redemption code
 /// The redemption code is safe to appear in URLs as it expires quickly
 pub async fn redeem_with_code(
@@ -56,6 +85,13 @@ pub async fn redeem_with_code(
     Query(query): Query<RedeemCodeQuery>,
 ) -> Result<Json<RedeemResponse>> {
     let mut conn = state.db.get()?;
+
+    // Resolve project ID from public_key or project_id
+    let project_id = resolve_project_id(
+        &conn,
+        query.public_key.as_deref(),
+        query.project_id.as_deref(),
+    )?;
 
     // Validate device type
     let device_type = query
@@ -88,7 +124,7 @@ pub async fn redeem_with_code(
         &mut conn,
         &state.master_key,
         &license,
-        &query.project_id,
+        &project_id,
         &query.device_id,
         device_type,
         query.device_name.as_deref(),
@@ -108,6 +144,13 @@ pub async fn redeem_with_key(
     Json(body): Json<RedeemKeyBody>,
 ) -> Result<Json<RedeemResponse>> {
     let mut conn = state.db.get()?;
+
+    // Resolve project ID from public_key or project_id
+    let project_id = resolve_project_id(
+        &conn,
+        body.public_key.as_deref(),
+        body.project_id.as_deref(),
+    )?;
 
     // Extract key from header first, fall back to body
     let key = extract_bearer_token(&headers)
@@ -131,7 +174,7 @@ pub async fn redeem_with_key(
         &mut conn,
         &state.master_key,
         &license,
-        &body.project_id,
+        &project_id,
         &body.device_id,
         device_type,
         body.device_name.as_deref(),

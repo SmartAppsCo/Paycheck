@@ -637,6 +637,19 @@ pub fn delete_project(conn: &Connection, id: &str) -> Result<bool> {
     Ok(deleted > 0)
 }
 
+/// Look up a project by its public key.
+/// Used by public endpoints to identify the project without requiring a project_id.
+pub fn get_project_by_public_key(conn: &Connection, public_key: &str) -> Result<Option<Project>> {
+    query_one(
+        conn,
+        &format!(
+            "SELECT {} FROM projects WHERE public_key = ?1",
+            PROJECT_COLS
+        ),
+        &[&public_key],
+    )
+}
+
 // ============ Project Members ============
 
 pub fn create_project_member(

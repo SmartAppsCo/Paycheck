@@ -9,7 +9,12 @@ use crate::util::LicenseExpirations;
 
 #[derive(Debug, Deserialize)]
 pub struct ValidateQuery {
-    pub project_id: String,
+    /// Public key - identifies the project (preferred)
+    #[serde(default)]
+    pub public_key: Option<String>,
+    /// Project ID - deprecated, use public_key instead
+    #[serde(default)]
+    pub project_id: Option<String>,
     pub jti: String,
 }
 
@@ -37,6 +42,21 @@ pub async fn validate_license(
             license_exp: None,
             updates_exp: None,
         })
+    };
+
+    // Resolve project ID from public_key or project_id
+    let project_id = if let Some(ref public_key) = query.public_key {
+        let project = queries::get_project_by_public_key(&conn, public_key)?;
+        match project {
+            Some(p) => p.id,
+            None => return Ok(invalid_response()),
+        }
+    } else if let Some(ref project_id) = query.project_id {
+        project_id.clone()
+    } else {
+        return Err(AppError::BadRequest(
+            "Either public_key or project_id is required".into(),
+        ));
     };
 
     // Find the device by JTI
@@ -74,7 +94,7 @@ pub async fn validate_license(
         .ok_or_else(|| AppError::Internal("Product not found".into()))?;
 
     // Verify project matches
-    if product.project_id != query.project_id {
+    if product.project_id != project_id {
         return Ok(invalid_response());
     }
 

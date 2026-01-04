@@ -11,6 +11,9 @@ use crate::payments::{LemonSqueezyClient, PaymentProvider, StripeClient};
 /// Device info is NOT required here - purchase ≠ activation.
 #[derive(Debug, Deserialize)]
 pub struct BuyRequest {
+    /// Public key - identifies the project (preferred over product_id lookup)
+    #[serde(default)]
+    pub public_key: Option<String>,
     /// Product ID - Paycheck looks up project and pricing from this
     pub product_id: String,
     /// Optional: explicit payment provider (auto-detected if not specified)
@@ -40,9 +43,21 @@ pub async fn initiate_buy(
     let product = queries::get_product_by_id(&conn, &request.product_id)?
         .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
 
-    // Get project from product
-    let project = queries::get_project_by_id(&conn, &product.project_id)?
-        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+    // Get project - prefer public_key lookup if provided, otherwise use product's project_id
+    let project = if let Some(ref public_key) = request.public_key {
+        let project = queries::get_project_by_public_key(&conn, public_key)?
+            .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+        // Verify the product belongs to this project
+        if product.project_id != project.id {
+            return Err(AppError::BadRequest(
+                "Product does not belong to this project".into(),
+            ));
+        }
+        project
+    } else {
+        queries::get_project_by_id(&conn, &product.project_id)?
+            .ok_or_else(|| AppError::NotFound("Project not found".into()))?
+    };
 
     // Validate redirect URL against project's allowlist
     let validated_redirect = if let Some(ref redirect) = request.redirect {

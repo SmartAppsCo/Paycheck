@@ -308,15 +308,37 @@ fn seed_dev_data(state: &AppState) {
     tracing::info!("DEV DATA SEEDED SUCCESSFULLY");
     tracing::info!("============================================");
 
-    // Print copy-paste friendly output (no log formatting, 2-space indent for Bruno env file)
+    // Print copy-paste friendly output
     println!();
-    println!("--- COPY FROM HERE ---");
+    println!("╔══════════════════════════════════════════════════════════════════╗");
+    println!("║                     DEV ENVIRONMENT READY                        ║");
+    println!("╠══════════════════════════════════════════════════════════════════╣");
+    println!("║ Bruno env vars (2-space indent):                                 ║");
+    println!("╠══════════════════════════════════════════════════════════════════╣");
     println!("  operator_api_key: {}", operator_api_key);
     println!("  org_api_key: {}", member_api_key);
     println!("  org_id: {}", org.id);
     println!("  project_id: {}", project.id);
     println!("  product_id: {}", product.id);
-    println!("--- END COPY ---");
+    println!("╠══════════════════════════════════════════════════════════════════╣");
+    println!("║ Quick test (no Stripe needed):                                   ║");
+    println!("╠══════════════════════════════════════════════════════════════════╣");
+    println!("║ 1. Create a license:                                             ║");
+    println!("║    curl -X POST http://localhost:3000/dev/create-license \\       ║");
+    println!("║      -H 'Content-Type: application/json' \\                       ║");
+    println!("║      -d '{{\"product_id\": \"{}\"}}'            ║", product.id);
+    println!("║                                                                  ║");
+    println!("║ 2. Activate & get JWT:                                           ║");
+    println!("║    curl -X POST http://localhost:3000/redeem/key \\               ║");
+    println!("║      -H 'Content-Type: application/json' \\                       ║");
+    println!("║      -d '{{\"license_key\": \"<key>\", \"device_id\": \"dev-1\", \\     ║");
+    println!("║           \"device_type\": \"uuid\"}}'                               ║");
+    println!("╠══════════════════════════════════════════════════════════════════╣");
+    println!("║ For real Stripe payments:                                        ║");
+    println!("║ • Update org with stripe_secret_key and stripe_webhook_secret    ║");
+    println!("║ • Update product payment_config with stripe_price_id             ║");
+    println!("║ • Use ngrok to expose webhook: POST /webhook/stripe              ║");
+    println!("╚══════════════════════════════════════════════════════════════════╝");
     println!();
 }
 

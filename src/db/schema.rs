@@ -55,6 +55,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id);
         CREATE INDEX IF NOT EXISTS idx_projects_domain ON projects(domain);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_public_key ON projects(public_key);
 
         -- Project members (for 'member' role org members who need explicit access)
         CREATE TABLE IF NOT EXISTS project_members (

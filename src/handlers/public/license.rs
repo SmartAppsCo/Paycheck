@@ -12,7 +12,12 @@ use crate::extractors::{Json, Query};
 /// Query parameters for GET /license
 #[derive(Debug, Deserialize)]
 pub struct LicenseQuery {
-    pub project_id: String,
+    /// Public key - identifies the project (preferred)
+    #[serde(default)]
+    pub public_key: Option<String>,
+    /// Project ID - deprecated, use public_key instead
+    #[serde(default)]
+    pub project_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,6 +50,25 @@ pub enum LicenseStatus {
     Revoked,
 }
 
+/// Resolve project ID from public_key or project_id, returning an error if neither is provided.
+fn resolve_project_id(
+    conn: &rusqlite::Connection,
+    public_key: Option<&str>,
+    project_id: Option<&str>,
+) -> Result<String> {
+    if let Some(public_key) = public_key {
+        let project = queries::get_project_by_public_key(conn, public_key)?
+            .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+        Ok(project.id)
+    } else if let Some(project_id) = project_id {
+        Ok(project_id.to_string())
+    } else {
+        Err(AppError::BadRequest(
+            "Either public_key or project_id is required".into(),
+        ))
+    }
+}
+
 /// GET /license - Get license info
 /// License key is passed in Authorization header, never exposed in URL
 pub async fn get_license_info(
@@ -55,6 +79,13 @@ pub async fn get_license_info(
     let conn = state.db.get()?;
     let license_key = auth.token();
 
+    // Resolve project ID from public_key or project_id
+    let project_id = resolve_project_id(
+        &conn,
+        query.public_key.as_deref(),
+        query.project_id.as_deref(),
+    )?;
+
     // Get the license key
     let license = queries::get_license_key_by_key(&conn, license_key, &state.master_key)?
         .ok_or_else(|| AppError::NotFound("License key not found".into()))?;
@@ -64,7 +95,7 @@ pub async fn get_license_info(
         .ok_or_else(|| AppError::Internal("Product not found".into()))?;
 
     // Verify project matches
-    if product.project_id != query.project_id {
+    if product.project_id != project_id {
         return Err(AppError::NotFound("License key not found".into()));
     }
 
