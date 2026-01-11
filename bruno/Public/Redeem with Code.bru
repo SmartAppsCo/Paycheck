@@ -4,23 +4,32 @@ meta {
   seq: 4
 }
 
-get {
-  url: {{base_url}}/redeem?public_key={{project_pub_key}}&code={{activation_code}}&device_id={{device_id}}&device_type=uuid
-  body: none
+post {
+  url: {{base_url}}/redeem
+  body: json
   auth: none
+}
+
+body:json {
+  {
+    "public_key": "{{project_pub_key}}",
+    "code": "{{activation_code}}",
+    "device_id": "{{device_id}}",
+    "device_type": "uuid"
+  }
 }
 
 docs {
   Activate a license using a short-lived activation code.
   Creates a device and returns a signed JWT for offline validation.
 
-  Required params:
+  Required fields:
   - public_key: Project's public key (preferred) OR project_id
   - code: Activation code (PREFIX-XXXX-XXXX-XXXX-XXXX format, expires in 30 min)
   - device_id: Device identifier
   - device_type: "uuid" or "machine"
 
-  Optional params:
+  Optional fields:
   - device_name: Human-readable device name
 
   Returns:

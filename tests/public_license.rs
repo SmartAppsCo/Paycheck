@@ -34,7 +34,7 @@ fn create_test_jwt(project: &Project, product: &Product, license_id: &str, devic
         &claims,
         &private_key,
         license_id,
-        &project.domain,
+        &project.name,
         &device.jti,
     )
     .unwrap()

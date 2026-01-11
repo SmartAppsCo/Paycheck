@@ -494,7 +494,7 @@ fn test_checkout_creates_license_and_device() {
     let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
 
     // Create payment session (no device info - that's at activation time)
-    let session = create_test_payment_session(&conn, &product.id, Some("cust_test"), None);
+    let session = create_test_payment_session(&conn, &product.id, Some("cust_test"));
 
     let checkout_data = CheckoutData {
         session_id: session.id.clone(),
@@ -560,7 +560,7 @@ fn test_checkout_concurrent_webhooks_create_only_one_license() {
     let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
 
-    let session = create_test_payment_session(&conn, &product.id, None, None);
+    let session = create_test_payment_session(&conn, &product.id, None);
 
     let checkout_data = CheckoutData {
         session_id: session.id.clone(),
@@ -633,7 +633,7 @@ fn test_checkout_creates_license_with_product_expirations() {
     };
     let product = queries::create_product(&conn, &project.id, &input).unwrap();
 
-    let session = create_test_payment_session(&conn, &product.id, None, None);
+    let session = create_test_payment_session(&conn, &product.id, None);
 
     let checkout_data = CheckoutData {
         session_id: session.id.clone(),
@@ -698,7 +698,7 @@ fn test_checkout_perpetual_license() {
     };
     let product = queries::create_product(&conn, &project.id, &input).unwrap();
 
-    let session = create_test_payment_session(&conn, &product.id, None, None);
+    let session = create_test_payment_session(&conn, &product.id, None);
 
     let checkout_data = CheckoutData {
         session_id: session.id.clone(),
@@ -892,7 +892,7 @@ async fn test_stripe_webhook_checkout_completed_creates_license() {
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
 
-        let session = create_test_payment_session(&conn, &product.id, None, None);
+        let session = create_test_payment_session(&conn, &product.id, None);
 
         session_id = session.id.clone();
         project_id = project.id.clone();
@@ -995,7 +995,7 @@ async fn test_stripe_webhook_invalid_signature_returns_unauthorized() {
         setup_stripe_config(&conn, &org.id, &master_key);
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let session = create_test_payment_session(&conn, &product.id, None, None);
+        let session = create_test_payment_session(&conn, &product.id, None);
         session_id = session.id.clone();
         project_id = project.id.clone();
     }
@@ -1051,7 +1051,7 @@ async fn test_stripe_webhook_unpaid_checkout_ignored() {
         setup_stripe_config(&conn, &org.id, &master_key);
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let session = create_test_payment_session(&conn, &product.id, None, None);
+        let session = create_test_payment_session(&conn, &product.id, None);
         session_id = session.id.clone();
         project_id = project.id.clone();
     }
@@ -1300,7 +1300,7 @@ async fn test_lemonsqueezy_webhook_order_created_creates_license() {
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
 
-        let session = create_test_payment_session(&conn, &product.id, None, None);
+        let session = create_test_payment_session(&conn, &product.id, None);
 
         session_id = session.id.clone();
         project_id = project.id.clone();
@@ -1398,7 +1398,7 @@ async fn test_lemonsqueezy_webhook_invalid_signature_returns_unauthorized() {
         setup_lemonsqueezy_config(&conn, &org.id, &master_key);
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let session = create_test_payment_session(&conn, &product.id, None, None);
+        let session = create_test_payment_session(&conn, &product.id, None);
 
         // Use session_id and project_id in payload
         let payload = json!({
@@ -1589,7 +1589,7 @@ async fn test_webhook_provider_not_configured_returns_ok() {
         // NO payment config set!
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let session = create_test_payment_session(&conn, &product.id, None, None);
+        let session = create_test_payment_session(&conn, &product.id, None);
         session_id = session.id.clone();
         project_id = project.id.clone();
     }

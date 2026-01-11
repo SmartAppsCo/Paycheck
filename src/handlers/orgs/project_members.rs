@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Extension, State},
+    extract::{Extension, Query, State},
     http::HeaderMap,
 };
 
@@ -10,6 +10,7 @@ use crate::middleware::OrgMemberContext;
 use crate::models::{
     ActorType, CreateProjectMember, ProjectMemberWithDetails, UpdateProjectMember,
 };
+use crate::pagination::{Paginated, PaginationQuery};
 use crate::util::audit_log;
 
 #[derive(serde::Deserialize)]
@@ -57,6 +58,7 @@ pub async fn create_project_member(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "create_project_member",
         "project_member",
@@ -66,6 +68,7 @@ pub async fn create_project_member(
         ),
         Some(&path.org_id),
         Some(&path.project_id),
+        &ctx.audit_names().resource(target_member.name.clone()),
     )?;
 
     Ok(Json(ProjectMemberWithDetails {
@@ -82,10 +85,31 @@ pub async fn create_project_member(
 pub async fn list_project_members(
     State(state): State<AppState>,
     Path(path): Path<crate::middleware::OrgProjectPath>,
-) -> Result<Json<Vec<ProjectMemberWithDetails>>> {
+    Query(pagination): Query<PaginationQuery>,
+) -> Result<Json<Paginated<ProjectMemberWithDetails>>> {
     let conn = state.db.get()?;
-    let members = queries::list_project_members(&conn, &path.project_id)?;
-    Ok(Json(members))
+    let limit = pagination.limit();
+    let offset = pagination.offset();
+    let (members, total) =
+        queries::list_project_members_paginated(&conn, &path.project_id, limit, offset)?;
+    Ok(Json(Paginated::new(members, total, limit, offset)))
+}
+
+pub async fn get_project_member(
+    State(state): State<AppState>,
+    Path(path): Path<ProjectMemberPath>,
+) -> Result<Json<ProjectMemberWithDetails>> {
+    let conn = state.db.get()?;
+
+    let member = queries::get_project_member_by_id(&conn, &path.id)?
+        .ok_or_else(|| AppError::NotFound("Project member not found".into()))?;
+
+    // Verify it belongs to the specified project
+    if member.project_id != path.project_id {
+        return Err(AppError::NotFound("Project member not found".into()));
+    }
+
+    Ok(Json(member))
 }
 
 pub async fn update_project_member(
@@ -112,6 +136,7 @@ pub async fn update_project_member(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "update_project_member",
         "project_member",
@@ -119,6 +144,7 @@ pub async fn update_project_member(
         Some(&serde_json::json!({ "role": input.role })),
         Some(&path.org_id),
         Some(&path.project_id),
+        &ctx.audit_names(),
     )?;
 
     Ok(Json(serde_json::json!({ "updated": true })))
@@ -147,6 +173,7 @@ pub async fn delete_project_member(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "delete_project_member",
         "project_member",
@@ -154,6 +181,7 @@ pub async fn delete_project_member(
         None,
         Some(&path.org_id),
         Some(&path.project_id),
+        &ctx.audit_names(),
     )?;
 
     Ok(Json(serde_json::json!({ "deleted": true })))

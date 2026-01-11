@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Extension, State},
+    extract::{Extension, Query, State},
     http::HeaderMap,
 };
 
@@ -9,6 +9,7 @@ use crate::error::{AppError, Result};
 use crate::extractors::{Json, Path};
 use crate::middleware::OrgMemberContext;
 use crate::models::{ActorType, CreateProduct, UpdateProduct};
+use crate::pagination::{Paginated, PaginationQuery};
 use crate::util::audit_log;
 
 #[derive(serde::Deserialize)]
@@ -38,6 +39,7 @@ pub async fn create_product(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "create_product",
         "product",
@@ -45,6 +47,7 @@ pub async fn create_product(
         Some(&serde_json::json!({ "name": input.name, "tier": input.tier })),
         Some(&path.org_id),
         Some(&path.project_id),
+        &ctx.audit_names().resource(product.name.clone()),
     )?;
 
     // Return with empty payment config (none configured yet)
@@ -57,10 +60,14 @@ pub async fn create_product(
 pub async fn list_products(
     State(state): State<AppState>,
     Path(path): Path<crate::middleware::OrgProjectPath>,
-) -> Result<Json<Vec<ProductWithPaymentConfig>>> {
+    Query(pagination): Query<PaginationQuery>,
+) -> Result<Json<Paginated<ProductWithPaymentConfig>>> {
     let conn = state.db.get()?;
-    let products = queries::list_products_with_config(&conn, &path.project_id)?;
-    Ok(Json(products))
+    let limit = pagination.limit();
+    let offset = pagination.offset();
+    let (products, total) =
+        queries::list_products_with_config_paginated(&conn, &path.project_id, limit, offset)?;
+    Ok(Json(Paginated::new(products, total, limit, offset)))
 }
 
 pub async fn get_product(
@@ -106,6 +113,7 @@ pub async fn update_product(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "update_product",
         "product",
@@ -113,6 +121,7 @@ pub async fn update_product(
         Some(&serde_json::json!({ "name": input.name, "tier": input.tier })),
         Some(&path.org_id),
         Some(&path.project_id),
+        &ctx.audit_names().resource(existing.name.clone()),
     )?;
 
     let product = queries::get_product_with_config(&conn, &path.id)?
@@ -148,6 +157,7 @@ pub async fn delete_product(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "delete_product",
         "product",
@@ -155,6 +165,7 @@ pub async fn delete_product(
         Some(&serde_json::json!({ "name": existing.name })),
         Some(&path.org_id),
         Some(&path.project_id),
+        &ctx.audit_names().resource(existing.name.clone()),
     )?;
 
     Ok(Json(serde_json::json!({ "deleted": true })))

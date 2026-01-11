@@ -54,7 +54,7 @@ fn operator_app_with_payment_configs() -> (Router, String) {
                 webhook_secret: "ls_whsec_test_secret".to_string(),
             }),
             resend_api_key: None,
-            default_provider: Some(Some("stripe".to_string())),
+            payment_provider: Some(Some("stripe".to_string())),
         };
 
         queries::update_organization(&conn, &org.id, &update, &master_key)

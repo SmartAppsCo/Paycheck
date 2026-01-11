@@ -35,6 +35,7 @@ export interface ClientConfig {
  *
  * Note: Price and variant info are configured in the product settings on Paycheck,
  * so you don't need to send them here - just the product ID.
+ * Redirect URL is configured per-project in the Paycheck dashboard, not per-request.
  */
 export interface CheckoutParams {
   /** Product UUID - Paycheck looks up pricing from product config */
@@ -43,8 +44,6 @@ export interface CheckoutParams {
   provider?: 'stripe' | 'lemonsqueezy';
   /** Your customer identifier (flows through to license) */
   customerId?: string;
-  /** Post-payment redirect URL (must be in project's allowlist) */
-  redirect?: string;
 }
 
 /**
@@ -109,7 +108,7 @@ export interface LicenseClaims {
   iss: string;
   /** Subject (license_id) */
   sub: string;
-  /** Audience (project domain) */
+  /** Audience (project name, for debugging - not verified) */
   aud: string;
   /** JWT ID (unique per device activation) */
   jti: string;
@@ -190,6 +189,14 @@ export interface DeactivateResult {
   deactivated: boolean;
   /** Number of remaining active devices */
   remainingDevices: number;
+}
+
+/**
+ * Result from requesting an activation code
+ */
+export interface RequestCodeResult {
+  /** Success message from the server */
+  message: string;
 }
 
 /**

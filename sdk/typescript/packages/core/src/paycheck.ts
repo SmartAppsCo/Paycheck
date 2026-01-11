@@ -10,6 +10,7 @@ import type {
   ValidateResult,
   LicenseInfo,
   DeactivateResult,
+  RequestCodeResult,
 } from './types';
 import { PaycheckError } from './types';
 import {
@@ -81,6 +82,24 @@ export interface ImportResult {
   claims?: LicenseClaims;
   /** Reason for invalidity */
   reason?: string;
+}
+
+/**
+ * Result from handling a payment callback URL
+ */
+export interface CallbackActivationResult {
+  /** Whether activation was successful */
+  activated: boolean;
+  /** Whether this was a callback URL (had code param) */
+  wasCallback: boolean;
+  /** Activation result if successful */
+  activation?: ActivationResult;
+  /** Decoded license claims if activated */
+  claims?: LicenseClaims;
+  /** Error message if activation failed */
+  error?: string;
+  /** The callback status from URL */
+  status: 'success' | 'pending' | 'none';
 }
 
 /** Default Paycheck API URL */
@@ -256,6 +275,8 @@ export class Paycheck {
   /**
    * Start a checkout session to purchase a product.
    *
+   * Redirect URL is configured per-project in the Paycheck dashboard, not per-request.
+   *
    * @param productId - Product UUID from Paycheck dashboard
    * @param options - Optional checkout parameters
    * @returns Checkout URL and session ID
@@ -269,7 +290,6 @@ export class Paycheck {
       product_id: productId,
       provider: options.provider,
       customer_id: options.customerId,
-      redirect: options.redirect,
     };
 
     return this.apiRequest<CheckoutResult>('POST', '/buy', { body });
@@ -533,8 +553,8 @@ export class Paycheck {
       activation_code_expires_at: number;
     }
 
-    const response = await this.apiRequest<RedeemResponse>('GET', '/redeem', {
-      query: {
+    const response = await this.apiRequest<RedeemResponse>('POST', '/redeem', {
+      body: {
         public_key: this.publicKey,
         code,
         device_id: this.deviceId,
@@ -554,6 +574,40 @@ export class Paycheck {
       activationCode: response.activation_code,
       activationCodeExpiresAt: response.activation_code_expires_at,
     };
+  }
+
+  /**
+   * Request an activation code to be sent to the purchase email.
+   *
+   * Use this for license recovery when a user needs to activate on a new device.
+   * The server will send a short-lived activation code (30 min TTL) to the email
+   * associated with the license purchase.
+   *
+   * **Email delivery order:**
+   * 1. If your project has a webhook URL configured, Paycheck POSTs the code to your endpoint (you handle delivery)
+   * 2. If your organization has a Resend API key configured, Paycheck sends via your Resend account
+   * 3. Otherwise, Paycheck.dev sends the email on your behalf (subject to plan send limits)
+   *
+   * @param email - The email address used for the original purchase
+   * @returns Success message from the server
+   *
+   * @example
+   * ```typescript
+   * try {
+   *   const { message } = await paycheck.requestActivationCode('user@example.com');
+   *   console.log(message); // "Activation code sent"
+   * } catch (err) {
+   *   // Handle rate limiting or invalid email
+   * }
+   * ```
+   */
+  async requestActivationCode(email: string): Promise<RequestCodeResult> {
+    return this.apiRequest<RequestCodeResult>('POST', '/activation/request-code', {
+      body: {
+        email,
+        public_key: this.publicKey,
+      },
+    });
   }
 
   /**
@@ -809,6 +863,87 @@ export class Paycheck {
     const projectId = params.get('project_id') || undefined;
 
     return { status, code, projectId };
+  }
+
+  /**
+   * Handle payment callback and activate in one step.
+   *
+   * Call this on your callback/success page to seamlessly complete activation.
+   * It parses the URL, extracts the activation code, and exchanges it for a JWT.
+   *
+   * @param url - The full callback URL (use window.location.href)
+   * @param options - Optional device info and settings
+   * @returns Result indicating what happened
+   *
+   * @example
+   * ```typescript
+   * // On your /success or /callback page
+   * const result = await paycheck.handleCallbackAndActivate(window.location.href);
+   *
+   * if (result.activated) {
+   *   console.log('Welcome!', result.claims?.tier);
+   *   // Optionally clean URL and redirect
+   *   window.history.replaceState({}, '', '/dashboard');
+   * } else if (result.wasCallback) {
+   *   console.error('Activation failed:', result.error);
+   * } else {
+   *   // Not a callback URL, normal page load
+   * }
+   * ```
+   */
+  async handleCallbackAndActivate(
+    url: string,
+    options?: DeviceInfo
+  ): Promise<CallbackActivationResult> {
+    // Parse the callback URL
+    let callback: CallbackResult;
+    try {
+      callback = this.handleCallback(url);
+    } catch {
+      // Invalid URL - not a callback
+      return {
+        activated: false,
+        wasCallback: false,
+        status: 'none',
+      };
+    }
+
+    // Check if this is actually a callback URL
+    if (!callback.code) {
+      return {
+        activated: false,
+        wasCallback: false,
+        status: callback.status,
+      };
+    }
+
+    // We have a code - attempt activation
+    try {
+      const activation = await this.activateWithCode(callback.code, options);
+
+      // Decode claims for convenience
+      const claims = this.getLicense();
+
+      return {
+        activated: true,
+        wasCallback: true,
+        activation,
+        claims: claims ?? undefined,
+        status: callback.status,
+      };
+    } catch (err) {
+      return {
+        activated: false,
+        wasCallback: true,
+        status: callback.status,
+        error:
+          err instanceof PaycheckError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : 'Activation failed',
+      };
+    }
   }
 }
 

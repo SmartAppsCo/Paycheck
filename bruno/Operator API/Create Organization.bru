@@ -26,11 +26,12 @@ docs {
   Create a new organization (requires admin+ role).
 
   If owner_email is provided, an org member with owner role
-  is created and their API key is returned.
+  is created. No API key is returned - the owner uses Console
+  (operator impersonation) or creates a key later via the API.
 
   Returns:
   {
     "organization": { ... },
-    "owner_api_key": "API_KEY_IF_OWNER_PROVIDED"
+    "owner": { "id": "...", "email": "...", ... }  // if owner_email provided
   }
 }

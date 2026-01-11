@@ -62,6 +62,7 @@ pub async fn create_payment_config(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "create_payment_config",
         "payment_config",
@@ -69,6 +70,7 @@ pub async fn create_payment_config(
         Some(&serde_json::json!({ "product_id": path.product_id, "provider": input.provider })),
         Some(&path.org_id),
         Some(&path.project_id),
+        &ctx.audit_names().resource(product.name.clone()),
     )?;
 
     Ok(Json(config))
@@ -154,6 +156,7 @@ pub async fn update_payment_config_handler(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "update_payment_config",
         "payment_config",
@@ -161,6 +164,7 @@ pub async fn update_payment_config_handler(
         Some(&serde_json::json!({ "product_id": path.product_id, "provider": existing.provider })),
         Some(&path.org_id),
         Some(&path.project_id),
+        &ctx.audit_names().resource(product.name.clone()),
     )?;
 
     let config = queries::get_payment_config_by_id(&conn, &path.id)?
@@ -205,6 +209,7 @@ pub async fn delete_payment_config_handler(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "delete_payment_config",
         "payment_config",
@@ -212,6 +217,7 @@ pub async fn delete_payment_config_handler(
         Some(&serde_json::json!({ "product_id": path.product_id, "provider": existing.provider })),
         Some(&path.org_id),
         Some(&path.project_id),
+        &ctx.audit_names().resource(product.name.clone()),
     )?;
 
     Ok(Json(serde_json::json!({ "deleted": true })))

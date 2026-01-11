@@ -94,7 +94,7 @@ fn org_app() -> (Router, AppState) {
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(None, "test@example.com".to_string())),
     };
 
-    let app = handlers::orgs::router(state.clone()).with_state(state.clone());
+    let app = handlers::orgs::router(state.clone(), paycheck::config::RateLimitConfig::disabled()).with_state(state.clone());
 
     (app, state)
 }
@@ -1790,7 +1790,7 @@ mod org_audit_log_isolation {
             email_service: std::sync::Arc::new(paycheck::email::EmailService::new(None, "test@example.com".to_string())),
         };
 
-        let app = handlers::orgs::router(state.clone()).with_state(state.clone());
+        let app = handlers::orgs::router(state.clone(), paycheck::config::RateLimitConfig::disabled()).with_state(state.clone());
 
         (app, state)
     }
@@ -1850,7 +1850,7 @@ mod org_audit_log_isolation {
 
     #[tokio::test]
     async fn audit_logs_only_return_own_org_data() {
-        use paycheck::models::ActorType;
+        use paycheck::models::{ActorType, AuditLogNames};
 
         let (app, state) = org_app_with_audit();
         let conn = state.db.get().unwrap();
@@ -1871,6 +1871,7 @@ mod org_audit_log_isolation {
             true,
             ActorType::OrgMember,
             Some("member1"),
+            None, // impersonator_id
             "test_action_org1",
             "test_resource",
             "resource1",
@@ -1879,6 +1880,7 @@ mod org_audit_log_isolation {
             None,
             None,
             None,
+            &AuditLogNames::default(),
         )
         .unwrap();
 
@@ -1887,6 +1889,7 @@ mod org_audit_log_isolation {
             true,
             ActorType::OrgMember,
             Some("member2"),
+            None, // impersonator_id
             "test_action_org2",
             "test_resource",
             "resource2",
@@ -1895,6 +1898,7 @@ mod org_audit_log_isolation {
             None,
             None,
             None,
+            &AuditLogNames::default(),
         )
         .unwrap();
 
@@ -1914,7 +1918,8 @@ mod org_audit_log_isolation {
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let logs: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let logs = result["items"].as_array().unwrap();
 
         // Should only see org1's log
         assert_eq!(logs.len(), 1);
@@ -1924,7 +1929,7 @@ mod org_audit_log_isolation {
 
     #[tokio::test]
     async fn query_param_org_id_cannot_override_path_org_id() {
-        use paycheck::models::ActorType;
+        use paycheck::models::{ActorType, AuditLogNames};
 
         let (app, state) = org_app_with_audit();
         let conn = state.db.get().unwrap();
@@ -1943,6 +1948,7 @@ mod org_audit_log_isolation {
             true,
             ActorType::OrgMember,
             Some("member1"),
+            None, // impersonator_id
             "org1_action",
             "test_resource",
             "resource1",
@@ -1951,6 +1957,7 @@ mod org_audit_log_isolation {
             None,
             None,
             None,
+            &AuditLogNames::default(),
         )
         .unwrap();
 
@@ -1959,6 +1966,7 @@ mod org_audit_log_isolation {
             true,
             ActorType::OrgMember,
             Some("member2"),
+            None, // impersonator_id
             "org2_action",
             "test_resource",
             "resource2",
@@ -1967,6 +1975,7 @@ mod org_audit_log_isolation {
             None,
             None,
             None,
+            &AuditLogNames::default(),
         )
         .unwrap();
 
@@ -1987,7 +1996,8 @@ mod org_audit_log_isolation {
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let logs: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let logs = result["items"].as_array().unwrap();
 
         // Should only see org1's log, NOT org2's - path org_id takes precedence
         assert_eq!(logs.len(), 1);
@@ -2014,5 +2024,253 @@ mod org_audit_log_isolation {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+}
+
+// ============================================================================
+// OPERATOR IMPERSONATION TESTS
+// ============================================================================
+
+mod operator_impersonation {
+    use super::*;
+
+    #[tokio::test]
+    async fn admin_operator_can_impersonate_org_member() {
+        let (app, state) = org_app();
+        let conn = state.db.get().unwrap();
+
+        // Create an operator with admin role
+        let (_operator, operator_key) =
+            create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+
+        // Create an org and member
+        let org = create_test_org(&conn, "Test Org");
+        let (member, _member_key) =
+            create_test_org_member(&conn, &org.id, "user@org.com", OrgMemberRole::Owner);
+
+        // Operator impersonates the member
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/orgs/{}/members", org.id))
+                    .header("Authorization", format!("Bearer {}", operator_key))
+                    .header("X-On-Behalf-Of", &member.id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn owner_operator_can_impersonate_org_member() {
+        let (app, state) = org_app();
+        let conn = state.db.get().unwrap();
+
+        let (_operator, operator_key) =
+            create_test_operator(&conn, "owner@platform.com", OperatorRole::Owner);
+
+        let org = create_test_org(&conn, "Test Org");
+        let (member, _member_key) =
+            create_test_org_member(&conn, &org.id, "user@org.com", OrgMemberRole::Owner);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/orgs/{}/members", org.id))
+                    .header("Authorization", format!("Bearer {}", operator_key))
+                    .header("X-On-Behalf-Of", &member.id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn view_operator_cannot_impersonate() {
+        let (app, state) = org_app();
+        let conn = state.db.get().unwrap();
+
+        let (_operator, operator_key) =
+            create_test_operator(&conn, "view@platform.com", OperatorRole::View);
+
+        let org = create_test_org(&conn, "Test Org");
+        let (member, _member_key) =
+            create_test_org_member(&conn, &org.id, "user@org.com", OrgMemberRole::Owner);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/orgs/{}/members", org.id))
+                    .header("Authorization", format!("Bearer {}", operator_key))
+                    .header("X-On-Behalf-Of", &member.id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn operator_key_without_impersonation_header_is_rejected() {
+        let (app, state) = org_app();
+        let conn = state.db.get().unwrap();
+
+        let (_operator, operator_key) =
+            create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+
+        let org = create_test_org(&conn, "Test Org");
+        let (_member, _member_key) =
+            create_test_org_member(&conn, &org.id, "user@org.com", OrgMemberRole::Owner);
+
+        // Using operator key without X-On-Behalf-Of header should fail
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/orgs/{}/members", org.id))
+                    .header("Authorization", format!("Bearer {}", operator_key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn cannot_impersonate_member_from_different_org() {
+        let (app, state) = org_app();
+        let conn = state.db.get().unwrap();
+
+        let (_operator, operator_key) =
+            create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+
+        let org1 = create_test_org(&conn, "Org 1");
+        let org2 = create_test_org(&conn, "Org 2");
+
+        // Member is in org1
+        let (member, _member_key) =
+            create_test_org_member(&conn, &org1.id, "user@org1.com", OrgMemberRole::Owner);
+
+        // Try to access org2's endpoints while impersonating org1's member
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/orgs/{}/members", org2.id))
+                    .header("Authorization", format!("Bearer {}", operator_key))
+                    .header("X-On-Behalf-Of", &member.id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn impersonation_respects_member_permissions() {
+        let (app, state) = org_app();
+        let conn = state.db.get().unwrap();
+
+        let (_operator, operator_key) =
+            create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+
+        let org = create_test_org(&conn, "Test Org");
+        // Member role can't create org members (owner-only operation)
+        let (member, _member_key) =
+            create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+
+        // Try to create org member while impersonating a member-role user
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/orgs/{}/members", org.id))
+                    .header("Authorization", format!("Bearer {}", operator_key))
+                    .header("X-On-Behalf-Of", &member.id)
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        r#"{"email": "new@org.com", "name": "New Member", "role": "member"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Should be forbidden because the impersonated member doesn't have owner role
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn impersonating_nonexistent_member_returns_not_found() {
+        let (app, state) = org_app();
+        let conn = state.db.get().unwrap();
+
+        let (_operator, operator_key) =
+            create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+
+        let org = create_test_org(&conn, "Test Org");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/orgs/{}/members", org.id))
+                    .header("Authorization", format!("Bearer {}", operator_key))
+                    .header("X-On-Behalf-Of", "nonexistent-member-id")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Operators cannot impersonate other operators on operator API endpoints.
+    /// The X-On-Behalf-Of header is only for impersonating org members on org endpoints.
+    #[tokio::test]
+    async fn operator_cannot_impersonate_another_operator() {
+        let (app, state) = operator_app();
+        let conn = state.db.get().unwrap();
+
+        // Create two operators - one admin and one owner
+        let (target_operator, _target_key) =
+            create_test_operator(&conn, "owner@platform.com", OperatorRole::Owner);
+        let (_admin_operator, admin_key) =
+            create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+
+        // Admin tries to access owner-only endpoint by "impersonating" the owner
+        // This should fail because operator impersonation doesn't exist
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/operators")
+                    .header("Authorization", format!("Bearer {}", admin_key))
+                    .header("X-On-Behalf-Of", &target_operator.id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Should still be FORBIDDEN - the X-On-Behalf-Of header has no effect
+        // on operator endpoints, so admin still can't access owner-only endpoints
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 }

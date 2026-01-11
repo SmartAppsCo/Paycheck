@@ -21,6 +21,8 @@ pub fn generate_keypair() -> (Vec<u8>, String) {
 }
 
 /// Sign claims with an Ed25519 private key
+/// The `audience` parameter is included in the JWT for debugging purposes only
+/// (e.g., to identify which project a token belongs to). It is NOT verified.
 pub fn sign_claims(
     claims: &LicenseClaims,
     private_key: &[u8],
@@ -80,29 +82,28 @@ pub fn decode_unverified(token: &str) -> Result<LicenseClaims> {
 }
 
 /// Verify a JWT and extract claims
-/// Validates signature, expiration, issuer ("paycheck"), and audience (expected_audience)
+/// Validates signature, expiration, and issuer ("paycheck")
+/// Note: Audience is NOT verified - signature verification with the project's
+/// public key is sufficient to prove the token was issued for that project.
 pub fn verify_token(
     token: &str,
     public_key_b64: &str,
-    expected_audience: &str,
 ) -> Result<JWTClaims<LicenseClaims>> {
-    verify_token_internal(token, public_key_b64, expected_audience, false)
+    verify_token_internal(token, public_key_b64, false)
 }
 
 /// Verify a JWT signature but allow expired tokens (for refresh flow)
-/// Validates signature, issuer ("paycheck"), and audience - but NOT expiration
+/// Validates signature and issuer ("paycheck") - but NOT expiration
 pub fn verify_token_allow_expired(
     token: &str,
     public_key_b64: &str,
-    expected_audience: &str,
 ) -> Result<JWTClaims<LicenseClaims>> {
-    verify_token_internal(token, public_key_b64, expected_audience, true)
+    verify_token_internal(token, public_key_b64, true)
 }
 
 fn verify_token_internal(
     token: &str,
     public_key_b64: &str,
-    expected_audience: &str,
     allow_expired: bool,
 ) -> Result<JWTClaims<LicenseClaims>> {
     let public_bytes = BASE64
@@ -125,9 +126,7 @@ fn verify_token_internal(
 
     let mut options = VerificationOptions {
         allowed_issuers: Some(std::collections::HashSet::from(["paycheck".to_string()])),
-        allowed_audiences: Some(std::collections::HashSet::from([
-            expected_audience.to_string()
-        ])),
+        // Audience not verified - signature with project's key is sufficient
         ..Default::default()
     };
 

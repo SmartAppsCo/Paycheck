@@ -6,14 +6,14 @@ use uuid::Uuid;
 use crate::crypto::MasterKey;
 use crate::db::{AppState, queries};
 use crate::error::{AppError, Result};
-use crate::extractors::{Json, Query};
+use crate::extractors::Json;
 use crate::jwt::{self, LicenseClaims};
 use crate::models::DeviceType;
 use crate::util::LicenseExpirations;
 
-/// Query parameters for GET /redeem (using short-lived activation code)
+/// Request body for POST /redeem (using short-lived activation code)
 #[derive(Debug, Deserialize)]
-pub struct RedeemCodeQuery {
+pub struct RedeemRequest {
     /// Public key - identifies the project (preferred)
     #[serde(default)]
     pub public_key: Option<String>,
@@ -60,25 +60,25 @@ fn resolve_project_id(
     }
 }
 
-/// GET /redeem - Redeem using a short-lived activation code
+/// POST /redeem - Redeem using a short-lived activation code
 ///
 /// The activation code is in PREFIX-XXXX-XXXX-XXXX-XXXX format and expires after 30 minutes.
 /// After successful redemption, a fresh activation code is returned for future use.
 pub async fn redeem_with_code(
     State(state): State<AppState>,
-    Query(query): Query<RedeemCodeQuery>,
+    Json(req): Json<RedeemRequest>,
 ) -> Result<Json<RedeemResponse>> {
     let mut conn = state.db.get()?;
 
     // Resolve project ID from public_key or project_id
     let project_id = resolve_project_id(
         &conn,
-        query.public_key.as_deref(),
-        query.project_id.as_deref(),
+        req.public_key.as_deref(),
+        req.project_id.as_deref(),
     )?;
 
     // Validate device type
-    let device_type = query
+    let device_type = req
         .device_type
         .parse::<DeviceType>()
         .ok()
@@ -87,7 +87,7 @@ pub async fn redeem_with_code(
         })?;
 
     // Look up the activation code
-    let activation_code = queries::get_activation_code_by_code(&conn, &query.code)?
+    let activation_code = queries::get_activation_code_by_code(&conn, &req.code)?
         .ok_or_else(|| AppError::NotFound("Activation code not found or expired".into()))?;
 
     // Check if already used or expired (generic message to prevent enumeration)
@@ -108,9 +108,9 @@ pub async fn redeem_with_code(
         &state.master_key,
         &license,
         &project_id,
-        &query.device_id,
+        &req.device_id,
         device_type,
-        query.device_name.as_deref(),
+        req.device_name.as_deref(),
     )
 }
 
@@ -181,7 +181,7 @@ fn redeem_license_internal(
 
     // Decrypt the private key and sign the JWT
     let private_key = master_key.decrypt_private_key(&project.id, &project.private_key)?;
-    let token = jwt::sign_claims(&claims, &private_key, &license.id, &project.domain, &jti)?;
+    let token = jwt::sign_claims(&claims, &private_key, &license.id, &project.name, &jti)?;
 
     // Create a fresh activation code for future activations (e.g., on new device)
     let new_activation_code =

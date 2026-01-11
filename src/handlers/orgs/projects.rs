@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Extension, State},
+    extract::{Extension, Query, State},
     http::HeaderMap,
 };
 
@@ -12,6 +12,7 @@ use crate::models::{
     ActorType, CreateProject, LemonSqueezyConfigMasked, ProjectPublic, StripeConfigMasked,
     UpdateProject,
 };
+use crate::pagination::{Paginated, PaginationQuery};
 use crate::util::audit_log;
 
 pub async fn create_project(
@@ -25,6 +26,10 @@ pub async fn create_project(
 
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
+
+    // Look up org for audit log
+    let org = queries::get_organization_by_id(&conn, &org_id)?
+        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
 
     // Generate Ed25519 key pair
     let (private_key, public_key) = jwt::generate_keypair();
@@ -43,13 +48,17 @@ pub async fn create_project(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "create_project",
         "project",
         &project.id,
-        Some(&serde_json::json!({ "name": input.name, "domain": input.domain })),
+        Some(&serde_json::json!({ "name": input.name })),
         Some(&org_id),
         Some(&project.id),
+        &ctx.audit_names()
+            .resource(project.name.clone())
+            .org(org.name),
     )?;
 
     Ok(Json(project.into()))
@@ -59,28 +68,28 @@ pub async fn list_projects(
     State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
     Path(org_id): Path<String>,
-) -> Result<Json<Vec<ProjectPublic>>> {
+    Query(pagination): Query<PaginationQuery>,
+) -> Result<Json<Paginated<ProjectPublic>>> {
     let conn = state.db.get()?;
-    let projects = queries::list_projects_for_org(&conn, &org_id)?;
+    let limit = pagination.limit();
+    let offset = pagination.offset();
 
     // Filter based on access
-    let accessible: Vec<ProjectPublic> = if ctx.member.role.has_implicit_project_access() {
-        projects.into_iter().map(Into::into).collect()
+    let (projects, total) = if ctx.member.role.has_implicit_project_access() {
+        queries::list_projects_for_org_paginated(&conn, &org_id, limit, offset)?
     } else {
         // For 'member' role, only show projects they're explicitly added to
-        projects
-            .into_iter()
-            .filter(|p| {
-                queries::get_project_member(&conn, &ctx.member.id, &p.id)
-                    .ok()
-                    .flatten()
-                    .is_some()
-            })
-            .map(Into::into)
-            .collect()
+        queries::list_accessible_projects_for_member_paginated(
+            &conn,
+            &org_id,
+            &ctx.member.id,
+            limit,
+            offset,
+        )?
     };
 
-    Ok(Json(accessible))
+    let items: Vec<ProjectPublic> = projects.into_iter().map(Into::into).collect();
+    Ok(Json(Paginated::new(items, total, limit, offset)))
 }
 
 pub async fn get_project(
@@ -112,6 +121,12 @@ pub async fn update_project(
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
+    // Look up org and project for audit log
+    let org = queries::get_organization_by_id(&conn, &path.org_id)?
+        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+    let existing = queries::get_project_by_id(&conn, &path.project_id)?
+        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+
     queries::update_project(&conn, &path.project_id, &input)?;
 
     audit_log(
@@ -119,13 +134,17 @@ pub async fn update_project(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "update_project",
         "project",
         &path.project_id,
-        Some(&serde_json::json!({ "name": input.name, "domain": input.domain })),
+        Some(&serde_json::json!({ "name": input.name })),
         Some(&path.org_id),
         Some(&path.project_id),
+        &ctx.audit_names()
+            .resource(existing.name)
+            .org(org.name),
     )?;
 
     let project = queries::get_project_by_id(&conn, &path.project_id)?
@@ -145,6 +164,9 @@ pub async fn delete_project(
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
+    // Look up org and project for audit log
+    let org = queries::get_organization_by_id(&conn, &path.org_id)?
+        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
     let existing = queries::get_project_by_id(&conn, &path.project_id)?
         .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
 
@@ -155,13 +177,17 @@ pub async fn delete_project(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "delete_project",
         "project",
         &path.project_id,
-        Some(&serde_json::json!({ "name": existing.name, "domain": existing.domain })),
+        Some(&serde_json::json!({ "name": existing.name })),
         Some(&path.org_id),
         Some(&path.project_id),
+        &ctx.audit_names()
+            .resource(existing.name)
+            .org(org.name),
     )?;
 
     Ok(Json(serde_json::json!({ "deleted": true })))
@@ -172,7 +198,7 @@ pub struct PaymentConfigResponse {
     pub org_id: String,
     pub stripe_config: Option<StripeConfigMasked>,
     pub ls_config: Option<LemonSqueezyConfigMasked>,
-    pub default_provider: Option<String>,
+    pub payment_provider: Option<String>,
 }
 
 /// Get payment provider configuration for the organization (masked for security)
@@ -202,6 +228,6 @@ pub async fn get_payment_config(
         org_id,
         stripe_config,
         ls_config,
-        default_provider: org.default_provider,
+        payment_provider: org.payment_provider,
     }))
 }

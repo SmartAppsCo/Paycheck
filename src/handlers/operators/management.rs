@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Extension, State},
+    extract::{Extension, Query, State},
     http::HeaderMap,
 };
 use serde::Serialize;
@@ -9,6 +9,7 @@ use crate::error::{AppError, Result};
 use crate::extractors::{Json, Path};
 use crate::middleware::OperatorContext;
 use crate::models::{ActorType, CreateOperator, Operator, UpdateOperator};
+use crate::pagination::{Paginated, PaginationQuery};
 use crate::util::audit_log;
 
 #[derive(Serialize)]
@@ -25,14 +26,14 @@ pub async fn create_operator(
 ) -> Result<Json<OperatorCreated>> {
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
-    let api_key = queries::generate_api_key();
-    let operator = queries::create_operator(&conn, &input, &api_key, Some(&ctx.operator.id))?;
+    let (operator, api_key) = queries::create_operator(&conn, &input)?;
 
     audit_log(
         &audit_conn,
         state.audit_log_enabled,
         ActorType::Operator,
         Some(&ctx.operator.id),
+        None, // Operators don't use impersonation
         &headers,
         "create_operator",
         "operator",
@@ -40,15 +41,21 @@ pub async fn create_operator(
         Some(&serde_json::json!({ "email": input.email, "role": input.role })),
         None,
         None,
+        &ctx.audit_names().resource(operator.name.clone()),
     )?;
 
     Ok(Json(OperatorCreated { operator, api_key }))
 }
 
-pub async fn list_operators(State(state): State<AppState>) -> Result<Json<Vec<Operator>>> {
+pub async fn list_operators(
+    State(state): State<AppState>,
+    Query(pagination): Query<PaginationQuery>,
+) -> Result<Json<Paginated<Operator>>> {
     let conn = state.db.get()?;
-    let operators = queries::list_operators(&conn)?;
-    Ok(Json(operators))
+    let limit = pagination.limit();
+    let offset = pagination.offset();
+    let (operators, total) = queries::list_operators_paginated(&conn, limit, offset)?;
+    Ok(Json(Paginated::new(operators, total, limit, offset)))
 }
 
 pub async fn get_operator(
@@ -86,6 +93,7 @@ pub async fn update_operator(
         state.audit_log_enabled,
         ActorType::Operator,
         Some(&ctx.operator.id),
+        None, // Operators don't use impersonation
         &headers,
         "update_operator",
         "operator",
@@ -93,6 +101,7 @@ pub async fn update_operator(
         Some(&serde_json::json!({ "name": input.name, "role": input.role })),
         None,
         None,
+        &ctx.audit_names().resource(input.name.clone()),
     )?;
 
     let operator = queries::get_operator_by_id(&conn, &id)?
@@ -125,6 +134,7 @@ pub async fn delete_operator(
         state.audit_log_enabled,
         ActorType::Operator,
         Some(&ctx.operator.id),
+        None, // Operators don't use impersonation
         &headers,
         "delete_operator",
         "operator",
@@ -132,6 +142,7 @@ pub async fn delete_operator(
         Some(&serde_json::json!({ "email": existing.email })),
         None,
         None,
+        &ctx.audit_names().resource(existing.name.clone()),
     )?;
 
     Ok(Json(serde_json::json!({ "deleted": true })))

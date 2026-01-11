@@ -1,3 +1,4 @@
+mod api_keys;
 mod audit_logs;
 mod licenses;
 mod members;
@@ -6,6 +7,7 @@ mod products;
 mod project_members;
 mod projects;
 
+pub use api_keys::*;
 pub use audit_logs::*;
 pub use licenses::*;
 pub use members::*;
@@ -16,20 +18,35 @@ pub use projects::*;
 
 use axum::{
     Router, middleware,
-    routing::{delete, get, post, put},
+    routing::{delete, get, patch, post, put},
 };
 
+use crate::config::RateLimitConfig;
 use crate::db::AppState;
 use crate::middleware::{org_member_auth, org_member_project_auth};
+use crate::rate_limit;
 
-pub fn router(state: AppState) -> Router<AppState> {
-    // Org-level routes (members management, payment config, audit logs)
+pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<AppState> {
+    // Org-level routes (members management, payment config, audit logs, api keys)
     let org_routes = Router::new()
         .route("/orgs/{org_id}/members", post(create_org_member))
         .route("/orgs/{org_id}/members", get(list_org_members))
         .route("/orgs/{org_id}/members/{id}", get(get_org_member))
         .route("/orgs/{org_id}/members/{id}", put(update_org_member))
         .route("/orgs/{org_id}/members/{id}", delete(delete_org_member))
+        // Member API keys
+        .route(
+            "/orgs/{org_id}/members/{member_id}/api-keys",
+            post(api_keys::create_api_key),
+        )
+        .route(
+            "/orgs/{org_id}/members/{member_id}/api-keys",
+            get(api_keys::list_api_keys),
+        )
+        .route(
+            "/orgs/{org_id}/members/{member_id}/api-keys/{key_id}",
+            delete(api_keys::revoke_api_key),
+        )
         .route("/orgs/{org_id}/projects", post(create_project))
         .route("/orgs/{org_id}/projects", get(list_projects))
         // Payment config (at org level, masked for customers to verify their settings)
@@ -57,6 +74,10 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route(
             "/orgs/{org_id}/projects/{project_id}/members",
             get(list_project_members),
+        )
+        .route(
+            "/orgs/{org_id}/projects/{project_id}/members/{id}",
+            get(get_project_member),
         )
         .route(
             "/orgs/{org_id}/projects/{project_id}/members/{id}",
@@ -122,6 +143,10 @@ pub fn router(state: AppState) -> Router<AppState> {
             get(get_license),
         )
         .route(
+            "/orgs/{org_id}/projects/{project_id}/licenses/{license_id}",
+            patch(update_license),
+        )
+        .route(
             "/orgs/{org_id}/projects/{project_id}/licenses/{license_id}/revoke",
             post(revoke_license),
         )
@@ -139,5 +164,12 @@ pub fn router(state: AppState) -> Router<AppState> {
             org_member_project_auth,
         ));
 
-    org_routes.merge(project_routes)
+    let merged = org_routes.merge(project_routes);
+
+    // Apply rate limiting if configured (skip if rpm is 0, useful for tests)
+    if rate_limit_config.org_ops_rpm > 0 {
+        merged.layer(rate_limit::org_ops_layer(rate_limit_config.org_ops_rpm))
+    } else {
+        merged
+    }
 }

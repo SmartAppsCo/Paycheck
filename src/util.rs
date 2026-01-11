@@ -5,7 +5,7 @@ use rusqlite::Connection;
 
 use crate::db::queries;
 use crate::error::Result;
-use crate::models::{ActorType, AuditLog, Product};
+use crate::models::{ActorType, AuditLog, AuditLogNames, Product};
 
 const SECONDS_PER_DAY: i64 = 86400;
 
@@ -78,12 +78,19 @@ pub fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
 ///
 /// This is a thin wrapper around `queries::create_audit_log` that handles the
 /// common pattern of extracting request info from headers.
+///
+/// The `impersonator_id` parameter should be set when an operator is acting on behalf
+/// of an org member (via `X-On-Behalf-Of` header). This ensures the audit trail captures
+/// both who requested the action (impersonator) and whose permissions were used (actor).
+///
+/// The `names` parameter provides human-readable names for display in text logs.
 #[allow(clippy::too_many_arguments)]
 pub fn audit_log(
     conn: &Connection,
     enabled: bool,
     actor_type: ActorType,
     actor_id: Option<&str>,
+    impersonator_id: Option<&str>,
     headers: &HeaderMap,
     action: &str,
     resource_type: &str,
@@ -91,6 +98,7 @@ pub fn audit_log(
     details: Option<&serde_json::Value>,
     org_id: Option<&str>,
     project_id: Option<&str>,
+    names: &AuditLogNames,
 ) -> Result<AuditLog> {
     let (ip, ua) = extract_request_info(headers);
     queries::create_audit_log(
@@ -98,6 +106,7 @@ pub fn audit_log(
         enabled,
         actor_type,
         actor_id,
+        impersonator_id,
         action,
         resource_type,
         resource_id,
@@ -106,5 +115,6 @@ pub fn audit_log(
         project_id,
         ip.as_deref(),
         ua.as_deref(),
+        names,
     )
 }

@@ -10,16 +10,23 @@ pub enum OperatorRole {
     View,
 }
 
+impl OperatorRole {
+    /// Returns true if this role can manage other operators (create, update, delete)
+    pub fn can_manage_operators(&self) -> bool {
+        matches!(self, OperatorRole::Owner)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Operator {
     pub id: String,
     pub email: String,
     pub name: String,
     pub role: OperatorRole,
+    /// Deprecated: migrated to operator_api_keys table
     #[serde(skip_serializing)]
-    pub api_key_hash: String,
+    pub api_key_hash: Option<String>,
     pub created_at: i64,
-    pub created_by: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

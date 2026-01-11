@@ -32,8 +32,16 @@ pub async fn payment_callback(
     let session = queries::get_payment_session(&conn, &query.session)?
         .ok_or_else(|| AppError::NotFound("Session not found".into()))?;
 
-    // Determine base redirect URL
-    let base_redirect = session
+    // Get the product to find project
+    let product = queries::get_product_by_id(&conn, &session.product_id)?
+        .ok_or_else(|| AppError::Internal("Product not found".into()))?;
+
+    // Get project for redirect URL and activation code prefix
+    let project = queries::get_project_by_id(&conn, &product.project_id)?
+        .ok_or_else(|| AppError::Internal("Project not found".into()))?;
+
+    // Determine base redirect URL (from project config or fallback to Paycheck success page)
+    let base_redirect = project
         .redirect_url
         .as_ref()
         .unwrap_or(&state.success_page_url);
@@ -47,14 +55,6 @@ pub async fn payment_callback(
         );
         return Ok(Redirect::temporary(&redirect_url));
     }
-
-    // Get the product to find project
-    let product = queries::get_product_by_id(&conn, &session.product_id)?
-        .ok_or_else(|| AppError::Internal("Product not found".into()))?;
-
-    // Get project for the activation code prefix
-    let project = queries::get_project_by_id(&conn, &product.project_id)?
-        .ok_or_else(|| AppError::Internal("Project not found".into()))?;
 
     // Get license directly via stored ID (set by webhook when license was created)
     let license_id = session.license_id.ok_or_else(|| {

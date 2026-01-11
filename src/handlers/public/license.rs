@@ -57,12 +57,12 @@ pub async fn get_license_info(
     let conn = state.db.get()?;
     let token = auth.token();
 
-    // Look up project by public key
-    let project = queries::get_project_by_public_key(&conn, &query.public_key)?
+    // Look up project by public key (validates project exists)
+    let _project = queries::get_project_by_public_key(&conn, &query.public_key)?
         .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
 
     // Verify JWT signature (allow expired JWTs - we just need identity)
-    let claims = jwt::verify_token_allow_expired(token, &query.public_key, &project.domain)?;
+    let claims = jwt::verify_token_allow_expired(token, &query.public_key)?;
 
     // Extract JTI from verified token
     let jti = claims

@@ -43,14 +43,18 @@ pub fn query_all<T: FromRow>(
 
 // ============ SQL SELECT Constants ============
 
-pub const OPERATOR_COLS: &str = "id, email, name, role, api_key_hash, created_at, created_by";
+pub const OPERATOR_COLS: &str = "id, email, name, role, api_key_hash, created_at";
 
 pub const ORGANIZATION_COLS: &str =
-    "id, name, stripe_config, ls_config, resend_api_key, default_provider, created_at, updated_at";
+    "id, name, stripe_config, ls_config, resend_api_key, payment_provider, created_at, updated_at";
 
-pub const ORG_MEMBER_COLS: &str = "id, org_id, email, name, role, api_key_hash, created_at";
+pub const ORG_MEMBER_COLS: &str = "id, org_id, email, name, role, api_key_hash, external_user_id, created_at";
 
-pub const PROJECT_COLS: &str = "id, org_id, name, domain, license_key_prefix, private_key, public_key, allowed_redirect_urls, email_from, email_enabled, email_webhook_url, created_at, updated_at";
+pub const ORG_MEMBER_API_KEY_COLS: &str = "id, org_member_id, name, key_prefix, key_hash, created_at, last_used_at, expires_at, revoked_at";
+
+pub const OPERATOR_API_KEY_COLS: &str = "id, operator_id, name, key_prefix, key_hash, created_at, last_used_at, expires_at, revoked_at";
+
+pub const PROJECT_COLS: &str = "id, org_id, name, license_key_prefix, private_key, public_key, redirect_url, email_from, email_enabled, email_webhook_url, created_at, updated_at";
 
 pub const PROJECT_MEMBER_COLS: &str = "id, org_member_id, project_id, role, created_at";
 
@@ -64,7 +68,7 @@ pub const LICENSE_COLS: &str = "id, email_hash, project_id, product_id, customer
 pub const DEVICE_COLS: &str =
     "id, license_id, device_id, device_type, name, jti, activated_at, last_seen_at";
 
-pub const PAYMENT_SESSION_COLS: &str = "id, product_id, customer_id, redirect_url, created_at, completed, license_id";
+pub const PAYMENT_SESSION_COLS: &str = "id, product_id, customer_id, created_at, completed, license_id";
 
 pub const ACTIVATION_CODE_COLS: &str =
     "id, code_hash, license_id, expires_at, used, created_at";
@@ -80,7 +84,6 @@ impl FromRow for Operator {
             role: row.get::<_, String>(3)?.parse::<OperatorRole>().unwrap(),
             api_key_hash: row.get(4)?,
             created_at: row.get(5)?,
-            created_by: row.get(6)?,
         })
     }
 }
@@ -97,7 +100,7 @@ impl FromRow for Organization {
             stripe_config_encrypted: stripe_data,
             ls_config_encrypted: ls_data,
             resend_api_key_encrypted: resend_data,
-            default_provider: row.get(5)?,
+            payment_provider: row.get(5)?,
             created_at: row.get(6)?,
             updated_at: row.get(7)?,
         })
@@ -113,28 +116,59 @@ impl FromRow for OrgMember {
             name: row.get(3)?,
             role: row.get::<_, String>(4)?.parse::<OrgMemberRole>().unwrap(),
             api_key_hash: row.get(5)?,
-            created_at: row.get(6)?,
+            external_user_id: row.get(6)?,
+            created_at: row.get(7)?,
+        })
+    }
+}
+
+impl FromRow for OrgMemberApiKey {
+    fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        Ok(OrgMemberApiKey {
+            id: row.get(0)?,
+            org_member_id: row.get(1)?,
+            name: row.get(2)?,
+            prefix: row.get(3)?,
+            key_hash: row.get(4)?,
+            created_at: row.get(5)?,
+            last_used_at: row.get(6)?,
+            expires_at: row.get(7)?,
+            revoked_at: row.get(8)?,
+        })
+    }
+}
+
+impl FromRow for OperatorApiKey {
+    fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        Ok(OperatorApiKey {
+            id: row.get(0)?,
+            operator_id: row.get(1)?,
+            name: row.get(2)?,
+            prefix: row.get(3)?,
+            key_hash: row.get(4)?,
+            created_at: row.get(5)?,
+            last_used_at: row.get(6)?,
+            expires_at: row.get(7)?,
+            revoked_at: row.get(8)?,
         })
     }
 }
 
 impl FromRow for Project {
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        let redirect_urls_str: String = row.get(7)?;
         Ok(Project {
             id: row.get(0)?,
             org_id: row.get(1)?,
             name: row.get(2)?,
-            domain: row.get(3)?,
-            license_key_prefix: row.get(4)?,
-            private_key: row.get(5)?,
-            public_key: row.get(6)?,
-            allowed_redirect_urls: serde_json::from_str(&redirect_urls_str).unwrap_or_default(),
-            email_from: row.get(8)?,
-            email_enabled: row.get::<_, i32>(9)? != 0,
-            email_webhook_url: row.get(10)?,
-            created_at: row.get(11)?,
-            updated_at: row.get(12)?,
+            license_key_prefix: row.get(3)?,
+            private_key: row.get(4)?,
+            public_key: row.get(5)?,
+            redirect_url: row.get(6)?,
+            email_from: row.get(7)?,
+            email_enabled: row.get::<_, i32>(8)? != 0,
+            email_webhook_url: row.get(9)?,
+            created_at: row.get(10)?,
+            updated_at: row.get(11)?,
         })
     }
 }
@@ -249,10 +283,9 @@ impl FromRow for PaymentSession {
             id: row.get(0)?,
             product_id: row.get(1)?,
             customer_id: row.get(2)?,
-            redirect_url: row.get(3)?,
-            created_at: row.get(4)?,
-            completed: row.get::<_, i32>(5)? != 0,
-            license_id: row.get(6)?,
+            created_at: row.get(3)?,
+            completed: row.get::<_, i32>(4)? != 0,
+            license_id: row.get(5)?,
         })
     }
 }

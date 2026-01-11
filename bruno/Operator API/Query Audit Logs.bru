@@ -1,7 +1,7 @@
 meta {
   name: Query Audit Logs
   type: http
-  seq: 10
+  seq: 12
 }
 
 get {
@@ -16,12 +16,18 @@ auth:bearer {
 
 docs {
   Query audit logs (requires view+ role).
-
+  
   All query params are optional filters:
-  - actor_type: system, operator, org_member, project_member
-  - action: Action name (create, update, delete, etc.)
+  - actor_type: system, operator, org_member, public
+  - actor_id: Actor ID
+  - impersonator_id: Filter to actions performed via impersonation
+  - action: Action name (create_organization, create_license, etc.)
   - resource_type: Resource type being acted on
   - resource_id: Specific resource ID
-  - limit: Max results
+  - org_id: Filter by organization
+  - project_id: Filter by project
+  - from_timestamp: Unix timestamp lower bound
+  - to_timestamp: Unix timestamp upper bound
+  - limit: Max results (default 50, max 100)
   - offset: Pagination offset
 }

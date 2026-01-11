@@ -5,6 +5,7 @@ export type {
   OfflineValidateResult,
   SyncResult,
   ImportResult,
+  CallbackActivationResult,
 } from './paycheck';
 
 // Types
@@ -21,6 +22,7 @@ export type {
   LicenseInfo,
   LicenseDeviceInfo,
   DeactivateResult,
+  RequestCodeResult,
   PaycheckErrorCode,
 } from './types';
 export { PaycheckError } from './types';

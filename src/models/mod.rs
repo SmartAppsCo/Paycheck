@@ -1,3 +1,4 @@
+mod api_key;
 mod audit_log;
 mod device;
 mod license;
@@ -10,6 +11,7 @@ mod product_payment_config;
 mod project;
 mod project_member;
 
+pub use api_key::*;
 pub use audit_log::*;
 pub use device::*;
 pub use license::*;

@@ -15,8 +15,9 @@
 #
 # What this creates:
 #   1. Organization: "Paycheck" with owner admin@paycheck.dev
-#   2. Project: "Paycheck" (domain: paycheck.dev, prefix: PC)
-#   3. Products:
+#   2. API key for the owner (via operator impersonation)
+#   3. Project: "Paycheck" (domain: paycheck.dev, prefix: PC)
+#   4. Products:
 #      - Free:       perpetual, 1 device, basic features
 #      - Pro:        30-day subscription, 5 devices, priority support
 #      - Enterprise: annual, unlimited devices, SSO, audit logs, etc.
@@ -36,8 +37,12 @@
 #   BASE_URL=https://api.paycheck.dev OPERATOR_API_KEY=abc123 ./scripts/bootstrap-paycheck.sh
 #
 # Output:
-#   On success, prints the org ID, owner API key, project ID, public key,
-#   and product IDs. SAVE THE OWNER API KEY - it is only shown once.
+#   On success, prints the org ID, owner member ID, owner API key, project ID,
+#   public key, and product IDs. SAVE THE OWNER API KEY - it is only shown once.
+#
+# API Key Flow:
+#   Organizations no longer auto-create API keys for owners. This script
+#   explicitly creates one via operator impersonation after org creation.
 #
 # Idempotency:
 #   This script is NOT idempotent. Running it twice will fail (duplicate org).
@@ -69,7 +74,7 @@ ORG_RESPONSE=$(curl -s -X POST "$BASE_URL/operators/organizations" \
     }')
 
 ORG_ID=$(echo "$ORG_RESPONSE" | jq -r '.organization.id')
-ORG_API_KEY=$(echo "$ORG_RESPONSE" | jq -r '.owner_api_key')
+OWNER_ID=$(echo "$ORG_RESPONSE" | jq -r '.owner.id')
 
 if [ "$ORG_ID" = "null" ] || [ -z "$ORG_ID" ]; then
     echo "Failed to create organization:"
@@ -77,11 +82,38 @@ if [ "$ORG_ID" = "null" ] || [ -z "$ORG_ID" ]; then
     exit 1
 fi
 
+if [ "$OWNER_ID" = "null" ] || [ -z "$OWNER_ID" ]; then
+    echo "Failed to get owner member ID:"
+    echo "$ORG_RESPONSE" | jq .
+    exit 1
+fi
+
 echo "  Organization ID: $ORG_ID"
+echo "  Owner Member ID: $OWNER_ID"
+echo ""
+
+# 2. Create an API key for the owner (using operator impersonation)
+echo "Creating owner API key..."
+API_KEY_RESPONSE=$(curl -s -X POST "$BASE_URL/orgs/$ORG_ID/members/$OWNER_ID/api-keys" \
+    -H "Authorization: Bearer $OPERATOR_API_KEY" \
+    -H "X-On-Behalf-Of: $OWNER_ID" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "name": "Bootstrap Key"
+    }')
+
+ORG_API_KEY=$(echo "$API_KEY_RESPONSE" | jq -r '.api_key')
+
+if [ "$ORG_API_KEY" = "null" ] || [ -z "$ORG_API_KEY" ]; then
+    echo "Failed to create owner API key:"
+    echo "$API_KEY_RESPONSE" | jq .
+    exit 1
+fi
+
 echo "  Owner API Key: $ORG_API_KEY"
 echo ""
 
-# 2. Create the Paycheck project
+# 3. Create the Paycheck project
 echo "Creating project..."
 PROJECT_RESPONSE=$(curl -s -X POST "$BASE_URL/orgs/$ORG_ID/projects" \
     -H "Authorization: Bearer $ORG_API_KEY" \
@@ -105,7 +137,7 @@ echo "  Project ID: $PROJECT_ID"
 echo "  Public Key: $PUBLIC_KEY"
 echo ""
 
-# 3. Create products (Free, Pro, Enterprise)
+# 4. Create products (Free, Pro, Enterprise)
 echo "Creating products..."
 
 # Free tier
@@ -163,6 +195,7 @@ echo "============================================"
 echo ""
 echo "Organization:"
 echo "  ID: $ORG_ID"
+echo "  Owner Member ID: $OWNER_ID"
 echo "  Owner API Key: $ORG_API_KEY"
 echo ""
 echo "Project:"

@@ -13,7 +13,7 @@ use paycheck::email::EmailService;
 use paycheck::handlers;
 use paycheck::jwt;
 use paycheck::models::{
-    self, ActorType, CreateOperator, CreateOrgMember, CreatePaymentConfig, CreateProduct,
+    self, ActorType, AuditLogNames, CreateOperator, CreateOrgMember, CreatePaymentConfig, CreateProduct,
     CreateProject, OperatorRole, OrgMemberRole,
 };
 use paycheck::rate_limit::ActivationRateLimiter;
@@ -59,22 +59,21 @@ fn bootstrap_first_operator(state: &AppState, email: &str) {
         return;
     }
 
-    let api_key = queries::generate_api_key();
-
     let input = CreateOperator {
         email: email.to_string(),
         name: "Bootstrap Operator".to_string(),
         role: OperatorRole::Owner,
     };
 
-    let operator = queries::create_operator(&conn, &input, &api_key, None)
-        .expect("Failed to create bootstrap operator");
+    let (operator, api_key) =
+        queries::create_operator(&conn, &input).expect("Failed to create bootstrap operator");
 
     queries::create_audit_log(
         &audit_conn,
         state.audit_log_enabled,
         ActorType::System,
-        None,
+        None, // actor_id
+        None, // impersonator_id
         "bootstrap_operator",
         "operator",
         &operator.id,
@@ -86,6 +85,7 @@ fn bootstrap_first_operator(state: &AppState, email: &str) {
         None,
         None,
         None,
+        &AuditLogNames::default(),
     )
     .expect("Failed to create audit log for bootstrap");
 
@@ -119,20 +119,20 @@ fn seed_dev_data(state: &AppState) {
     }
 
     // 1. Create operator
-    let operator_api_key = queries::generate_api_key();
     let operator_input = CreateOperator {
         email: "dev@paycheck.local".to_string(),
         name: "Dev Operator".to_string(),
         role: OperatorRole::Owner,
     };
-    let operator = queries::create_operator(&conn, &operator_input, &operator_api_key, None)
-        .expect("Failed to create dev operator");
+    let (operator, operator_api_key) =
+        queries::create_operator(&conn, &operator_input).expect("Failed to create dev operator");
 
     queries::create_audit_log(
         &audit_conn,
         state.audit_log_enabled,
         ActorType::System,
-        None,
+        None, // actor_id
+        None, // impersonator_id
         "seed_operator",
         "operator",
         &operator.id,
@@ -141,6 +141,7 @@ fn seed_dev_data(state: &AppState) {
         None,
         None,
         None,
+        &AuditLogNames::default().resource(operator.name.clone()),
     )
     .expect("Failed to create audit log");
 
@@ -151,6 +152,7 @@ fn seed_dev_data(state: &AppState) {
             name: "Dev Org".to_string(),
             owner_email: None,
             owner_name: None,
+            external_user_id: None,
         },
     )
     .expect("Failed to create dev organization");
@@ -159,7 +161,8 @@ fn seed_dev_data(state: &AppState) {
         &audit_conn,
         state.audit_log_enabled,
         ActorType::System,
-        None,
+        None, // actor_id
+        None, // impersonator_id
         "seed_organization",
         "organization",
         &org.id,
@@ -168,24 +171,30 @@ fn seed_dev_data(state: &AppState) {
         None,
         None,
         None,
+        &AuditLogNames::default().resource(org.name.clone()),
     )
     .expect("Failed to create audit log");
 
     // 3. Create org member
-    let member_api_key = queries::generate_api_key();
     let member_input = CreateOrgMember {
         email: "dev@devorg.local".to_string(),
         name: "Dev Member".to_string(),
         role: OrgMemberRole::Owner,
+        external_user_id: None,
     };
-    let member = queries::create_org_member(&conn, &org.id, &member_input, &member_api_key)
+    let member = queries::create_org_member(&conn, &org.id, &member_input, "")
         .expect("Failed to create dev org member");
+
+    // Create an API key for the member
+    let (_, member_api_key) = queries::create_org_member_api_key(&conn, &member.id, "Default", None)
+        .expect("Failed to create dev org member API key");
 
     queries::create_audit_log(
         &audit_conn,
         state.audit_log_enabled,
         ActorType::System,
-        None,
+        None, // actor_id
+        None, // impersonator_id
         "seed_org_member",
         "org_member",
         &member.id,
@@ -194,6 +203,9 @@ fn seed_dev_data(state: &AppState) {
         None,
         None,
         None,
+        &AuditLogNames::default()
+            .resource(member.name.clone())
+            .org(org.name.clone()),
     )
     .expect("Failed to create audit log");
 
@@ -201,9 +213,8 @@ fn seed_dev_data(state: &AppState) {
     let (private_key, public_key) = jwt::generate_keypair();
     let project_input = CreateProject {
         name: "Dev Project".to_string(),
-        domain: "localhost".to_string(),
         license_key_prefix: "PC".to_string(),
-        allowed_redirect_urls: vec![],
+        redirect_url: None,
         email_from: None,
         email_enabled: true,
         email_webhook_url: None,
@@ -222,7 +233,8 @@ fn seed_dev_data(state: &AppState) {
         &audit_conn,
         state.audit_log_enabled,
         ActorType::System,
-        None,
+        None, // actor_id
+        None, // impersonator_id
         "seed_project",
         "project",
         &project.id,
@@ -231,6 +243,10 @@ fn seed_dev_data(state: &AppState) {
         Some(&project.id),
         None,
         None,
+        &AuditLogNames::default()
+            .resource(project.name.clone())
+            .org(org.name.clone())
+            .project(project.name.clone()),
     )
     .expect("Failed to create audit log");
 
@@ -255,7 +271,8 @@ fn seed_dev_data(state: &AppState) {
         &audit_conn,
         state.audit_log_enabled,
         ActorType::System,
-        None,
+        None, // actor_id
+        None, // impersonator_id
         "seed_product",
         "product",
         &product.id,
@@ -264,6 +281,10 @@ fn seed_dev_data(state: &AppState) {
         Some(&project.id),
         None,
         None,
+        &AuditLogNames::default()
+            .resource(product.name.clone())
+            .org(org.name.clone())
+            .project(project.name.clone()),
     )
     .expect("Failed to create audit log");
 
@@ -280,35 +301,49 @@ fn seed_dev_data(state: &AppState) {
 
     // Print copy-paste friendly output
     println!();
-    println!("╔══════════════════════════════════════════════════════════════════╗");
-    println!("║                     DEV ENVIRONMENT READY                        ║");
-    println!("╠══════════════════════════════════════════════════════════════════╣");
-    println!("║ Bruno env vars (2-space indent):                                 ║");
-    println!("╠══════════════════════════════════════════════════════════════════╣");
+    println!("══════════════════════════════════════════════════════════════════");
+    println!("                     DEV ENVIRONMENT READY");
+    println!("══════════════════════════════════════════════════════════════════");
+    println!();
+    println!("──────────────────────────────────────────────────────────────────");
+    println!("Bruno env vars (paste into Local.bru with 2-space indent):");
+    println!("──────────────────────────────────────────────────────────────────");
+    println!();
     println!("  operator_api_key: {}", operator_api_key);
     println!("  org_api_key: {}", member_api_key);
     println!("  org_id: {}", org.id);
     println!("  project_id: {}", project.id);
     println!("  product_id: {}", product.id);
     println!("  project_pub_key: {}", public_key);
-    println!("╠══════════════════════════════════════════════════════════════════╣");
-    println!("║ Quick test (no Stripe needed):                                   ║");
-    println!("╠══════════════════════════════════════════════════════════════════╣");
-    println!("║ 1. Create a license via admin API:                               ║");
-    println!("║    curl -X POST http://localhost:3000/dev/create-license \\       ║");
-    println!("║      -H 'Content-Type: application/json' \\                       ║");
-    println!("║{:<66}║", format!("      -d '{{\"product_id\": \"{}\"}}'", product.id));
-    println!("║    → Returns activation_code                                     ║");
-    println!("║                                                                  ║");
-    println!("║ 2. Activate with code & get JWT:                                 ║");
-    println!("║    curl 'http://localhost:3000/redeem?code=<code>&device_id=dev-1║");
-    println!("║          &device_type=uuid&project_id=<project_id>'              ║");
-    println!("╠══════════════════════════════════════════════════════════════════╣");
-    println!("║ For real Stripe payments:                                        ║");
-    println!("║ • Update org with stripe_secret_key and stripe_webhook_secret    ║");
-    println!("║ • Update product payment_config with stripe_price_id             ║");
-    println!("║ • Use ngrok to expose webhook: POST /webhook/stripe              ║");
-    println!("╚══════════════════════════════════════════════════════════════════╝");
+    println!("  member_id: {}", member.id);
+    println!();
+    println!("──────────────────────────────────────────────────────────────────");
+    println!("Quick test (no Stripe needed):");
+    println!("──────────────────────────────────────────────────────────────────");
+    println!();
+    println!("1. Create a license via operator impersonation (returns activation_code):");
+    println!();
+    println!(
+        "curl http://localhost:4242/orgs/{}/projects/{}/licenses \\",
+        org.id, project.id
+    );
+    println!("  -H 'Authorization: Bearer {}' \\", operator_api_key);
+    println!("  -H 'X-On-Behalf-Of: {}' \\", member.id);
+    println!("  -H 'Content-Type: application/json' \\");
+    println!("  -d '{{\"product_id\": \"{}\"}}'", product.id);
+    println!();
+    println!("2. Activate with code & get JWT:");
+    println!();
+    println!("curl http://localhost:4242/redeem \\");
+    println!("  -H 'Content-Type: application/json' \\");
+    println!("  -d '{{\"code\": \"<CODE>\", \"device_id\": \"dev-1\", \"device_type\": \"uuid\"}}'");
+    println!();
+    println!("──────────────────────────────────────────────────────────────────");
+    println!("For real Stripe payments:");
+    println!("  - Update org with stripe_secret_key and stripe_webhook_secret");
+    println!("  - Update product payment_config with stripe_price_id");
+    println!("  - Use ngrok to expose webhook: POST /webhook/stripe");
+    println!("══════════════════════════════════════════════════════════════════");
     println!();
 }
 
@@ -619,23 +654,24 @@ async fn main() {
         email_service: Arc::new(email_service),
     };
 
-    // Purge old audit logs on startup (0 = never purge)
-    if config.audit_log_retention_days > 0 {
+    // Purge old public audit logs on startup (0 = never purge)
+    // Only public (end-user) logs are purged; internal actions are kept forever.
+    if config.public_audit_log_retention_days > 0 {
         let conn = state
             .audit
             .get()
             .expect("Failed to get audit connection for purge");
-        match queries::purge_old_audit_logs(&conn, config.audit_log_retention_days) {
+        match queries::purge_old_public_audit_logs(&conn, config.public_audit_log_retention_days) {
             Ok(count) if count > 0 => {
                 tracing::info!(
-                    "Purged {} audit log entries older than {} days",
+                    "Purged {} public audit log entries older than {} days",
                     count,
-                    config.audit_log_retention_days
+                    config.public_audit_log_retention_days
                 );
             }
             Ok(_) => {}
             Err(e) => {
-                tracing::warn!("Failed to purge old audit logs: {}", e);
+                tracing::warn!("Failed to purge old public audit logs: {}", e);
             }
         }
     }
@@ -645,6 +681,10 @@ async fn main() {
         if !config.dev_mode {
             tracing::warn!("--seed flag ignored: not in dev mode (set PAYCHECK_ENV=dev)");
         } else {
+            if cli.ephemeral {
+                println!();
+                println!("⚠️  EPHEMERAL MODE: databases will be deleted on exit");
+            }
             seed_dev_data(&state);
         }
     }
@@ -659,27 +699,17 @@ async fn main() {
 
     // Build the application router
     let console_cors = config.console_cors_layer();
-    let mut app = Router::new()
+    let app = Router::new()
         // Public endpoints (no auth, permissive CORS for customer websites)
         .merge(handlers::public::router(config.rate_limit))
         // Webhook endpoints (provider-specific auth, no CORS needed - server-to-server)
         .merge(handlers::webhooks::router())
         // Operator API (operator key auth, console CORS only)
         .merge(handlers::operators::router(state.clone()).layer(console_cors.clone()))
-        // Organization API (org member key auth, console CORS only)
-        .merge(handlers::orgs::router(state.clone()).layer(console_cors));
-
-    // Dev-only endpoints (only in dev mode)
-    if config.dev_mode {
-        use axum::routing::post;
-        app = app.route(
-            "/dev/create-license",
-            post(handlers::dev::create_dev_license),
-        );
-        tracing::info!("DEV endpoints enabled: POST /dev/create-license");
-    }
-
-    let app = app.layer(TraceLayer::new_for_http()).with_state(state);
+        // Organization API (org member key auth, console CORS only, high rate limit)
+        .merge(handlers::orgs::router(state.clone(), config.rate_limit).layer(console_cors))
+        .layer(TraceLayer::new_for_http())
+        .with_state(state);
 
     // Start the server
     let addr = config.addr();

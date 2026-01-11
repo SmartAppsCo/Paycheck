@@ -77,7 +77,7 @@ fn setup_refresh_test() -> (Router, String, String, String, String) {
             &claims,
             &private_key,
             &license.id,
-            &project.domain,
+            &project.name,
             &device.jti,
         )
         .unwrap();
@@ -315,7 +315,7 @@ async fn test_refresh_with_revoked_license_fails() {
             &claims,
             &private_key,
             &license.id,
-            &project.domain,
+            &project.name,
             &device.jti,
         )
         .unwrap();
@@ -405,7 +405,7 @@ async fn test_refresh_with_revoked_jti_fails() {
             &claims,
             &private_key,
             &license.id,
-            &project.domain,
+            &project.name,
             &device.jti,
         )
         .unwrap();

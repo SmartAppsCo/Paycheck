@@ -19,14 +19,13 @@ pub struct Project {
     pub id: String,
     pub org_id: String,
     pub name: String,
-    pub domain: String,
     pub license_key_prefix: String,
     /// Encrypted private key (envelope encryption with master key)
     #[serde(skip_serializing)]
     pub private_key: Vec<u8>,
     pub public_key: String,
-    /// Allowlist of URLs that can be used as post-payment redirects
-    pub allowed_redirect_urls: Vec<String>,
+    /// Post-payment redirect URL (server uses this, not client-specified)
+    pub redirect_url: Option<String>,
     /// Email "from" address for activation emails (e.g., "noreply@myapp.com")
     /// Falls back to system default if not set
     pub email_from: Option<String>,
@@ -44,10 +43,9 @@ pub struct ProjectPublic {
     pub id: String,
     pub org_id: String,
     pub name: String,
-    pub domain: String,
     pub license_key_prefix: String,
     pub public_key: String,
-    pub allowed_redirect_urls: Vec<String>,
+    pub redirect_url: Option<String>,
     pub email_from: Option<String>,
     pub email_enabled: bool,
     pub email_webhook_url: Option<String>,
@@ -61,10 +59,9 @@ impl From<Project> for ProjectPublic {
             id: p.id,
             org_id: p.org_id,
             name: p.name,
-            domain: p.domain,
             license_key_prefix: p.license_key_prefix,
             public_key: p.public_key,
-            allowed_redirect_urls: p.allowed_redirect_urls,
+            redirect_url: p.redirect_url,
             email_from: p.email_from,
             email_enabled: p.email_enabled,
             email_webhook_url: p.email_webhook_url,
@@ -77,11 +74,11 @@ impl From<Project> for ProjectPublic {
 #[derive(Debug, Deserialize)]
 pub struct CreateProject {
     pub name: String,
-    pub domain: String,
     #[serde(default = "default_prefix")]
     pub license_key_prefix: String,
+    /// Post-payment redirect URL (optional, falls back to Paycheck success page)
     #[serde(default)]
-    pub allowed_redirect_urls: Vec<String>,
+    pub redirect_url: Option<String>,
     /// Email "from" address for activation emails (e.g., "noreply@myapp.com")
     #[serde(default)]
     pub email_from: Option<String>,
@@ -150,9 +147,10 @@ fn mask_secret(s: &str) -> String {
 #[derive(Debug, Deserialize)]
 pub struct UpdateProject {
     pub name: Option<String>,
-    pub domain: Option<String>,
     pub license_key_prefix: Option<String>,
-    pub allowed_redirect_urls: Option<Vec<String>>,
+    /// Redirect URL (use Some(None) to clear, None to leave unchanged)
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub redirect_url: Option<Option<String>>,
     /// Email "from" address (use Some(None) to clear, None to leave unchanged)
     #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub email_from: Option<Option<String>>,

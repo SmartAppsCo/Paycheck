@@ -17,8 +17,8 @@ auth:bearer {
 body:json {
   {
     "name": "My App",
-    "domain": "myapp.example.com",
     "license_key_prefix": "MYAPP",
+    "redirect_url": "https://myapp.com/activated",
     "email_from": "noreply@myapp.com",
     "email_enabled": true,
     "email_webhook_url": null
@@ -30,11 +30,16 @@ docs {
 
   Fields:
   - name: Project display name
-  - domain: Project domain
   - license_key_prefix: Optional prefix for activation codes (default: "PC")
+  - redirect_url: Optional post-payment redirect URL (default: Paycheck success page)
   - email_from: Optional "from" address for activation emails (default: system setting)
   - email_enabled: Enable/disable email delivery (default: true)
   - email_webhook_url: Optional webhook URL for DIY email delivery
+
+  Redirect URL:
+  - After payment, users are redirected to this URL with ?code=XXX&project_id=XXX&status=success
+  - If not configured, users see a Paycheck-hosted success page with the activation code
+  - One URL per project (no allowlist needed - project = environment)
 
   Email configuration:
   - If email_webhook_url is set, Paycheck POSTs activation data there instead of sending email

@@ -39,8 +39,8 @@ pub async fn deactivate_device(
         .ok_or_else(|| AppError::Internal("Project not found".into()))?;
 
     // Now verify the JWT signature with the project's public key
-    // Also validates issuer ("paycheck") and audience (project.domain)
-    let verified_claims = jwt::verify_token(token, &project.public_key, &project.domain)?;
+    // Also validates issuer ("paycheck")
+    let verified_claims = jwt::verify_token(token, &project.public_key)?;
 
     // Extract JTI from verified claims
     let jti = verified_claims

@@ -43,7 +43,7 @@ async fn test_callback_pending_session_redirects_with_pending_status() {
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
 
         // Create a payment session that's NOT completed
-        let session = create_test_payment_session(&conn, &product.id, None, None);
+        let session = create_test_payment_session(&conn, &product.id, None);
 
         session_id = session.id.clone();
     }
@@ -102,7 +102,7 @@ async fn test_callback_completed_session_redirects_with_activation_code() {
         );
 
         // Create a payment session
-        let session = create_test_payment_session(&conn, &product.id, None, None);
+        let session = create_test_payment_session(&conn, &product.id, None);
 
         // Complete the session (simulating webhook completion)
         complete_payment_session(&conn, &session.id, &license.id);
@@ -158,7 +158,7 @@ async fn test_callback_completed_session_redirects_with_activation_code() {
 }
 
 #[tokio::test]
-async fn test_callback_third_party_redirect() {
+async fn test_callback_project_redirect_url() {
     let state = create_test_app_state();
     let master_key = test_master_key();
 
@@ -167,7 +167,27 @@ async fn test_callback_third_party_redirect() {
     {
         let conn = state.db.get().unwrap();
         let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+
+        // Create project with a redirect URL configured
+        let input = CreateProject {
+            name: "Test Project".to_string(),
+            license_key_prefix: "TEST".to_string(),
+            redirect_url: Some("https://myapp.example.com/activated".to_string()),
+            email_from: None,
+            email_enabled: true,
+            email_webhook_url: None,
+        };
+        let (private_key, public_key) = paycheck::jwt::generate_keypair();
+        let project = queries::create_project(
+            &conn,
+            &org.id,
+            &input,
+            &private_key,
+            &public_key,
+            &master_key,
+        )
+        .unwrap();
+
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
 
         // Create license
@@ -178,13 +198,8 @@ async fn test_callback_third_party_redirect() {
             Some(future_timestamp(365)),
         );
 
-        // Create a payment session WITH a third-party redirect URL
-        let session = create_test_payment_session(
-            &conn,
-            &product.id,
-            None,
-            Some("https://myapp.example.com/activated"),
-        );
+        // Create a payment session (no redirect_url - uses project's)
+        let session = create_test_payment_session(&conn, &product.id, None);
 
         // Complete the session
         complete_payment_session(&conn, &session.id, &license.id);
@@ -217,10 +232,11 @@ async fn test_callback_third_party_redirect() {
         .to_str()
         .unwrap();
 
-    // Should redirect to custom URL
+    // Should redirect to project's configured URL
     assert!(
         location.starts_with("https://myapp.example.com/activated"),
-        "Should redirect to custom URL"
+        "Should redirect to project's configured URL, got: {}",
+        location
     );
 
     // Should include activation code and project_id

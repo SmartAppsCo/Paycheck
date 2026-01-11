@@ -1,4 +1,4 @@
-//! Rate limiting configuration for public endpoints.
+//! Rate limiting configuration for API endpoints.
 //!
 //! Rate limits are applied per-IP address to protect against DoS attacks.
 //! Brute force is not a concern due to high-entropy keys (80+ bits).
@@ -7,11 +7,13 @@
 //! - Strict: /buy - external API calls
 //! - Standard: /callback, /redeem/*, /validate, /license, /devices/*
 //! - Relaxed: /health
+//! - Org Ops: /orgs/* - authenticated org member operations (high limit, stops extreme abuse)
 //!
 //! Configure via environment variables:
 //! - RATE_LIMIT_STRICT_RPM (default: 10)
 //! - RATE_LIMIT_STANDARD_RPM (default: 30)
 //! - RATE_LIMIT_RELAXED_RPM (default: 60)
+//! - RATE_LIMIT_ORG_OPS_RPM (default: 3000)
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -54,6 +56,13 @@ pub fn standard_layer(requests_per_minute: u32) -> RateLimitLayer {
 /// Creates a rate limiter layer for the relaxed tier.
 /// Used for lightweight endpoints like health checks.
 pub fn relaxed_layer(requests_per_minute: u32) -> RateLimitLayer {
+    create_layer(requests_per_minute)
+}
+
+/// Creates a rate limiter layer for org operations.
+/// High limit to only stop extreme abuse (runaway scripts, DDoS attempts).
+/// Used for /orgs/* authenticated endpoints.
+pub fn org_ops_layer(requests_per_minute: u32) -> RateLimitLayer {
     create_layer(requests_per_minute)
 }
 

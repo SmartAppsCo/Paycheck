@@ -9,6 +9,7 @@ use crate::payments::{LemonSqueezyClient, PaymentProvider, StripeClient};
 
 /// Simplified BuyRequest - Paycheck knows the product pricing details.
 /// Device info is NOT required here - purchase ≠ activation.
+/// Redirect URL is configured per-project, not per-request.
 #[derive(Debug, Deserialize)]
 pub struct BuyRequest {
     /// Public key - identifies the project (preferred over product_id lookup)
@@ -22,9 +23,6 @@ pub struct BuyRequest {
     /// Optional: developer-managed customer identifier (flows through to license)
     #[serde(default)]
     pub customer_id: Option<String>,
-    /// Optional: redirect URL after payment (must be in project's allowed_redirect_urls)
-    #[serde(default)]
-    pub redirect: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,23 +57,6 @@ pub async fn initiate_buy(
             .ok_or_else(|| AppError::NotFound("Project not found".into()))?
     };
 
-    // Validate redirect URL against project's allowlist
-    let validated_redirect = if let Some(ref redirect) = request.redirect {
-        if project.allowed_redirect_urls.is_empty() {
-            return Err(AppError::BadRequest(
-                "Redirect URL provided but project has no allowed redirect URLs configured".into(),
-            ));
-        }
-        if !project.allowed_redirect_urls.contains(redirect) {
-            return Err(AppError::BadRequest(
-                "Redirect URL is not in project's allowed redirect URLs".into(),
-            ));
-        }
-        Some(redirect.clone())
-    } else {
-        None
-    };
-
     // Get organization (payment config is at org level)
     let org = queries::get_organization_by_id(&conn, &project.org_id)?
         .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
@@ -86,10 +67,10 @@ pub async fn initiate_buy(
         p.parse::<PaymentProvider>()
             .ok()
             .ok_or_else(|| AppError::BadRequest("Invalid provider".into()))?
-    } else if let Some(ref default) = org.default_provider {
-        // Use organization's default provider
-        default.parse::<PaymentProvider>().ok().ok_or_else(|| {
-            AppError::BadRequest("Invalid default_provider in organization".into())
+    } else if let Some(ref provider) = org.payment_provider {
+        // Use organization's payment provider
+        provider.parse::<PaymentProvider>().ok().ok_or_else(|| {
+            AppError::BadRequest("Invalid payment_provider in organization".into())
         })?
     } else {
         // Auto-detect: use the only configured provider, or error if both/neither
@@ -130,7 +111,6 @@ pub async fn initiate_buy(
         &CreatePaymentSession {
             product_id: request.product_id.clone(),
             customer_id: request.customer_id.clone(),
-            redirect_url: validated_redirect,
         },
     )?;
 

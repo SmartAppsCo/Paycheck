@@ -39,7 +39,7 @@ fn create_test_jwt(
         &claims,
         &private_key,
         license_id,
-        &project.domain,
+        &project.name,
         &device.jti,
     )
     .unwrap()
@@ -424,7 +424,7 @@ async fn test_deactivate_machine_type_device() {
             &claims,
             &private_key,
             &license.id,
-            &project.domain,
+            &project.name,
             &device.jti,
         )
         .unwrap();

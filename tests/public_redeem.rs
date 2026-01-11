@@ -1,15 +1,15 @@
-//! Tests for the GET /redeem endpoint:
+//! Tests for the POST /redeem endpoint:
 //! Redeem an activation code for a JWT token and register a device.
 
 use axum::{body::Body, http::Request};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 mod common;
 use common::*;
 
 // ============================================================================
-// GET /redeem - Redeem with activation code
+// POST /redeem - Redeem with activation code
 // ============================================================================
 
 #[tokio::test]
@@ -46,12 +46,15 @@ async fn test_redeem_with_valid_code_returns_token() {
     let response = app
         .oneshot(
             Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/redeem?project_id={}&code={}&device_id=test-device&device_type=uuid",
-                    project_id, code
-                ))
-                .body(Body::empty())
+                .method("POST")
+                .uri("/redeem")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&json!({
+                    "project_id": project_id,
+                    "code": code,
+                    "device_id": "test-device",
+                    "device_type": "uuid"
+                })).unwrap()))
                 .unwrap(),
         )
         .await
@@ -106,12 +109,15 @@ async fn test_redeem_with_invalid_device_type_returns_error() {
     let response = app
         .oneshot(
             Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/redeem?project_id={}&code={}&device_id=test-device&device_type=invalid",
-                    project_id, code
-                ))
-                .body(Body::empty())
+                .method("POST")
+                .uri("/redeem")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&json!({
+                    "project_id": project_id,
+                    "code": code,
+                    "device_id": "test-device",
+                    "device_type": "invalid"
+                })).unwrap()))
                 .unwrap(),
         )
         .await
@@ -140,12 +146,15 @@ async fn test_redeem_code_not_found_returns_error() {
     let response = app
         .oneshot(
             Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/redeem?project_id={}&code=invalid-code&device_id=test-device&device_type=uuid",
-                    project_id
-                ))
-                .body(Body::empty())
+                .method("POST")
+                .uri("/redeem")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&json!({
+                    "project_id": project_id,
+                    "code": "invalid-code",
+                    "device_id": "test-device",
+                    "device_type": "uuid"
+                })).unwrap()))
                 .unwrap(),
         )
         .await
@@ -190,12 +199,15 @@ async fn test_redeem_code_already_used_returns_forbidden() {
     let response = app
         .oneshot(
             Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/redeem?project_id={}&code={}&device_id=test-device&device_type=uuid",
-                    project_id, code
-                ))
-                .body(Body::empty())
+                .method("POST")
+                .uri("/redeem")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&json!({
+                    "project_id": project_id,
+                    "code": code,
+                    "device_id": "test-device",
+                    "device_type": "uuid"
+                })).unwrap()))
                 .unwrap(),
         )
         .await
@@ -239,12 +251,16 @@ async fn test_redeem_code_creates_device_record() {
     let response = app
         .oneshot(
             Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/redeem?project_id={}&code={}&device_id=new-device-123&device_type=uuid&device_name=My%20Device",
-                    project_id, code
-                ))
-                .body(Body::empty())
+                .method("POST")
+                .uri("/redeem")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&json!({
+                    "project_id": project_id,
+                    "code": code,
+                    "device_id": "new-device-123",
+                    "device_type": "uuid",
+                    "device_name": "My Device"
+                })).unwrap()))
                 .unwrap(),
         )
         .await
@@ -296,12 +312,15 @@ async fn test_redeem_revoked_license_returns_forbidden() {
     let response = app
         .oneshot(
             Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/redeem?project_id={}&code={}&device_id=test-device&device_type=uuid",
-                    project_id, code
-                ))
-                .body(Body::empty())
+                .method("POST")
+                .uri("/redeem")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&json!({
+                    "project_id": project_id,
+                    "code": code,
+                    "device_id": "test-device",
+                    "device_type": "uuid"
+                })).unwrap()))
                 .unwrap(),
         )
         .await
@@ -343,12 +362,15 @@ async fn test_redeem_expired_license_returns_forbidden() {
     let response = app
         .oneshot(
             Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/redeem?project_id={}&code={}&device_id=test-device&device_type=uuid",
-                    project_id, code
-                ))
-                .body(Body::empty())
+                .method("POST")
+                .uri("/redeem")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&json!({
+                    "project_id": project_id,
+                    "code": code,
+                    "device_id": "test-device",
+                    "device_type": "uuid"
+                })).unwrap()))
                 .unwrap(),
         )
         .await
@@ -406,12 +428,15 @@ async fn test_redeem_device_limit_exceeded_returns_error() {
     let response = app
         .oneshot(
             Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/redeem?project_id={}&code={}&device_id=device-2&device_type=uuid",
-                    project_id, code
-                ))
-                .body(Body::empty())
+                .method("POST")
+                .uri("/redeem")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&json!({
+                    "project_id": project_id,
+                    "code": code,
+                    "device_id": "device-2",
+                    "device_type": "uuid"
+                })).unwrap()))
                 .unwrap(),
         )
         .await
@@ -461,12 +486,15 @@ async fn test_redeem_same_device_returns_token() {
     let response = app
         .oneshot(
             Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/redeem?project_id={}&code={}&device_id=existing-device&device_type=uuid",
-                    project_id, code
-                ))
-                .body(Body::empty())
+                .method("POST")
+                .uri("/redeem")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&json!({
+                    "project_id": project_id,
+                    "code": code,
+                    "device_id": "existing-device",
+                    "device_type": "uuid"
+                })).unwrap()))
                 .unwrap(),
         )
         .await
@@ -509,13 +537,15 @@ async fn test_redeem_with_public_key() {
     let response = app
         .oneshot(
             Request::builder()
-                .method("GET")
-                .uri(format!(
-                    "/redeem?public_key={}&code={}&device_id=test-device&device_type=uuid",
-                    urlencoding::encode(&public_key),
-                    code
-                ))
-                .body(Body::empty())
+                .method("POST")
+                .uri("/redeem")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&json!({
+                    "public_key": public_key,
+                    "code": code,
+                    "device_id": "test-device",
+                    "device_type": "uuid"
+                })).unwrap()))
                 .unwrap(),
         )
         .await

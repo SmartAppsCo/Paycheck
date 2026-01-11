@@ -17,16 +17,9 @@ use common::*;
 /// Helper to create a test router with the API routes
 fn test_app() -> Router {
     use axum::routing::{get, post};
-    use paycheck::handlers::dev::create_dev_license;
-    use paycheck::handlers::public::{get_license_info, validate_license};
+    use paycheck::handlers::public::{get_license_info, initiate_buy, validate_license};
 
     let master_key = test_master_key();
-    let conn = setup_test_db();
-
-    // Create test data
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-    let _product = create_test_product(&conn, &project.id, "Pro", "pro");
 
     // Create app state
     use paycheck::db::AppState;
@@ -61,7 +54,7 @@ fn test_app() -> Router {
     };
 
     Router::new()
-        .route("/dev/create-license", post(create_dev_license))
+        .route("/buy", post(initiate_buy))
         .route("/validate", get(validate_license))
         .route("/license", get(get_license_info))
         .with_state(state)
@@ -76,7 +69,7 @@ async fn test_invalid_json_body_returns_json_error() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/dev/create-license")
+                .uri("/buy")
                 .header("content-type", "application/json")
                 .body(Body::from("{ invalid json }"))
                 .unwrap(),
@@ -113,7 +106,7 @@ async fn test_missing_json_fields_returns_json_error() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/dev/create-license")
+                .uri("/buy")
                 .header("content-type", "application/json")
                 .body(Body::from("{}"))
                 .unwrap(),
@@ -182,7 +175,7 @@ async fn test_application_error_returns_json() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/dev/create-license")
+                .uri("/buy")
                 .header("content-type", "application/json")
                 .body(Body::from(r#"{"product_id": "nonexistent-product"}"#))
                 .unwrap(),

@@ -13,6 +13,7 @@ pub mod handlers;
 pub mod jwt;
 pub mod middleware;
 pub mod models;
+pub mod pagination;
 pub mod payments;
 pub mod rate_limit;
 pub mod util;

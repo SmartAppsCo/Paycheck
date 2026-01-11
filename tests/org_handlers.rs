@@ -51,7 +51,7 @@ fn org_app() -> (Router, AppState) {
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(None, "test@example.com".to_string())),
     };
 
-    let app = handlers::orgs::router(state.clone()).with_state(state.clone());
+    let app = handlers::orgs::router(state.clone(), paycheck::config::RateLimitConfig::disabled()).with_state(state.clone());
 
     (app, state)
 }
@@ -172,8 +172,9 @@ mod product_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        let products = json.as_array().unwrap();
+        let products = json["items"].as_array().unwrap();
         assert_eq!(products.len(), 3);
+        assert_eq!(json["total"], 3);
     }
 
     #[tokio::test]
@@ -967,9 +968,8 @@ mod project_tests {
 
         let body = json!({
             "name": "My New Project",
-            "domain": "myproject.example.com",
             "license_key_prefix": "MNP",
-            "allowed_redirect_urls": ["https://myapp.com/callback", "https://myapp.com/success"]
+            "redirect_url": "https://myapp.com/activated"
         });
 
         let response = app
@@ -994,12 +994,8 @@ mod project_tests {
 
         assert!(json["id"].as_str().is_some());
         assert_eq!(json["name"], "My New Project");
-        assert_eq!(json["domain"], "myproject.example.com");
         assert_eq!(json["license_key_prefix"], "MNP");
-        assert_eq!(
-            json["allowed_redirect_urls"],
-            json!(["https://myapp.com/callback", "https://myapp.com/success"])
-        );
+        assert_eq!(json["redirect_url"], "https://myapp.com/activated");
         // Public key should be present (for client-side JWT verification)
         assert!(json["public_key"].as_str().is_some());
     }
@@ -1046,8 +1042,9 @@ mod project_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        let projects = json.as_array().unwrap();
+        let projects = json["items"].as_array().unwrap();
         assert_eq!(projects.len(), 3);
+        assert_eq!(json["total"], 3);
     }
 
     #[tokio::test]
@@ -1072,8 +1069,7 @@ mod project_tests {
         }
 
         let body = json!({
-            "name": "Updated Name",
-            "domain": "updated.example.com"
+            "name": "Updated Name"
         });
 
         let response = app
@@ -1097,7 +1093,6 @@ mod project_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         assert_eq!(json["name"], "Updated Name");
-        assert_eq!(json["domain"], "updated.example.com");
     }
 
     #[tokio::test]
@@ -1422,10 +1417,11 @@ mod project_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        let projects = json.as_array().unwrap();
+        let projects = json["items"].as_array().unwrap();
         // Member should only see the one project they're assigned to
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0]["name"], assigned_project_name);
+        assert_eq!(json["total"], 1);
     }
 
     #[tokio::test]
@@ -1657,8 +1653,9 @@ mod org_member_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        let members = json.as_array().unwrap();
+        let members = json["items"].as_array().unwrap();
         assert_eq!(members.len(), 3);
+        assert_eq!(json["total"], 3);
     }
 
     #[tokio::test]
@@ -1704,13 +1701,17 @@ mod org_member_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        // Response is { member: {...}, api_key: "..." }
+        // Response is { member: {...}, api_key: { id, name, key, prefix, ... } }
         assert!(json["member"]["id"].as_str().is_some());
         assert_eq!(json["member"]["email"], "newmember@test.com");
         assert_eq!(json["member"]["name"], "New Member");
         assert_eq!(json["member"]["role"], "admin");
         // API key should be returned on creation so admin can share it
-        assert!(json["api_key"].as_str().is_some());
+        assert!(json["api_key"]["key"].as_str().is_some());
+        assert!(json["api_key"]["key"]
+            .as_str()
+            .unwrap()
+            .starts_with("pc_"));
     }
 
     #[tokio::test]
@@ -2271,8 +2272,9 @@ mod project_member_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        let members = json.as_array().unwrap();
+        let members = json["items"].as_array().unwrap();
         assert_eq!(members.len(), 2);
+        assert_eq!(json["total"], 2);
         // Should include email/name details
         assert!(members[0]["email"].as_str().is_some());
         assert!(members[0]["name"].as_str().is_some());

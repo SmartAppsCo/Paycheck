@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type {
   LicenseClaims,
   ActivationResult,
   DeactivateResult,
   DeviceInfo,
   ImportResult,
+  CallbackActivationResult,
+  RequestCodeResult,
 } from '@paycheck/sdk';
 import { usePaycheck } from './provider';
 
@@ -42,18 +44,15 @@ export interface UseLicenseResult {
   offline: boolean;
 
   // Actions
-  /** Activate with license key */
-  activate: (
-    licenseKey: string,
-    deviceInfo?: DeviceInfo
-  ) => Promise<ActivationResult>;
-  /** Activate with redemption code */
+  /** Activate with activation code */
   activateWithCode: (
     code: string,
     deviceInfo?: DeviceInfo
   ) => Promise<ActivationResult>;
   /** Import a JWT token directly (offline activation) */
   importToken: (token: string) => Promise<ImportResult>;
+  /** Request activation code to be sent to purchase email (via webhook, org's Resend, or Paycheck.dev) */
+  requestActivationCode: (email: string) => Promise<RequestCodeResult>;
   /** Refresh the token */
   refresh: () => Promise<string>;
   /** Deactivate current device */
@@ -164,23 +163,6 @@ export function useLicense(options: UseLicenseOptions = {}): UseLicenseResult {
   const isExpired = paycheck.isExpired();
 
   // Actions
-  const activate = useCallback(
-    async (
-      licenseKey: string,
-      deviceInfo?: DeviceInfo
-    ): Promise<ActivationResult> => {
-      setLoading(true);
-      try {
-        const result = await paycheck.activate(licenseKey, deviceInfo);
-        await reload();
-        return result;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [paycheck, reload]
-  );
-
   const activateWithCode = useCallback(
     async (code: string, deviceInfo?: DeviceInfo): Promise<ActivationResult> => {
       setLoading(true);
@@ -207,6 +189,13 @@ export function useLicense(options: UseLicenseOptions = {}): UseLicenseResult {
       }
     },
     [paycheck, reload]
+  );
+
+  const requestActivationCode = useCallback(
+    async (email: string): Promise<RequestCodeResult> => {
+      return paycheck.requestActivationCode(email);
+    },
+    [paycheck]
   );
 
   const refresh = useCallback(async (): Promise<string> => {
@@ -250,9 +239,9 @@ export function useLicense(options: UseLicenseOptions = {}): UseLicenseResult {
     error,
     synced,
     offline,
-    activate,
     activateWithCode,
     importToken,
+    requestActivationCode,
     refresh,
     deactivate,
     clear,
@@ -449,4 +438,286 @@ export function LicenseGate({
   }
 
   return isLicensed ? children : fallback;
+}
+
+// ==================== Payment Callback Hook ====================
+
+/**
+ * Options for usePaymentCallback hook
+ */
+export interface UsePaymentCallbackOptions {
+  /** Custom URL to check (default: window.location.href) */
+  url?: string;
+  /** Clean URL params after successful activation (default: true) */
+  cleanUrl?: boolean;
+  /** Path to replace URL with after activation (default: keeps current path) */
+  redirectTo?: string;
+  /** Device info for activation */
+  deviceInfo?: DeviceInfo;
+  /** Callback when activation succeeds */
+  onSuccess?: (result: CallbackActivationResult) => void;
+  /** Callback when activation fails */
+  onError?: (error: string) => void;
+  /** Skip automatic activation (manual control) */
+  manual?: boolean;
+}
+
+/**
+ * Return type for usePaymentCallback hook
+ */
+export interface UsePaymentCallbackResult {
+  /** Whether callback processing is in progress */
+  processing: boolean;
+  /** Whether activation was successful */
+  activated: boolean;
+  /** Whether the current URL is a callback URL */
+  isCallback: boolean;
+  /** The activation result if successful */
+  result: CallbackActivationResult | null;
+  /** Error message if activation failed */
+  error: string | null;
+  /** Decoded license claims if activated */
+  claims: LicenseClaims | null;
+  /** Manually trigger activation (when manual: true) */
+  activate: () => Promise<CallbackActivationResult>;
+  /** Reset state (useful for retrying) */
+  reset: () => void;
+}
+
+/**
+ * Hook for seamlessly handling payment callbacks.
+ *
+ * Automatically detects if the current URL is a payment callback,
+ * extracts the activation code, and completes activation in one step.
+ *
+ * @param options - Hook options
+ *
+ * @example
+ * ```tsx
+ * // Basic usage - just drop it in your callback page
+ * function SuccessPage() {
+ *   const { processing, activated, error, claims } = usePaymentCallback();
+ *
+ *   if (processing) {
+ *     return <div>Activating your license...</div>;
+ *   }
+ *
+ *   if (error) {
+ *     return <div>Activation failed: {error}</div>;
+ *   }
+ *
+ *   if (activated) {
+ *     return <div>Welcome! Your tier: {claims?.tier}</div>;
+ *   }
+ *
+ *   // Not a callback URL - show normal content
+ *   return <div>Success page</div>;
+ * }
+ * ```
+ *
+ * @example
+ * ```tsx
+ * // With redirect after activation
+ * function CallbackPage() {
+ *   const { processing, activated } = usePaymentCallback({
+ *     redirectTo: '/dashboard',
+ *     onSuccess: (result) => {
+ *       toast.success(`Welcome! You now have ${result.claims?.tier} access.`);
+ *     },
+ *     onError: (error) => {
+ *       toast.error(`Activation failed: ${error}`);
+ *     },
+ *   });
+ *
+ *   if (processing) return <ActivationSpinner />;
+ *   if (activated) return <Redirect to="/dashboard" />;
+ *
+ *   return <NormalPageContent />;
+ * }
+ * ```
+ *
+ * @example
+ * ```tsx
+ * // Manual control - activate when ready
+ * function ManualCallbackPage() {
+ *   const { isCallback, activate, processing, activated } = usePaymentCallback({
+ *     manual: true,
+ *   });
+ *
+ *   if (!isCallback) return <div>Not a callback</div>;
+ *
+ *   return (
+ *     <div>
+ *       <h1>Complete Your Purchase</h1>
+ *       <button onClick={activate} disabled={processing}>
+ *         {processing ? 'Activating...' : 'Activate License'}
+ *       </button>
+ *       {activated && <div>Success!</div>}
+ *     </div>
+ *   );
+ * }
+ * ```
+ */
+export function usePaymentCallback(
+  options: UsePaymentCallbackOptions = {}
+): UsePaymentCallbackResult {
+  const paycheck = usePaycheck();
+  const {
+    url,
+    cleanUrl = true,
+    redirectTo,
+    deviceInfo,
+    onSuccess,
+    onError,
+    manual = false,
+  } = options;
+
+  const [processing, setProcessing] = useState(!manual);
+  const [activated, setActivated] = useState(false);
+  const [isCallback, setIsCallback] = useState(false);
+  const [result, setResult] = useState<CallbackActivationResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [claims, setClaims] = useState<LicenseClaims | null>(null);
+
+  // Track if we've already processed to prevent double-activation
+  const processedRef = useRef(false);
+
+  // Get the URL to check
+  const getUrl = useCallback(() => {
+    if (url) return url;
+    if (typeof window !== 'undefined') return window.location.href;
+    return '';
+  }, [url]);
+
+  // Clean URL after activation
+  const cleanUrlParams = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    const targetPath = redirectTo || window.location.pathname;
+    window.history.replaceState({}, '', targetPath);
+  }, [redirectTo]);
+
+  // Perform activation
+  const activate = useCallback(async (): Promise<CallbackActivationResult> => {
+    const currentUrl = getUrl();
+    if (!currentUrl) {
+      const noUrlResult: CallbackActivationResult = {
+        activated: false,
+        wasCallback: false,
+        status: 'none',
+        error: 'No URL available',
+      };
+      return noUrlResult;
+    }
+
+    setProcessing(true);
+    setError(null);
+
+    try {
+      const activationResult = await paycheck.handleCallbackAndActivate(
+        currentUrl,
+        deviceInfo
+      );
+
+      setResult(activationResult);
+      setIsCallback(activationResult.wasCallback);
+      setActivated(activationResult.activated);
+
+      if (activationResult.claims) {
+        setClaims(activationResult.claims);
+      }
+
+      if (activationResult.activated) {
+        if (cleanUrl) {
+          cleanUrlParams();
+        }
+        onSuccess?.(activationResult);
+      } else if (activationResult.wasCallback && activationResult.error) {
+        setError(activationResult.error);
+        onError?.(activationResult.error);
+      }
+
+      return activationResult;
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : 'Activation failed';
+      setError(errorMessage);
+      onError?.(errorMessage);
+
+      const errorResult: CallbackActivationResult = {
+        activated: false,
+        wasCallback: true,
+        status: 'success',
+        error: errorMessage,
+      };
+      setResult(errorResult);
+      return errorResult;
+    } finally {
+      setProcessing(false);
+    }
+  }, [
+    getUrl,
+    paycheck,
+    deviceInfo,
+    cleanUrl,
+    cleanUrlParams,
+    onSuccess,
+    onError,
+  ]);
+
+  // Reset state
+  const reset = useCallback(() => {
+    setProcessing(false);
+    setActivated(false);
+    setIsCallback(false);
+    setResult(null);
+    setError(null);
+    setClaims(null);
+    processedRef.current = false;
+  }, []);
+
+  // Auto-activate on mount (unless manual mode)
+  useEffect(() => {
+    if (manual || processedRef.current) {
+      setProcessing(false);
+      return;
+    }
+
+    // Check if URL has callback params before processing
+    const currentUrl = getUrl();
+    if (!currentUrl) {
+      setProcessing(false);
+      return;
+    }
+
+    // Quick check for code param
+    try {
+      const urlObj = new URL(currentUrl);
+      const hasCode = urlObj.searchParams.has('code');
+      setIsCallback(hasCode);
+
+      if (!hasCode) {
+        setProcessing(false);
+        return;
+      }
+    } catch {
+      setProcessing(false);
+      return;
+    }
+
+    // Process callback
+    processedRef.current = true;
+    activate();
+  }, [manual, getUrl, activate]);
+
+  return {
+    processing,
+    activated,
+    isCallback,
+    result,
+    error,
+    claims,
+    activate,
+    reset,
+  };
 }

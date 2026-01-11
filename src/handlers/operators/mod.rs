@@ -1,8 +1,10 @@
+mod api_keys;
 mod audit_logs;
 mod management;
 mod organizations;
 mod support;
 
+pub use api_keys::*;
 pub use audit_logs::*;
 pub use management::*;
 pub use organizations::*;
@@ -36,6 +38,11 @@ pub fn router(state: AppState) -> Router<AppState> {
                 .route("/operators/organizations/{id}", get(get_organization))
                 .route("/operators/organizations/{id}", put(update_organization))
                 .route("/operators/organizations/{id}", delete(delete_organization))
+                // Org member listing (admin+)
+                .route(
+                    "/operators/organizations/{org_id}/members",
+                    get(list_org_members),
+                )
                 // Support endpoints (admin+)
                 .route(
                     "/operators/organizations/{org_id}/payment-config",
@@ -54,6 +61,20 @@ pub fn router(state: AppState) -> Router<AppState> {
             Router::new()
                 // Audit logs (view+)
                 .route("/operators/audit-logs", get(query_audit_logs))
+                .route("/operators/audit-logs/text", get(query_audit_logs_text))
+                // Operator API keys (operators can manage their own, owner can manage all)
+                .route(
+                    "/operators/{operator_id}/api-keys",
+                    post(api_keys::create_api_key),
+                )
+                .route(
+                    "/operators/{operator_id}/api-keys",
+                    get(api_keys::list_api_keys),
+                )
+                .route(
+                    "/operators/{operator_id}/api-keys/{key_id}",
+                    delete(api_keys::revoke_api_key),
+                )
                 .layer(middleware::from_fn_with_state(state.clone(), operator_auth)),
         )
 }

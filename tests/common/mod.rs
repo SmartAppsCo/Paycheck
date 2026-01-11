@@ -34,21 +34,25 @@ pub fn setup_test_db() -> Connection {
     conn
 }
 
+/// Create an in-memory test audit database with schema initialized
+pub fn setup_test_audit_db() -> Connection {
+    let conn = Connection::open_in_memory().expect("Failed to create in-memory audit database");
+    init_audit_db(&conn).expect("Failed to initialize audit schema");
+    conn
+}
+
 /// Create a test operator with default values
 pub fn create_test_operator(
     conn: &Connection,
     email: &str,
     role: OperatorRole,
 ) -> (Operator, String) {
-    let api_key = queries::generate_api_key();
     let input = CreateOperator {
         email: email.to_string(),
         name: format!("Test Operator {}", email),
         role,
     };
-    let operator = queries::create_operator(conn, &input, &api_key, None)
-        .expect("Failed to create test operator");
-    (operator, api_key)
+    queries::create_operator(conn, &input).expect("Failed to create test operator")
 }
 
 /// Create a test organization
@@ -57,6 +61,7 @@ pub fn create_test_org(conn: &Connection, name: &str) -> Organization {
         name: name.to_string(),
         owner_email: None,
         owner_name: None,
+        external_user_id: None,
     };
     queries::create_organization(conn, &input).expect("Failed to create test organization")
 }
@@ -68,14 +73,19 @@ pub fn create_test_org_member(
     email: &str,
     role: OrgMemberRole,
 ) -> (OrgMember, String) {
-    let api_key = queries::generate_api_key();
     let input = CreateOrgMember {
         email: email.to_string(),
         name: format!("Test Member {}", email),
         role,
+        external_user_id: None,
     };
-    let member = queries::create_org_member(conn, org_id, &input, &api_key)
+    let member = queries::create_org_member(conn, org_id, &input, "")
         .expect("Failed to create test org member");
+
+    // Create an API key in the new table
+    let (_, api_key) = queries::create_org_member_api_key(conn, &member.id, "Default", None)
+        .expect("Failed to create test org member API key");
+
     (member, api_key)
 }
 
@@ -88,9 +98,8 @@ pub fn create_test_project(
 ) -> Project {
     let input = CreateProject {
         name: name.to_string(),
-        domain: format!("{}.example.com", name.to_lowercase().replace(' ', "-")),
         license_key_prefix: "TEST".to_string(),
-        allowed_redirect_urls: vec![],
+        redirect_url: None,
         email_from: None,
         email_enabled: true,
         email_webhook_url: None,
@@ -226,7 +235,7 @@ pub fn public_app(state: AppState) -> Router {
     Router::new()
         .route("/buy", post(initiate_buy))
         .route("/callback", get(payment_callback))
-        .route("/redeem", get(redeem_with_code))
+        .route("/redeem", post(redeem_with_code))
         .route("/activation/request-code", post(request_activation_code))
         .route("/validate", get(validate_license))
         .route("/license", get(get_license_info))
@@ -236,16 +245,15 @@ pub fn public_app(state: AppState) -> Router {
 
 /// Create a test payment session.
 /// Note: Device info is NOT stored in payment sessions - purchase ≠ activation.
+/// Redirect URL is configured per-project, not per-session.
 pub fn create_test_payment_session(
     conn: &Connection,
     product_id: &str,
     customer_id: Option<&str>,
-    redirect_url: Option<&str>,
 ) -> PaymentSession {
     let input = CreatePaymentSession {
         product_id: product_id.to_string(),
         customer_id: customer_id.map(|s| s.to_string()),
-        redirect_url: redirect_url.map(|s| s.to_string()),
     };
     queries::create_payment_session(conn, &input).expect("Failed to create test payment session")
 }

@@ -6,12 +6,23 @@ use axum::{
 };
 
 use crate::db::{AppState, queries};
-use crate::models::{Operator, OperatorRole};
+use crate::models::{AuditLogNames, Operator, OperatorRole};
 use crate::util::extract_bearer_token;
 
 #[derive(Clone)]
 pub struct OperatorContext {
     pub operator: Operator,
+}
+
+impl OperatorContext {
+    /// Get audit log names pre-populated with the operator's name.
+    /// Chain with `.resource()`, `.org()`, `.project()` to add more context.
+    pub fn audit_names(&self) -> AuditLogNames {
+        AuditLogNames {
+            actor_name: Some(self.operator.name.clone()),
+            ..Default::default()
+        }
+    }
 }
 
 /// Authenticate operator from bearer token.

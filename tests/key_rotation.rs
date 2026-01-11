@@ -106,9 +106,8 @@ fn test_project_private_key_rotation_works() {
     let (private_key_bytes, public_key) = jwt::generate_keypair();
     let input = CreateProject {
         name: "Test Project".to_string(),
-        domain: "test.example.com".to_string(),
         license_key_prefix: "TEST".to_string(),
-        allowed_redirect_urls: vec![],
+        redirect_url: None,
         email_from: None,
         email_enabled: true,
         email_webhook_url: None,

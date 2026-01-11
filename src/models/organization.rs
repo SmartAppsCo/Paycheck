@@ -17,7 +17,7 @@ pub struct Organization {
     /// Encrypted Resend API key (None if not configured - uses system default)
     #[serde(skip)]
     pub resend_api_key_encrypted: Option<Vec<u8>>,
-    pub default_provider: Option<String>,
+    pub payment_provider: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -84,6 +84,9 @@ pub struct CreateOrganization {
     pub owner_email: Option<String>,
     #[serde(default)]
     pub owner_name: Option<String>,
+    /// External user ID for the owner (e.g., Console user ID)
+    #[serde(default)]
+    pub external_user_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,10 +98,10 @@ pub struct UpdateOrganization {
     /// Use Some(None) to clear and fall back to system default, None to leave unchanged
     #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub resend_api_key: Option<Option<String>>,
-    /// Default payment provider ("stripe" or "lemonsqueezy")
+    /// Payment provider ("stripe" or "lemonsqueezy")
     /// Use Some(None) to clear, None to leave unchanged
     #[serde(default, deserialize_with = "deserialize_optional_field")]
-    pub default_provider: Option<Option<String>>,
+    pub payment_provider: Option<Option<String>>,
 }
 
 /// Deserialize a field that can be:
@@ -122,7 +125,7 @@ pub struct OrganizationPublic {
     pub has_stripe: bool,
     pub has_lemonsqueezy: bool,
     pub has_resend: bool,
-    pub default_provider: Option<String>,
+    pub payment_provider: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -138,7 +141,7 @@ impl From<Organization> for OrganizationPublic {
             has_stripe,
             has_lemonsqueezy: has_ls,
             has_resend,
-            default_provider: o.default_provider,
+            payment_provider: o.payment_provider,
             created_at: o.created_at,
             updated_at: o.updated_at,
         }

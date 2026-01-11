@@ -174,37 +174,63 @@ Based on:
 | Tier | Price | Revenue Cap | Target |
 |------|-------|-------------|--------|
 | **Self-hosted** | $0 | Unlimited | DIYers, enterprises evaluating |
-| **Starter** | $10/mo | <$1K/mo | Testing the market, first product |
-| **Indie** | $50/mo | <$10K/mo | Serious indie dev, multiple products |
-| **Pro** | $100/mo | <$100K/mo | Full-time business, needs API |
-| **Business** | $500/mo | <$1M/mo | Compliance needs, revocation |
-| **Enterprise** | Let's talk | $1M+/mo | Custom everything |
+| **Free Trial** | $0 | — | 14-day full Hobby experience |
+| **Hobby** | $15/mo | <$500/mo | Vibe coders, side projects, validating ideas |
+| **Indie** | $29/mo | <$5K/mo | Serious indie dev, multiple products |
+| **Pro** | $99/mo | <$50K/mo | Full-time business, needs API automation |
+| **Business** | $499/mo | <$500K/mo | Scale with confidence, enterprise sales |
+| **Enterprise** | Custom | $500K+/mo | Custom everything |
 
 ### Feature Matrix
 
-| Feature | Self-host | Starter | Indie | Pro | Business | Enterprise |
-|---------|-----------|---------|-------|-----|----------|------------|
-| Offline activation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Online activation | ✓ | — | ✓ | ✓ | ✓ | ✓ |
-| Device limits | ✓ | — | ✓ | ✓ | ✓ | ✓ |
-| Activation limits | ✓ | — | ✓ | ✓ | ✓ | ✓ |
-| Products | ∞ | 1 | 5 | ∞ | ∞ | ∞ |
-| API access | ✓ | — | — | ✓ | ✓ | ✓ |
-| Online checks | ✓ | — | — | — | ✓ | ✓ |
-| Revocation | ✓ | — | — | — | ✓ | ✓ |
-| Audit logs | ✓ | — | — | — | ✓ | ✓ |
-| SSO | ✓ | — | — | — | ✓ | ✓ |
-| SLA | — | — | — | — | 99.9% | Custom |
-| Support | Community | Email | Email | Priority | Priority | Dedicated |
+| Feature | Self-host | Free Trial | Hobby | Indie | Pro | Business | Enterprise |
+|---------|-----------|------------|-------|-------|-----|----------|------------|
+| Offline activation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Email activation codes | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Online activation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Device limits | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Activation limits | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Products | ∞ | 1 | 1 | 3 | ∞ | ∞ | ∞ |
+| Emails included | ∞ | 100 | 500 | 2K | 30K | 300K | Custom |
+| Revenue cap | — | — | $500 | $5K | $50K | $500K | ∞ |
+| API access | ✓ | — | — | — | ✓ | ✓ | ✓ |
+| Online checks | ✓ | — | — | — | — | ✓ | ✓ |
+| Revocation | ✓ | — | — | — | — | ✓ | ✓ |
+| Audit logs | ✓ | — | — | — | — | ✓ | ✓ |
+| SSO | ✓ | — | — | — | — | ✓ | ✓ |
+| SLA | — | — | — | — | — | 99.9% | Custom |
+| Support | Community | — | Email | Email | Priority | Priority | Dedicated |
 
 ### Upgrade Triggers
 
 | Transition | Trigger | Your Price | Their Revenue | Your % |
 |------------|---------|------------|---------------|--------|
-| Starter → Indie | $1K/mo revenue | $50/mo | $1K/mo | 5% |
-| Indie → Pro | $10K/mo revenue | $100/mo | $10K/mo | 1% |
-| Pro → Business | $100K/mo revenue | $500/mo | $100K/mo | 0.5% |
-| Business → Enterprise | $1M/mo revenue | Custom | $1M+/mo | <0.1% |
+| Hobby → Indie | $500/mo revenue | $29/mo | $500/mo | 5.8% |
+| Indie → Pro | $5K/mo revenue | $99/mo | $5K/mo | 1.98% |
+| Pro → Business | $50K/mo revenue | $499/mo | $50K/mo | 1.0% |
+| Business → Enterprise | $500K/mo revenue | Custom | $500K+/mo | <0.1% |
+
+### The Hobbyist Premium
+
+Vibe coders at the Hobby tier are the ideal customer:
+- **Pay reliably** — $15/month makes them feel like real developers
+- **Use almost nothing** — No customers means no emails, no support tickets
+- **Evangelize** — Excited about their projects, tell friends
+- **Might graduate** — Some will ship and upgrade to Indie
+
+A hobbyist with 0 sales costs us ~$0.01/month in email. That's **99.9% margin**. They subsidize the micro-product sellers who generate higher email volume.
+
+### Upgrade Psychology
+
+```
+Old: $10 → $50 → $100 → $500 (5x, 2x, 5x jumps - uneven)
+New: $15 → $29 → $99 → $499 (2x, 3.4x, 5x jumps - smooth progression)
+```
+
+Each jump is justified:
+- **Hobby → Indie (2x)**: You're actually selling now, need multiple products
+- **Indie → Pro (3.4x)**: You're scaling, need API automation
+- **Pro → Business (5x)**: You're at scale, need control and visibility
 
 ### Comparison to Alternatives
 
@@ -212,18 +238,20 @@ Based on:
 
 | Revenue | Paycheck | Stripe (~3%) | Total | vs Gumroad (10%) | vs LemonSqueezy (5%) |
 |---------|----------|--------------|-------|------------------|----------------------|
-| $1K/mo | $10/mo | $30/mo | $40/mo | $100/mo | $50/mo |
-| $5K/mo | $50/mo | $150/mo | $200/mo | $500/mo | $250/mo |
-| $10K/mo | $50/mo | $300/mo | $350/mo | $1,000/mo | $500/mo |
-| $50K/mo | $100/mo | $1,500/mo | $1,600/mo | $5,000/mo | $2,500/mo |
-| $100K/mo | $500/mo | $3,000/mo | $3,500/mo | $10,000/mo | $5,000/mo |
+| $500/mo | $15/mo | $15/mo | $30/mo | $50/mo | $25/mo |
+| $2K/mo | $29/mo | $60/mo | $89/mo | $200/mo | $100/mo |
+| $5K/mo | $29/mo | $150/mo | $179/mo | $500/mo | $250/mo |
+| $10K/mo | $99/mo | $300/mo | $399/mo | $1,000/mo | $500/mo |
+| $50K/mo | $99/mo | $1,500/mo | $1,599/mo | $5,000/mo | $2,500/mo |
+| $100K/mo | $499/mo | $3,000/mo | $3,499/mo | $10,000/mo | $5,000/mo |
 
 **Option B: Paycheck + LemonSqueezy (they handle taxes)**
 
 | Revenue | Paycheck | LemonSqueezy (5%) | Total | What you get |
 |---------|----------|-------------------|-------|--------------|
-| $10K/mo | $50/mo | $500/mo | $550/mo | Full licensing + MoR tax handling |
-| $50K/mo | $100/mo | $2,500/mo | $2,600/mo | Full licensing + MoR tax handling |
+| $5K/mo | $29/mo | $250/mo | $279/mo | Full licensing + MoR tax handling |
+| $10K/mo | $99/mo | $500/mo | $599/mo | Full licensing + MoR tax handling |
+| $50K/mo | $99/mo | $2,500/mo | $2,599/mo | Full licensing + MoR tax handling |
 
 **Option C: Hybrid (developer-configured routing)**
 
@@ -241,7 +269,7 @@ Example: Route EU/UK → LemonSqueezy (MoR), everywhere else → Stripe (cheaper
 - Want cheapest? Paycheck + Stripe (handle taxes yourself or use Quaderno ~$50/mo)
 - Want easiest? Paycheck + LemonSqueezy (they handle taxes, you get full licensing they don't offer)
 - Want optimized? Paycheck + both (configure your own routing rules based on your tax situation)
-- At $10K/mo: Option A saves ~$150/mo vs LemonSqueezy alone, plus full licensing features
+- At $10K/mo: Option A saves ~$100/mo vs LemonSqueezy alone, plus full licensing features
 
 ---
 
@@ -251,64 +279,187 @@ Example: Route EU/UK → LemonSqueezy (MoR), everywhere else → Stripe (cheaper
 
 | Metric | Q1 | Q2 | Q3 | Q4 |
 |--------|-----|-----|-----|-----|
-| **Starter** ($10) | 20 | 50 | 100 | 150 |
-| **Indie** ($50) | 5 | 15 | 40 | 70 |
-| **Pro** ($100) | 1 | 3 | 8 | 15 |
-| **Business** ($500) | 0 | 1 | 2 | 5 |
-| **MRR** | $550 | $2,050 | $4,800 | $9,000 |
+| **Hobby** ($15) | 25 | 60 | 120 | 180 |
+| **Indie** ($29) | 5 | 15 | 40 | 70 |
+| **Pro** ($99) | 1 | 3 | 8 | 15 |
+| **Business** ($499) | 0 | 1 | 2 | 5 |
+| **MRR** | $599 | $2,430 | $5,988 | $11,225 |
 
 **Year 1 totals:**
-- Total paying customers: 240
-- MRR at end of Y1: $9,000
-- ARR run rate: **$108,000**
+- Total paying customers: 270
+- MRR at end of Y1: $11,225
+- ARR run rate: **$134,700**
 
 ### Year 2 Projections (Growth)
 
 | Tier | Customers | MRR |
 |------|-----------|-----|
-| Starter | 300 | $3,000 |
-| Indie | 150 | $7,500 |
-| Pro | 40 | $4,000 |
-| Business | 15 | $7,500 |
+| Hobby | 350 | $5,250 |
+| Indie | 150 | $4,350 |
+| Pro | 40 | $3,960 |
+| Business | 15 | $7,485 |
 | Enterprise | 2 | $4,000 |
-| **Total** | **507** | **$26,000** |
+| **Total** | **557** | **$25,045** |
 
 **Year 2 totals:**
-- MRR: $26,000
-- ARR: **$312,000**
+- MRR: $25,045
+- ARR: **$300,540**
 
 ### Year 3 Projections (Established)
 
 | Tier | Customers | MRR |
 |------|-----------|-----|
-| Starter | 500 | $5,000 |
-| Indie | 300 | $15,000 |
-| Pro | 80 | $8,000 |
-| Business | 40 | $20,000 |
+| Hobby | 550 | $8,250 |
+| Indie | 300 | $8,700 |
+| Pro | 80 | $7,920 |
+| Business | 40 | $19,960 |
 | Enterprise | 5 | $15,000 |
-| **Total** | **925** | **$63,000** |
+| **Total** | **975** | **$59,830** |
 
 **Year 3 totals:**
-- MRR: $63,000
-- ARR: **$756,000**
+- MRR: $59,830
+- ARR: **$717,960**
 
 ### Revenue Growth Summary
 
 | Year | Customers | MRR | ARR |
 |------|-----------|-----|-----|
-| Y1 | 240 | $9,000 | $108,000 |
-| Y2 | 507 | $26,000 | $312,000 |
-| Y3 | 925 | $63,000 | $756,000 |
+| Y1 | 270 | $11,225 | $134,700 |
+| Y2 | 557 | $25,045 | $300,540 |
+| Y3 | 975 | $59,830 | $717,960 |
+
+### Customer Mix Evolution
+
+| Year | Hobby % | Indie % | Pro % | Business % | Enterprise % |
+|------|---------|---------|-------|------------|--------------|
+| Y1 | 67% | 26% | 6% | 2% | 0% |
+| Y2 | 63% | 27% | 7% | 3% | <1% |
+| Y3 | 56% | 31% | 8% | 4% | <1% |
+
+The mix naturally shifts toward higher tiers as customers succeed and upgrade. Hobby remains the largest segment by count but shrinks as a percentage over time.
 
 ### Average Revenue Per Customer
 
 | Year | ARPC | Notes |
 |------|------|-------|
-| Y1 | $37.50/mo | Starter-heavy, early adopters |
-| Y2 | $51.28/mo | Mix shifts toward Indie/Pro |
-| Y3 | $68.11/mo | Business tier growing |
+| Y1 | $41.57/mo | Hobby-heavy, early adopters |
+| Y2 | $44.96/mo | Mix shifting toward Indie/Pro |
+| Y3 | $61.36/mo | Business tier growing, mature customer base |
 
 The ARPC growth reflects customers succeeding and upgrading through tiers — exactly how the pricing is designed to work.
+
+---
+
+## Speculative: Stripe Connect Revenue Potential
+
+### The Opportunity
+
+Paycheck could evolve beyond SaaS subscription revenue by offering payment processing through Stripe Connect. This would position Paycheck as a Merchant of Record (MoR) for indie developers who:
+- Don't want to set up their own Stripe accounts
+- Need tax handling without LemonSqueezy's limitations
+- Want a single vendor for payments + licensing
+
+### Competitive Pricing Analysis
+
+| Provider | Take Rate | Notes |
+|----------|-----------|-------|
+| Stripe Direct | 2.9% + $0.30 | Dev handles taxes, chargebacks |
+| LemonSqueezy | 5% + $0.50 | MoR, handles taxes |
+| Gumroad | 10% | MoR, handles taxes |
+| Paddle | 5% + $0.50 | MoR, handles taxes |
+| **Paycheck Connect** | 3.5% + $0.30 | MoR, handles taxes, full licensing |
+
+**Proposed rate: 3.5% + $0.30 per transaction**
+
+This is competitive because:
+- **0.6% above Stripe Direct** — Fair premium for MoR tax handling
+- **1.5% below LemonSqueezy** — Major savings at scale
+- **Includes full licensing** — What LemonSqueezy can't do
+
+At $50 average transaction:
+- Stripe Direct: $1.75 (3.5%)
+- Paycheck Connect: $2.05 (4.1%)
+- LemonSqueezy: $3.00 (6.0%)
+- Gumroad: $5.00 (10%)
+
+### Transaction Volume Modeling
+
+**Assumptions:**
+- 20% of SaaS customers opt into Paycheck Connect (simplicity seekers)
+- Average transaction: $50
+- Transactions per customer: correlates with tier
+
+| Year | Connect Customers | Avg Transactions/mo | GMV/mo | Transaction Revenue |
+|------|-------------------|---------------------|--------|---------------------|
+| Y1 | 54 (20% of 270) | 15 | $40,500 | $1,418 |
+| Y2 | 111 (20% of 557) | 20 | $111,000 | $3,885 |
+| Y3 | 195 (20% of 975) | 25 | $243,750 | $8,531 |
+
+**Note:** These are net revenues after paying out to developers and covering Stripe's 2.9% + $0.30 base fees.
+
+### Combined Revenue Model (SaaS + Connect)
+
+| Year | SaaS ARR | Connect ARR | Total ARR | Connect % |
+|------|----------|-------------|-----------|-----------|
+| Y1 | $134,700 | $17,016 | $151,716 | 11% |
+| Y2 | $300,540 | $46,620 | $347,160 | 13% |
+| Y3 | $717,960 | $102,372 | $820,332 | 12% |
+
+### Upside Scenario: Higher Adoption
+
+If 40% of customers use Paycheck Connect (strong product-market fit for the "just works" crowd):
+
+| Year | Connect Customers | GMV/mo | Connect ARR | Total ARR |
+|------|-------------------|--------|-------------|-----------|
+| Y1 | 108 | $81,000 | $34,032 | $168,732 |
+| Y2 | 223 | $223,000 | $93,660 | $394,200 |
+| Y3 | 390 | $487,500 | $204,744 | $922,704 |
+
+### Strategic Benefits Beyond Revenue
+
+1. **Stickier customers** — Payment processing + licensing = hard to leave
+2. **Data insights** — Transaction data reveals product-market fit, churn risk
+3. **Upsell trigger** — Can prompt tier upgrades based on actual revenue
+4. **Network effects** — More volume = better negotiating position with Stripe
+5. **Competitive moat** — "Full stack for indie devs" vs point solutions
+
+### Risks and Considerations
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Chargeback liability | High | Reserve fund, dev clawback policy |
+| Tax complexity | High | Stripe Tax integration, start US-only |
+| 1099 reporting burden | Medium | Automate with Stripe Connect payouts |
+| Support volume increase | Medium | Clear SLAs, self-service dashboard |
+| Regulatory overhead | Medium | Start simple, expand carefully |
+
+### Implementation Phases
+
+**Phase 1: US-Only Launch**
+- Accept US customers only (simpler tax)
+- 3.5% + $0.30 pricing
+- Stripe Tax for sales tax
+- Minimal chargeback reserve requirement
+
+**Phase 2: International Expansion**
+- EU/UK with VAT handling
+- Per-country pricing if needed
+- Partner with tax advisors
+
+**Phase 3: Premium Features**
+- Custom payout schedules
+- White-label checkout
+- Revenue analytics dashboard
+
+### Connect Revenue Summary
+
+Stripe Connect represents a meaningful revenue diversification opportunity:
+
+- **Conservative (20% adoption):** +$100K ARR by Y3
+- **Optimistic (40% adoption):** +$200K ARR by Y3
+- **Combined potential:** $800K-$920K ARR by Y3
+
+The transaction revenue serves as a "success tax" that scales with customer success — aligning Paycheck's incentives with developer outcomes while maintaining the flat-fee SaaS pricing that makes the core product attractive.
 
 ---
 
@@ -341,6 +492,7 @@ The ARPC growth reflects customers succeeding and upgrading through tiers — ex
 2. **Add payment providers**
    - Paddle
    - Stripe Link
+   - Paycheck Connect (Stripe Connect MoR option)
 
 3. **Partnerships**
    - Integration with popular frameworks
@@ -368,6 +520,7 @@ The ARPC growth reflects customers succeeding and upgrading through tiers — ex
 | LemonSqueezy adds offline | Low | Medium | We integrate with LS — if they add it, we pivot to other value props |
 | Low conversion to paid | Medium | Medium | Self-host is genuinely free, paid tiers offer real value (hosting, support) |
 | Self-hosters don't pay | Expected | Low | They become evangelists, enterprise needs paid support |
+| Stripe Connect complexity | Medium | Medium | Phase rollout, start US-only |
 
 ---
 
@@ -387,17 +540,25 @@ The ARPC growth reflects customers succeeding and upgrading through tiers — ex
 
 - [ ] 1,000 GitHub stars
 - [ ] 5,000 Docker pulls (self-hosted adoption)
-- [ ] 240 paid customers
-- [ ] $108K ARR
+- [ ] 270 paid customers
+- [ ] $135K ARR
 - [ ] Self-sustaining (covers infrastructure costs)
 
 ### Year 2 Goals
 
 - [ ] 3,000 GitHub stars
 - [ ] 20,000 Docker pulls
-- [ ] 500 paid customers
-- [ ] $312K ARR
+- [ ] 550 paid customers
+- [ ] $300K ARR
 - [ ] Profitable (founder salary)
+
+### Year 3 Goals (with Connect)
+
+- [ ] 5,000 GitHub stars
+- [ ] 50,000 Docker pulls
+- [ ] 975 paid customers
+- [ ] $720K-$820K ARR (SaaS + Connect)
+- [ ] Stripe Connect live and growing
 
 ---
 
@@ -411,7 +572,9 @@ Paycheck sits at the intersection of three underserved needs:
 
 The market is large enough ($3B+ licensing, millions of Stripe merchants), and we've found a unique position: **complement, not compete.** Keygen does licensing but not payments. LemonSqueezy does payments and taxes but only basic licensing. Paycheck bridges the gap — and by supporting LemonSqueezy as a backend, we offer the best of both worlds.
 
-**Bottom line:** A $300K-700K ARR business is achievable within 2-3 years with focused execution on the indie developer segment.
+With the addition of Stripe Connect, Paycheck can evolve into a full-stack solution for indie developers: licensing, payments, and tax handling in one place. The transaction revenue diversifies the business model while aligning with customer success.
+
+**Bottom line:** A $700K-$800K ARR business is achievable within 3 years with focused execution on the indie developer segment. With Stripe Connect adoption, this could exceed $900K ARR.
 
 ---
 

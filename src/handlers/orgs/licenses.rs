@@ -9,6 +9,7 @@ use crate::error::{AppError, Result};
 use crate::extractors::{Json, Path};
 use crate::middleware::OrgMemberContext;
 use crate::models::{ActorType, CreateLicense, Device, LicenseWithProduct};
+use crate::pagination::Paginated;
 use crate::util::{LicenseExpirations, audit_log};
 
 #[derive(serde::Deserialize)]
@@ -37,32 +38,36 @@ pub struct LicenseWithDevices {
 pub struct ListLicensesQuery {
     /// Filter licenses by customer email (for support lookups)
     pub email: Option<String>,
+    /// Filter by payment provider order ID (for support lookups via receipt)
+    pub payment_provider_order_id: Option<String>,
     /// Max results to return (default 50, max 100)
     pub limit: Option<i64>,
     /// Offset for pagination (default 0)
     pub offset: Option<i64>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct ListLicensesResponse {
-    pub licenses: Vec<LicenseWithProduct>,
-    pub total: i64,
-    pub limit: i64,
-    pub offset: i64,
+impl ListLicensesQuery {
+    fn limit(&self) -> i64 {
+        self.limit.unwrap_or(50).clamp(1, 100)
+    }
+
+    fn offset(&self) -> i64 {
+        self.offset.unwrap_or(0).max(0)
+    }
 }
 
 /// GET /orgs/{org_id}/projects/{project_id}/licenses
-/// List licenses for a project with pagination, optionally filtered by email.
-/// When filtering by email, returns ALL licenses including expired/revoked (for support).
+/// List licenses for a project with pagination, optionally filtered by email or payment order ID.
+/// When filtering by email or order ID, returns ALL licenses including expired/revoked (for support).
 pub async fn list_licenses(
     State(state): State<AppState>,
     Path(path): Path<crate::middleware::OrgProjectPath>,
     Query(query): Query<ListLicensesQuery>,
-) -> Result<Json<ListLicensesResponse>> {
+) -> Result<Json<Paginated<LicenseWithProduct>>> {
     let conn = state.db.get()?;
 
-    let limit = query.limit.unwrap_or(50).min(100).max(1);
-    let offset = query.offset.unwrap_or(0).max(0);
+    let limit = query.limit();
+    let offset = query.offset();
 
     let (licenses, total) = if let Some(email) = query.email {
         // Support lookup by email - includes expired/revoked
@@ -74,17 +79,21 @@ pub async fn list_licenses(
             limit,
             offset,
         )?
+    } else if let Some(ref order_id) = query.payment_provider_order_id {
+        // Support lookup by payment provider order ID (e.g., from receipt) - includes expired/revoked
+        queries::get_licenses_by_payment_order_id_paginated(
+            &conn,
+            &path.project_id,
+            order_id,
+            limit,
+            offset,
+        )?
     } else {
         // Default: list all licenses for project
         queries::list_licenses_for_project_paginated(&conn, &path.project_id, limit, offset)?
     };
 
-    Ok(Json(ListLicensesResponse {
-        licenses,
-        total,
-        limit,
-        offset,
-    }))
+    Ok(Json(Paginated::new(licenses, total, limit, offset)))
 }
 
 /// Request body for creating a license directly (for bulk/trial licenses)
@@ -222,6 +231,7 @@ pub async fn create_license(
             state.audit_log_enabled,
             ActorType::OrgMember,
             Some(&ctx.member.id),
+            ctx.impersonated_by.as_deref(),
             &headers,
             "create_license",
             "license",
@@ -231,6 +241,7 @@ pub async fn create_license(
             ),
             Some(&path.org_id),
             Some(&path.project_id),
+            &ctx.audit_names().project(project.name.clone()),
         )?;
     }
 
@@ -243,6 +254,94 @@ pub async fn create_license(
 
     Ok(Json(CreateLicenseResponse {
         licenses: created_licenses,
+    }))
+}
+
+/// Request body for updating a license (email correction)
+#[derive(Debug, Deserialize)]
+pub struct UpdateLicenseBody {
+    /// New email to hash and store (fixes typo'd purchase email)
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UpdateLicenseResponse {
+    #[serde(flatten)]
+    pub license: LicenseWithProduct,
+    pub message: &'static str,
+}
+
+/// PATCH /orgs/{org_id}/projects/{project_id}/licenses/{license_id}
+/// Update a license's email hash to fix typo'd purchase emails.
+/// This enables self-service recovery with the corrected email address.
+pub async fn update_license(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<OrgMemberContext>,
+    Path(path): Path<LicensePath>,
+    headers: HeaderMap,
+    Json(body): Json<UpdateLicenseBody>,
+) -> Result<Json<UpdateLicenseResponse>> {
+    if !ctx.can_write_project() {
+        return Err(AppError::Forbidden("Insufficient permissions".into()));
+    }
+
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
+
+    // Get the license
+    let license = queries::get_license_by_id(&conn, &path.license_id)?
+        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+
+    // Verify license belongs to a product in this project
+    let product = queries::get_product_by_id(&conn, &license.product_id)?
+        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+
+    if product.project_id != path.project_id {
+        return Err(AppError::NotFound("License not found".into()));
+    }
+
+    // Update email hash if provided
+    if let Some(ref email) = body.email {
+        let new_email_hash = queries::hash_email(email);
+        queries::update_license_email_hash(&conn, &license.id, &new_email_hash)?;
+
+        // Audit log the email change (log old hash for investigation, not new email for privacy)
+        audit_log(
+            &audit_conn,
+            state.audit_log_enabled,
+            ActorType::OrgMember,
+            Some(&ctx.member.id),
+            ctx.impersonated_by.as_deref(),
+            &headers,
+            "update_license_email",
+            "license",
+            &license.id,
+            Some(&serde_json::json!({
+                "old_email_hash": license.email_hash,
+                "reason": "email_correction"
+            })),
+            Some(&path.org_id),
+            Some(&path.project_id),
+            &ctx.audit_names(),
+        )?;
+
+        tracing::info!(
+            "License email updated by admin: {} (project: {})",
+            license.id,
+            path.project_id
+        );
+    }
+
+    // Fetch the updated license
+    let updated_license = queries::get_license_by_id(&conn, &path.license_id)?
+        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+
+    Ok(Json(UpdateLicenseResponse {
+        license: LicenseWithProduct {
+            license: updated_license,
+            product_name: product.name,
+        },
+        message: "License email updated. Customer can now use self-service recovery with the new email.",
     }))
 }
 
@@ -309,6 +408,7 @@ pub async fn revoke_license(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "revoke_license",
         "license",
@@ -316,6 +416,7 @@ pub async fn revoke_license(
         None,
         Some(&path.org_id),
         Some(&path.project_id),
+        &ctx.audit_names(),
     )?;
 
     Ok(Json(serde_json::json!({ "revoked": true })))
@@ -370,6 +471,7 @@ pub async fn send_activation_code(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "generate_activation_code",
         "license",
@@ -377,6 +479,7 @@ pub async fn send_activation_code(
         Some(&serde_json::json!({ "expires_at": code.expires_at })),
         Some(&path.org_id),
         Some(&path.project_id),
+        &ctx.audit_names().project(project.name.clone()),
     )?;
 
     Ok(Json(SendActivationCodeResponse {
@@ -439,6 +542,7 @@ pub async fn deactivate_device_admin(
         state.audit_log_enabled,
         ActorType::OrgMember,
         Some(&ctx.member.id),
+        ctx.impersonated_by.as_deref(),
         &headers,
         "deactivate_device",
         "device",
@@ -448,6 +552,7 @@ pub async fn deactivate_device_admin(
         ),
         Some(&path.org_id),
         Some(&path.project_id),
+        &ctx.audit_names().resource(device.name.clone()),
     )?;
 
     tracing::info!(

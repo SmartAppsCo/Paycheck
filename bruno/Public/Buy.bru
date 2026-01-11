@@ -12,16 +12,10 @@ post {
 
 body:json {
   {
-    "project_id": "{{project_id}}",
+    "public_key": "{{project_pub_key}}",
     "product_id": "{{product_id}}",
-    "device_id": "{{device_id}}",
-    "device_type": "uuid",
     "customer_id": null,
-    "provider": null,
-    "variant_id": null,
-    "price_cents": 1999,
-    "currency": "usd",
-    "redirect": null
+    "provider": null
   }
 }
 
@@ -29,20 +23,18 @@ docs {
   Initiates a payment flow by creating a checkout session with the configured payment provider.
 
   Request body:
-  - project_id: (required) The project identifier
+  - public_key: (optional) Project's public key for identification
   - product_id: (required) The product to purchase
-  - device_id: (required) Client device identifier
-  - device_type: (required) "uuid" or "machine"
   - customer_id: (optional) Developer-managed customer identifier to link to your system
   - provider: (optional) Force "stripe" or "lemonsqueezy"
-  - variant_id: (optional) LemonSqueezy variant ID (required for LemonSqueezy)
-  - price_cents: (optional) Stripe price in cents (required for Stripe)
-  - currency: (optional) Currency code (default: usd)
-  - redirect: (optional) Redirect URL after payment (must be in project's allowed_redirect_urls)
+
+  Note: Redirect URL is configured per-project in the Paycheck dashboard, not per-request.
+  After payment, the user is redirected to the project's configured redirect_url (or Paycheck's
+  success page if not configured).
 
   Provider selection logic:
   1. If 'provider' param specified -> use that
-  2. Else if organization has 'default_provider' set -> use that
+  2. Else if organization has 'payment_provider' set -> use that
   3. Else if only one provider configured on org -> use it
   4. Else -> error (must specify 'provider' param)
 

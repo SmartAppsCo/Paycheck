@@ -25,6 +25,7 @@ impl std::fmt::Display for DeviceType {
 ///
 /// Note: Price and variant info are configured in the product settings on Paycheck,
 /// so you don't need to send them here - just the product ID.
+/// Redirect URL is configured per-project in the Paycheck dashboard, not per-request.
 #[derive(Debug, Clone, Default)]
 pub struct CheckoutParams {
     /// Product UUID - Paycheck looks up pricing from product config
@@ -33,8 +34,6 @@ pub struct CheckoutParams {
     pub provider: Option<String>,
     /// Your customer identifier (flows through to license)
     pub customer_id: Option<String>,
-    /// Post-payment redirect URL (must be in project's allowlist)
-    pub redirect: Option<String>,
 }
 
 /// Result from starting a checkout session
@@ -129,7 +128,7 @@ pub struct LicenseClaims {
     pub iss: String,
     /// Subject (license_id)
     pub sub: String,
-    /// Audience (project domain)
+    /// Audience (project name, for debugging - not verified)
     pub aud: String,
     /// JWT ID (unique per device activation)
     pub jti: String,

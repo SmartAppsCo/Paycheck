@@ -50,7 +50,7 @@ pub fn router(rate_limit_config: RateLimitConfig) -> Router<AppState> {
     // Standard tier: crypto + DB operations
     let standard_routes = Router::new()
         .route("/callback", get(payment_callback))
-        .route("/redeem", get(redeem_with_code))
+        .route("/redeem", post(redeem_with_code))
         .route("/refresh", post(refresh_token))
         .route("/validate", get(validate_license))
         .route("/license", get(get_license_info))

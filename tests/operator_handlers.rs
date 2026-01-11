@@ -144,8 +144,9 @@ mod operator_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        let operators = json.as_array().unwrap();
+        let operators = json["items"].as_array().unwrap();
         assert_eq!(operators.len(), 3);
+        assert_eq!(json["total"], 3);
     }
 
     #[tokio::test]
@@ -479,8 +480,8 @@ mod organization_tests {
 
         assert!(json["organization"]["id"].as_str().is_some());
         assert_eq!(json["organization"]["name"], "Acme Corp");
-        // No owner API key when owner not specified
-        assert!(json["owner_api_key"].is_null() || json.get("owner_api_key").is_none());
+        // No owner when owner_email not specified
+        assert!(json["owner"].is_null() || json.get("owner").is_none());
     }
 
     #[tokio::test]
@@ -523,9 +524,10 @@ mod organization_tests {
 
         assert!(json["organization"]["id"].as_str().is_some());
         assert_eq!(json["organization"]["name"], "Acme Corp");
-        // Owner API key should be returned
-        assert!(json["owner_api_key"].as_str().is_some());
-        assert!(!json["owner_api_key"].as_str().unwrap().is_empty());
+        // Owner should be returned (no API key - use Console or create later)
+        assert!(json["owner"]["id"].as_str().is_some());
+        assert_eq!(json["owner"]["email"], "owner@acme.com");
+        assert!(json["owner"].get("api_key").is_none());
 
         // Verify org member was created
         let conn = state.db.get().unwrap();
@@ -570,8 +572,9 @@ mod organization_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        let orgs = json.as_array().unwrap();
+        let orgs = json["items"].as_array().unwrap();
         assert_eq!(orgs.len(), 3);
+        assert_eq!(json["total"], 3);
     }
 
     #[tokio::test]
@@ -732,7 +735,7 @@ mod organization_tests {
     }
 
     #[tokio::test]
-    async fn test_update_organization_with_default_provider() {
+    async fn test_update_organization_with_payment_provider() {
         let (app, state) = operator_app();
 
         let org_id: String;
@@ -747,7 +750,7 @@ mod organization_tests {
         }
 
         let body = json!({
-            "default_provider": "stripe"
+            "payment_provider": "stripe"
         });
 
         let response = app
@@ -770,7 +773,7 @@ mod organization_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["default_provider"], "stripe");
+        assert_eq!(json["payment_provider"], "stripe");
     }
 
     #[tokio::test]
@@ -1073,8 +1076,10 @@ mod audit_log_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        let logs = json.as_array().unwrap();
+        // Response is now paginated: { items: [...], total, limit, offset }
+        let logs = json["items"].as_array().unwrap();
         assert!(!logs.is_empty(), "Should have at least one audit log entry");
+        assert!(json["total"].as_i64().unwrap() >= 1);
     }
 
     #[tokio::test]
@@ -1108,8 +1113,8 @@ mod audit_log_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        // Should return array (possibly empty if no matching logs)
-        assert!(json.is_array());
+        // Response is now paginated: { items: [...], total, limit, offset }
+        assert!(json["items"].is_array());
     }
 
     #[tokio::test]
@@ -1143,7 +1148,98 @@ mod audit_log_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        let logs = json.as_array().unwrap();
+        // Response is now paginated: { items: [...], total, limit, offset }
+        let logs = json["items"].as_array().unwrap();
         assert!(logs.len() <= 10, "Should respect limit");
+        assert_eq!(json["limit"].as_i64().unwrap(), 10);
+        assert_eq!(json["offset"].as_i64().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_query_audit_logs_text_returns_plain_text() {
+        let (app, state) = operator_app();
+
+        let api_key: String;
+
+        {
+            let conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&conn, "view@test.com", OperatorRole::View);
+            api_key = key;
+        }
+
+        // Create an org to generate an audit log entry
+        {
+            let conn = state.db.get().unwrap();
+            let (_, admin_key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+
+            let app2 = handlers::operators::router(state.clone()).with_state(state.clone());
+            let body = json!({"name": "Text Test Org"});
+            let _response = app2
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/operators/organizations")
+                        .header("content-type", "application/json")
+                        .header("Authorization", format!("Bearer {}", admin_key))
+                        .body(Body::from(serde_json::to_string(&body).unwrap()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+        }
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/operators/audit-logs/text")
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+
+        // Should have at least one line with create_organization action
+        assert!(!text.is_empty(), "Should have audit log content");
+        assert!(
+            text.contains("created organization"),
+            "Should contain the org creation action"
+        );
+        assert!(text.contains("Operator"), "Should contain actor type");
+    }
+
+    #[tokio::test]
+    async fn test_query_audit_logs_text_with_filters() {
+        let (app, state) = operator_app();
+
+        let api_key: String;
+
+        {
+            let conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&conn, "view@test.com", OperatorRole::View);
+            api_key = key;
+        }
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/operators/audit-logs/text?action=create_organization&limit=5")
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
     }
 }

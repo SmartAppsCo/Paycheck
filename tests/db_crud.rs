@@ -15,7 +15,7 @@ fn test_create_operator() {
     assert_eq!(operator.email, "test@example.com");
     assert_eq!(operator.role, OperatorRole::Admin);
     assert!(!api_key.is_empty());
-    assert!(api_key.starts_with("pc_"));
+    assert!(api_key.starts_with("pco_")); // Operator keys use pco_ prefix
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn test_update_organization() {
         stripe_config: None,
         ls_config: None,
         resend_api_key: None,
-        default_provider: None,
+        payment_provider: None,
     };
     queries::update_organization(&conn, &org.id, &update, &master_key).expect("Update failed");
 
@@ -179,7 +179,7 @@ fn test_create_org_member() {
     assert_eq!(member.org_id, org.id);
     assert_eq!(member.email, "member@test.com");
     assert_eq!(member.role, OrgMemberRole::Owner);
-    assert!(api_key.starts_with("pc_"));
+    assert!(api_key.starts_with("pc_")); // Org member keys use pc_ prefix
 }
 
 #[test]
@@ -216,13 +216,13 @@ fn test_unique_email_per_org() {
     create_test_org_member(&conn, &org.id, "same@test.com", OrgMemberRole::Owner);
 
     // Creating another member with the same email in the same org should fail
-    let api_key = queries::generate_api_key();
     let input = CreateOrgMember {
         email: "same@test.com".to_string(),
         name: "Duplicate".to_string(),
         role: OrgMemberRole::Member,
+        external_user_id: None,
     };
-    let result = queries::create_org_member(&conn, &org.id, &input, &api_key);
+    let result = queries::create_org_member(&conn, &org.id, &input, "");
     assert!(result.is_err());
 }
 
@@ -303,7 +303,7 @@ fn test_update_org_stripe_config() {
         stripe_config: Some(stripe_config.clone()),
         ls_config: None,
         resend_api_key: None,
-        default_provider: None,
+        payment_provider: None,
     };
 
     queries::update_organization(&conn, &org.id, &update, &master_key).expect("Update failed");
@@ -345,7 +345,7 @@ fn test_update_org_lemonsqueezy_config() {
         stripe_config: None,
         ls_config: Some(ls_config.clone()),
         resend_api_key: None,
-        default_provider: None,
+        payment_provider: None,
     };
 
     queries::update_organization(&conn, &org.id, &update, &master_key).expect("Update failed");
@@ -390,7 +390,7 @@ fn test_update_org_both_payment_configs() {
         stripe_config: Some(stripe_config),
         ls_config: Some(ls_config),
         resend_api_key: None,
-        default_provider: Some(Some("stripe".to_string())),
+        payment_provider: Some(Some("stripe".to_string())),
     };
 
     queries::update_organization(&conn, &org.id, &update, &master_key).expect("Update failed");
@@ -415,7 +415,7 @@ fn test_update_org_both_payment_configs() {
         .expect("LS config not found");
     assert_eq!(ls.api_key, "ls_both_key");
 
-    assert_eq!(updated.default_provider, Some("stripe".to_string()));
+    assert_eq!(updated.payment_provider, Some("stripe".to_string()));
 }
 
 #[test]
@@ -436,7 +436,7 @@ fn test_payment_config_wrong_key_fails() {
         stripe_config: Some(stripe_config),
         ls_config: None,
         resend_api_key: None,
-        default_provider: None,
+        payment_provider: None,
     };
 
     queries::update_organization(&conn, &org.id, &update, &master_key).expect("Update failed");
@@ -591,4 +591,144 @@ fn test_delete_project_cascades_to_products() {
 
     let result = queries::get_product_by_id(&conn, &product.id).expect("Query failed");
     assert!(result.is_none());
+}
+
+// ============ Audit Log Purge Tests ============
+
+#[test]
+fn test_purge_old_public_audit_logs_only_deletes_public() {
+    let conn = setup_test_audit_db();
+
+    // Create audit logs with different actor types, all with old timestamps
+    // Using timestamp 0 (1970) to ensure they're "old"
+    let old_timestamp = 0i64;
+
+    // Insert logs directly to control timestamp
+    conn.execute(
+        "INSERT INTO audit_logs (id, timestamp, actor_type, action, resource_type, resource_id)
+         VALUES ('log_public', ?1, 'public', 'redeem', 'license', 'lic1')",
+        [old_timestamp],
+    )
+    .unwrap();
+
+    conn.execute(
+        "INSERT INTO audit_logs (id, timestamp, actor_type, action, resource_type, resource_id)
+         VALUES ('log_operator', ?1, 'operator', 'create', 'organization', 'org1')",
+        [old_timestamp],
+    )
+    .unwrap();
+
+    conn.execute(
+        "INSERT INTO audit_logs (id, timestamp, actor_type, action, resource_type, resource_id)
+         VALUES ('log_org_member', ?1, 'org_member', 'create', 'license', 'lic2')",
+        [old_timestamp],
+    )
+    .unwrap();
+
+    conn.execute(
+        "INSERT INTO audit_logs (id, timestamp, actor_type, action, resource_type, resource_id)
+         VALUES ('log_system', ?1, 'system', 'bootstrap', 'operator', 'op1')",
+        [old_timestamp],
+    )
+    .unwrap();
+
+    // Verify all 4 logs exist
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM audit_logs", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 4);
+
+    // Purge with 1 day retention (anything older than 1 day ago)
+    let deleted = queries::purge_old_public_audit_logs(&conn, 1).unwrap();
+
+    // Only the public log should be deleted
+    assert_eq!(deleted, 1);
+
+    // Verify only 3 logs remain
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM audit_logs", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 3);
+
+    // Verify the public log is gone
+    let public_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM audit_logs WHERE id = 'log_public')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(!public_exists);
+
+    // Verify internal logs still exist
+    let operator_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM audit_logs WHERE id = 'log_operator')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(operator_exists);
+
+    let org_member_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM audit_logs WHERE id = 'log_org_member')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(org_member_exists);
+
+    let system_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM audit_logs WHERE id = 'log_system')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(system_exists);
+}
+
+#[test]
+fn test_purge_old_public_audit_logs_respects_retention_period() {
+    let conn = setup_test_audit_db();
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    // Create an old public log (100 days old)
+    let old_timestamp = now - (100 * 86400);
+    conn.execute(
+        "INSERT INTO audit_logs (id, timestamp, actor_type, action, resource_type, resource_id)
+         VALUES ('log_old_public', ?1, 'public', 'redeem', 'license', 'lic1')",
+        [old_timestamp],
+    )
+    .unwrap();
+
+    // Create a recent public log (1 day old)
+    let recent_timestamp = now - 86400;
+    conn.execute(
+        "INSERT INTO audit_logs (id, timestamp, actor_type, action, resource_type, resource_id)
+         VALUES ('log_recent_public', ?1, 'public', 'redeem', 'license', 'lic2')",
+        [recent_timestamp],
+    )
+    .unwrap();
+
+    // Purge with 30 day retention
+    let deleted = queries::purge_old_public_audit_logs(&conn, 30).unwrap();
+
+    // Only the old public log should be deleted
+    assert_eq!(deleted, 1);
+
+    // Verify the recent public log still exists
+    let recent_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM audit_logs WHERE id = 'log_recent_public')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(recent_exists);
 }

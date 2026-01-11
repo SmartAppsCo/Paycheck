@@ -8,11 +8,14 @@ export {
   useLicenseStatus,
   useFeature,
   useVersionAccess,
+  usePaymentCallback,
 } from './hooks';
 export type {
   UseLicenseOptions,
   UseLicenseResult,
   UseLicenseStatusResult,
+  UsePaymentCallbackOptions,
+  UsePaymentCallbackResult,
 } from './hooks';
 
 // Gate components
@@ -28,6 +31,8 @@ export type {
   DeviceInfo,
   ImportResult,
   SyncResult,
+  CallbackActivationResult,
+  RequestCodeResult,
   PaycheckErrorCode,
 } from '@paycheck/sdk';
 export { Paycheck, PaycheckError } from '@paycheck/sdk';

@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::crypto::MasterKey;
 
-/// Rate limiting configuration for public endpoints
+/// Rate limiting configuration for API endpoints
 #[derive(Clone, Copy, Debug)]
 pub struct RateLimitConfig {
     /// Strict tier: requests per minute (for endpoints with external API calls like /buy)
@@ -13,6 +13,9 @@ pub struct RateLimitConfig {
     pub standard_rpm: u32,
     /// Relaxed tier: requests per minute (for lightweight endpoints like /health)
     pub relaxed_rpm: u32,
+    /// Org ops tier: requests per minute (for /orgs/* authenticated endpoints)
+    /// High limit to only stop extreme abuse (runaway scripts, DDoS attempts)
+    pub org_ops_rpm: u32,
 }
 
 impl Default for RateLimitConfig {
@@ -21,6 +24,19 @@ impl Default for RateLimitConfig {
             strict_rpm: 10,
             standard_rpm: 30,
             relaxed_rpm: 60,
+            org_ops_rpm: 3000,
+        }
+    }
+}
+
+impl RateLimitConfig {
+    /// Create a config with rate limiting disabled (for tests)
+    pub fn disabled() -> Self {
+        Self {
+            strict_rpm: 0,
+            standard_rpm: 0,
+            relaxed_rpm: 0,
+            org_ops_rpm: 0,
         }
     }
 }
@@ -36,8 +52,10 @@ pub struct Config {
     pub dev_mode: bool,
     /// Enable/disable audit logging entirely
     pub audit_log_enabled: bool,
-    /// Days to retain audit logs before purging (0 = never purge)
-    pub audit_log_retention_days: i64,
+    /// Days to retain public (end-user) audit logs before purging.
+    /// Internal actions (operator, org_member, system) are kept forever.
+    /// 0 = never purge (default).
+    pub public_audit_log_retention_days: i64,
     /// Master key for envelope encryption of project private keys.
     /// Required in production; auto-generated in dev mode if not set.
     pub master_key: MasterKey,
@@ -128,7 +146,7 @@ impl Config {
         let port: u16 = env::var("PORT")
             .ok()
             .and_then(|p| p.parse().ok())
-            .unwrap_or(3000);
+            .unwrap_or(4242);
 
         let base_url = env::var("BASE_URL").unwrap_or_else(|_| format!("http://{}:{}", host, port));
 
@@ -136,10 +154,10 @@ impl Config {
             .map(|v| v != "false" && v != "0")
             .unwrap_or(true);
 
-        let audit_log_retention_days: i64 = env::var("AUDIT_LOG_RETENTION_DAYS")
+        let public_audit_log_retention_days: i64 = env::var("PUBLIC_AUDIT_LOG_RETENTION_DAYS")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(90);
+            .unwrap_or(0);
 
         // Master key for envelope encryption - loaded from file with permission checks
         let master_key = match env::var("PAYCHECK_MASTER_KEY_FILE") {
@@ -191,6 +209,10 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(rate_limit_defaults.relaxed_rpm),
+            org_ops_rpm: env::var("RATE_LIMIT_ORG_OPS_RPM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(rate_limit_defaults.org_ops_rpm),
         };
 
         // Console origins for admin API CORS
@@ -225,7 +247,7 @@ impl Config {
             bootstrap_operator_email: env::var("BOOTSTRAP_OPERATOR_EMAIL").ok(),
             dev_mode,
             audit_log_enabled,
-            audit_log_retention_days,
+            public_audit_log_retention_days,
             master_key,
             success_page_url,
             rate_limit,

@@ -7,9 +7,9 @@ use crate::error::{AppError, Result};
 use crate::models::*;
 
 use super::from_row::{
-    ACTIVATION_CODE_COLS, DEVICE_COLS, LICENSE_COLS, OPERATOR_COLS, ORG_MEMBER_COLS,
-    ORGANIZATION_COLS, PAYMENT_CONFIG_COLS, PAYMENT_SESSION_COLS, PRODUCT_COLS, PROJECT_COLS,
-    PROJECT_MEMBER_COLS, query_all, query_one,
+    ACTIVATION_CODE_COLS, DEVICE_COLS, LICENSE_COLS, OPERATOR_API_KEY_COLS, OPERATOR_COLS,
+    ORG_MEMBER_API_KEY_COLS, ORG_MEMBER_COLS, ORGANIZATION_COLS, PAYMENT_CONFIG_COLS,
+    PAYMENT_SESSION_COLS, PRODUCT_COLS, PROJECT_COLS, PROJECT_MEMBER_COLS, query_all, query_one,
 };
 
 fn now() -> i64 {
@@ -98,45 +98,33 @@ impl UpdateBuilder {
     }
 }
 
-pub fn generate_api_key() -> String {
-    format!("pc_{}", Uuid::new_v4().to_string().replace("-", ""))
-}
-
 // ============ Operators ============
 
-pub fn create_operator(
-    conn: &Connection,
-    input: &CreateOperator,
-    api_key: &str,
-    created_by: Option<&str>,
-) -> Result<Operator> {
+/// Create an operator with a default API key.
+/// Returns the operator and the API key (key is only shown once).
+pub fn create_operator(conn: &Connection, input: &CreateOperator) -> Result<(Operator, String)> {
     let id = gen_id();
     let now = now();
-    let api_key_hash = hash_secret(api_key);
 
     conn.execute(
-        "INSERT INTO operators (id, email, name, role, api_key_hash, created_at, created_by)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![
-            &id,
-            &input.email,
-            &input.name,
-            input.role.as_ref(),
-            &api_key_hash,
-            now,
-            created_by
-        ],
+        "INSERT INTO operators (id, email, name, role, api_key_hash, created_at)
+         VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
+        params![&id, &input.email, &input.name, input.role.as_ref(), now],
     )?;
 
-    Ok(Operator {
-        id,
+    let operator = Operator {
+        id: id.clone(),
         email: input.email.clone(),
         name: input.name.clone(),
         role: input.role,
-        api_key_hash,
+        api_key_hash: None,
         created_at: now,
-        created_by: created_by.map(String::from),
-    })
+    };
+
+    // Create default API key
+    let (_key_record, api_key) = create_operator_api_key(conn, &id, "Default", None)?;
+
+    Ok((operator, api_key))
 }
 
 pub fn get_operator_by_id(conn: &Connection, id: &str) -> Result<Option<Operator>> {
@@ -144,18 +132,6 @@ pub fn get_operator_by_id(conn: &Connection, id: &str) -> Result<Option<Operator
         conn,
         &format!("SELECT {} FROM operators WHERE id = ?1", OPERATOR_COLS),
         &[&id],
-    )
-}
-
-pub fn get_operator_by_api_key(conn: &Connection, api_key: &str) -> Result<Option<Operator>> {
-    let hash = hash_secret(api_key);
-    query_one(
-        conn,
-        &format!(
-            "SELECT {} FROM operators WHERE api_key_hash = ?1",
-            OPERATOR_COLS
-        ),
-        &[&hash],
     )
 }
 
@@ -168,6 +144,26 @@ pub fn list_operators(conn: &Connection) -> Result<Vec<Operator>> {
         ),
         &[],
     )
+}
+
+/// List operators with pagination
+pub fn list_operators_paginated(
+    conn: &Connection,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<Operator>, i64)> {
+    let total: i64 = conn.query_row("SELECT COUNT(*) FROM operators", [], |row| row.get(0))?;
+
+    let items = query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM operators ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+            OPERATOR_COLS
+        ),
+        params![limit, offset],
+    )?;
+
+    Ok((items, total))
 }
 
 pub fn update_operator(conn: &Connection, id: &str, input: &UpdateOperator) -> Result<()> {
@@ -188,6 +184,148 @@ pub fn count_operators(conn: &Connection) -> Result<i64> {
         .map_err(Into::into)
 }
 
+// ============ Operator API Keys ============
+
+/// Generate an operator API key
+pub fn generate_operator_api_key() -> String {
+    format!("pco_{}", Uuid::new_v4().to_string().replace("-", ""))
+}
+
+/// Authenticate an operator by API key.
+/// Checks the operator_api_keys table and validates the key is active.
+pub fn get_operator_by_api_key(conn: &Connection, api_key: &str) -> Result<Option<Operator>> {
+    let hash = hash_secret(api_key);
+
+    // First try the new api keys table
+    let key: Option<OperatorApiKey> = query_one(
+        conn,
+        &format!(
+            "SELECT {} FROM operator_api_keys WHERE key_hash = ?1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > unixepoch())",
+            OPERATOR_API_KEY_COLS
+        ),
+        &[&hash],
+    )?;
+
+    if let Some(key) = key {
+        // Update last_used_at (fire and forget)
+        let _ = conn.execute(
+            "UPDATE operator_api_keys SET last_used_at = ?1 WHERE id = ?2",
+            params![now(), &key.id],
+        );
+
+        // Get the operator
+        return get_operator_by_id(conn, &key.operator_id);
+    }
+
+    // Fall back to legacy api_key_hash column
+    query_one(
+        conn,
+        &format!(
+            "SELECT {} FROM operators WHERE api_key_hash = ?1",
+            OPERATOR_COLS
+        ),
+        &[&hash],
+    )
+}
+
+/// Create an API key for an operator
+pub fn create_operator_api_key(
+    conn: &Connection,
+    operator_id: &str,
+    name: &str,
+    expires_in_days: Option<i64>,
+) -> Result<(OperatorApiKey, String)> {
+    let id = gen_id();
+    let now = now();
+    let key = generate_operator_api_key();
+    let prefix = &key[..8];
+    let key_hash = hash_secret(&key);
+    let expires_at = expires_in_days.map(|days| now + days * 86400);
+
+    conn.execute(
+        "INSERT INTO operator_api_keys (id, operator_id, name, key_prefix, key_hash, created_at, last_used_at, expires_at, revoked_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, NULL)",
+        params![&id, operator_id, name, prefix, &key_hash, now, expires_at],
+    )?;
+
+    Ok((
+        OperatorApiKey {
+            id,
+            operator_id: operator_id.to_string(),
+            name: name.to_string(),
+            prefix: prefix.to_string(),
+            key_hash,
+            created_at: now,
+            last_used_at: None,
+            expires_at,
+            revoked_at: None,
+        },
+        key,
+    ))
+}
+
+/// List API keys for an operator (active only, excludes revoked)
+pub fn list_operator_api_keys(
+    conn: &Connection,
+    operator_id: &str,
+) -> Result<Vec<OperatorApiKey>> {
+    query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM operator_api_keys WHERE operator_id = ?1 AND revoked_at IS NULL ORDER BY created_at DESC",
+            OPERATOR_API_KEY_COLS
+        ),
+        &[&operator_id],
+    )
+}
+
+pub fn list_operator_api_keys_paginated(
+    conn: &Connection,
+    operator_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<OperatorApiKey>, i64)> {
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM operator_api_keys WHERE operator_id = ?1 AND revoked_at IS NULL",
+        params![operator_id],
+        |row| row.get(0),
+    )?;
+    let keys = query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM operator_api_keys WHERE operator_id = ?1 AND revoked_at IS NULL ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            OPERATOR_API_KEY_COLS
+        ),
+        params![operator_id, limit, offset],
+    )?;
+    Ok((keys, total))
+}
+
+/// Get an operator API key by ID
+pub fn get_operator_api_key_by_id(
+    conn: &Connection,
+    key_id: &str,
+) -> Result<Option<OperatorApiKey>> {
+    query_one(
+        conn,
+        &format!(
+            "SELECT {} FROM operator_api_keys WHERE id = ?1",
+            OPERATOR_API_KEY_COLS
+        ),
+        &[&key_id],
+    )
+}
+
+/// Revoke an operator API key (soft delete)
+pub fn revoke_operator_api_key(conn: &Connection, key_id: &str) -> Result<bool> {
+    let now = now();
+    let affected = conn.execute(
+        "UPDATE operator_api_keys SET revoked_at = ?1 WHERE id = ?2 AND revoked_at IS NULL",
+        params![now, key_id],
+    )?;
+    Ok(affected > 0)
+}
+
 // ============ Audit Logs ============
 
 #[allow(clippy::too_many_arguments)]
@@ -196,6 +334,7 @@ pub fn create_audit_log(
     enabled: bool,
     actor_type: ActorType,
     actor_id: Option<&str>,
+    impersonator_id: Option<&str>,
     action: &str,
     resource_type: &str,
     resource_id: &str,
@@ -204,6 +343,7 @@ pub fn create_audit_log(
     project_id: Option<&str>,
     ip_address: Option<&str>,
     user_agent: Option<&str>,
+    names: &AuditLogNames,
 ) -> Result<AuditLog> {
     let id = gen_id();
     let timestamp = now();
@@ -215,12 +355,18 @@ pub fn create_audit_log(
             timestamp,
             actor_type,
             actor_id: actor_id.map(String::from),
+            actor_name: names.actor_name.clone(),
+            impersonator_id: impersonator_id.map(String::from),
+            impersonator_name: names.impersonator_name.clone(),
             action: action.to_string(),
             resource_type: resource_type.to_string(),
             resource_id: resource_id.to_string(),
+            resource_name: names.resource_name.clone(),
             details: details.cloned(),
             org_id: org_id.map(String::from),
+            org_name: names.org_name.clone(),
             project_id: project_id.map(String::from),
+            project_name: names.project_name.clone(),
             ip_address: ip_address.map(String::from),
             user_agent: user_agent.map(String::from),
         });
@@ -229,19 +375,25 @@ pub fn create_audit_log(
     let details_str = details.map(|d| d.to_string());
 
     conn.execute(
-        "INSERT INTO audit_logs (id, timestamp, actor_type, actor_id, action, resource_type, resource_id, details, org_id, project_id, ip_address, user_agent)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        "INSERT INTO audit_logs (id, timestamp, actor_type, actor_id, actor_name, impersonator_id, impersonator_name, action, resource_type, resource_id, resource_name, details, org_id, org_name, project_id, project_name, ip_address, user_agent)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         params![
             &id,
             timestamp,
             actor_type.as_ref(),
             actor_id,
+            &names.actor_name,
+            impersonator_id,
+            &names.impersonator_name,
             action,
             resource_type,
             resource_id,
+            &names.resource_name,
             &details_str,
             org_id,
+            &names.org_name,
             project_id,
+            &names.project_name,
             ip_address,
             user_agent
         ],
@@ -252,96 +404,153 @@ pub fn create_audit_log(
         timestamp,
         actor_type,
         actor_id: actor_id.map(String::from),
+        actor_name: names.actor_name.clone(),
+        impersonator_id: impersonator_id.map(String::from),
+        impersonator_name: names.impersonator_name.clone(),
         action: action.to_string(),
         resource_type: resource_type.to_string(),
         resource_id: resource_id.to_string(),
+        resource_name: names.resource_name.clone(),
         details: details.cloned(),
         org_id: org_id.map(String::from),
+        org_name: names.org_name.clone(),
         project_id: project_id.map(String::from),
+        project_name: names.project_name.clone(),
         ip_address: ip_address.map(String::from),
         user_agent: user_agent.map(String::from),
     })
 }
 
-pub fn query_audit_logs(conn: &Connection, query: &AuditLogQuery) -> Result<Vec<AuditLog>> {
-    let mut sql = String::from(
-        "SELECT id, timestamp, actor_type, actor_id, action, resource_type, resource_id, details, org_id, project_id, ip_address, user_agent
-         FROM audit_logs WHERE 1=1",
-    );
-    let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+pub fn query_audit_logs(
+    conn: &Connection,
+    query: &AuditLogQuery,
+) -> Result<(Vec<AuditLog>, i64)> {
+    // Build WHERE clause (shared between COUNT and SELECT)
+    let mut where_clause = String::from("WHERE 1=1");
+    let mut filter_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
     if let Some(ref actor_type) = query.actor_type {
-        sql.push_str(" AND actor_type = ?");
-        params_vec.push(Box::new(actor_type.as_ref().to_string()));
+        where_clause.push_str(" AND actor_type = ?");
+        filter_params.push(Box::new(actor_type.as_ref().to_string()));
     }
     if let Some(ref actor_id) = query.actor_id {
-        sql.push_str(" AND actor_id = ?");
-        params_vec.push(Box::new(actor_id.clone()));
+        where_clause.push_str(" AND actor_id = ?");
+        filter_params.push(Box::new(actor_id.clone()));
+    }
+    if let Some(ref impersonator_id) = query.impersonator_id {
+        where_clause.push_str(" AND impersonator_id = ?");
+        filter_params.push(Box::new(impersonator_id.clone()));
     }
     if let Some(ref action) = query.action {
-        sql.push_str(" AND action = ?");
-        params_vec.push(Box::new(action.clone()));
+        where_clause.push_str(" AND action = ?");
+        filter_params.push(Box::new(action.clone()));
     }
     if let Some(ref resource_type) = query.resource_type {
-        sql.push_str(" AND resource_type = ?");
-        params_vec.push(Box::new(resource_type.clone()));
+        where_clause.push_str(" AND resource_type = ?");
+        filter_params.push(Box::new(resource_type.clone()));
     }
     if let Some(ref resource_id) = query.resource_id {
-        sql.push_str(" AND resource_id = ?");
-        params_vec.push(Box::new(resource_id.clone()));
+        where_clause.push_str(" AND resource_id = ?");
+        filter_params.push(Box::new(resource_id.clone()));
     }
     if let Some(ref org_id) = query.org_id {
-        sql.push_str(" AND org_id = ?");
-        params_vec.push(Box::new(org_id.clone()));
+        where_clause.push_str(" AND org_id = ?");
+        filter_params.push(Box::new(org_id.clone()));
     }
     if let Some(ref project_id) = query.project_id {
-        sql.push_str(" AND project_id = ?");
-        params_vec.push(Box::new(project_id.clone()));
+        where_clause.push_str(" AND project_id = ?");
+        filter_params.push(Box::new(project_id.clone()));
     }
     if let Some(from_ts) = query.from_timestamp {
-        sql.push_str(" AND timestamp >= ?");
-        params_vec.push(Box::new(from_ts));
+        where_clause.push_str(" AND timestamp >= ?");
+        filter_params.push(Box::new(from_ts));
     }
     if let Some(to_ts) = query.to_timestamp {
-        sql.push_str(" AND timestamp <= ?");
-        params_vec.push(Box::new(to_ts));
+        where_clause.push_str(" AND timestamp <= ?");
+        filter_params.push(Box::new(to_ts));
     }
 
-    sql.push_str(" ORDER BY timestamp DESC");
+    // Get total count
+    let count_sql = format!("SELECT COUNT(*) FROM audit_logs {}", where_clause);
+    let filter_refs: Vec<&dyn rusqlite::ToSql> =
+        filter_params.iter().map(|b| b.as_ref()).collect();
+    let total: i64 = conn.query_row(&count_sql, filter_refs.as_slice(), |row| row.get(0))?;
 
-    if let Some(limit) = query.limit {
-        sql.push_str(" LIMIT ?");
-        params_vec.push(Box::new(limit));
-    }
-    if let Some(offset) = query.offset {
-        sql.push_str(" OFFSET ?");
-        params_vec.push(Box::new(offset));
-    }
+    // Build SELECT query with pagination
+    let limit = query.limit();
+    let offset = query.offset();
+    let select_sql = format!(
+        "SELECT id, timestamp, actor_type, actor_id, actor_name, impersonator_id, impersonator_name, action, resource_type, resource_id, resource_name, details, org_id, org_name, project_id, project_name, ip_address, user_agent
+         FROM audit_logs {} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+        where_clause
+    );
 
-    let mut stmt = conn.prepare(&sql)?;
-    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+    // Rebuild params with limit/offset
+    let mut select_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    if let Some(ref actor_type) = query.actor_type {
+        select_params.push(Box::new(actor_type.as_ref().to_string()));
+    }
+    if let Some(ref actor_id) = query.actor_id {
+        select_params.push(Box::new(actor_id.clone()));
+    }
+    if let Some(ref impersonator_id) = query.impersonator_id {
+        select_params.push(Box::new(impersonator_id.clone()));
+    }
+    if let Some(ref action) = query.action {
+        select_params.push(Box::new(action.clone()));
+    }
+    if let Some(ref resource_type) = query.resource_type {
+        select_params.push(Box::new(resource_type.clone()));
+    }
+    if let Some(ref resource_id) = query.resource_id {
+        select_params.push(Box::new(resource_id.clone()));
+    }
+    if let Some(ref org_id) = query.org_id {
+        select_params.push(Box::new(org_id.clone()));
+    }
+    if let Some(ref project_id) = query.project_id {
+        select_params.push(Box::new(project_id.clone()));
+    }
+    if let Some(from_ts) = query.from_timestamp {
+        select_params.push(Box::new(from_ts));
+    }
+    if let Some(to_ts) = query.to_timestamp {
+        select_params.push(Box::new(to_ts));
+    }
+    select_params.push(Box::new(limit));
+    select_params.push(Box::new(offset));
+
+    let mut stmt = conn.prepare(&select_sql)?;
+    let select_refs: Vec<&dyn rusqlite::ToSql> =
+        select_params.iter().map(|b| b.as_ref()).collect();
 
     let logs = stmt
-        .query_map(params_refs.as_slice(), |row| {
-            let details_str: Option<String> = row.get(7)?;
+        .query_map(select_refs.as_slice(), |row| {
+            let details_str: Option<String> = row.get(11)?;
             Ok(AuditLog {
                 id: row.get(0)?,
                 timestamp: row.get(1)?,
                 actor_type: row.get::<_, String>(2)?.parse::<ActorType>().unwrap(),
                 actor_id: row.get(3)?,
-                action: row.get(4)?,
-                resource_type: row.get(5)?,
-                resource_id: row.get(6)?,
+                actor_name: row.get(4)?,
+                impersonator_id: row.get(5)?,
+                impersonator_name: row.get(6)?,
+                action: row.get(7)?,
+                resource_type: row.get(8)?,
+                resource_id: row.get(9)?,
+                resource_name: row.get(10)?,
                 details: details_str.and_then(|s| serde_json::from_str(&s).ok()),
-                org_id: row.get(8)?,
-                project_id: row.get(9)?,
-                ip_address: row.get(10)?,
-                user_agent: row.get(11)?,
+                org_id: row.get(12)?,
+                org_name: row.get(13)?,
+                project_id: row.get(14)?,
+                project_name: row.get(15)?,
+                ip_address: row.get(16)?,
+                user_agent: row.get(17)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
 
-    Ok(logs)
+    Ok((logs, total))
 }
 
 // ============ Organizations ============
@@ -351,7 +560,7 @@ pub fn create_organization(conn: &Connection, input: &CreateOrganization) -> Res
     let now = now();
 
     conn.execute(
-        "INSERT INTO organizations (id, name, stripe_config, ls_config, resend_api_key, default_provider, created_at, updated_at)
+        "INSERT INTO organizations (id, name, stripe_config, ls_config, resend_api_key, payment_provider, created_at, updated_at)
          VALUES (?1, ?2, NULL, NULL, NULL, NULL, ?3, ?4)",
         params![&id, &input.name, now, now],
     )?;
@@ -362,7 +571,7 @@ pub fn create_organization(conn: &Connection, input: &CreateOrganization) -> Res
         stripe_config_encrypted: None,
         ls_config_encrypted: None,
         resend_api_key_encrypted: None,
-        default_provider: None,
+        payment_provider: None,
         created_at: now,
         updated_at: now,
     })
@@ -388,6 +597,27 @@ pub fn list_organizations(conn: &Connection) -> Result<Vec<Organization>> {
         ),
         &[],
     )
+}
+
+/// List organizations with pagination
+pub fn list_organizations_paginated(
+    conn: &Connection,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<Organization>, i64)> {
+    let total: i64 =
+        conn.query_row("SELECT COUNT(*) FROM organizations", [], |row| row.get(0))?;
+
+    let items = query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM organizations ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+            ORGANIZATION_COLS
+        ),
+        params![limit, offset],
+    )?;
+
+    Ok((items, total))
 }
 
 pub fn update_organization(
@@ -438,11 +668,11 @@ pub fn update_organization(
         )?;
         updated = true;
     }
-    if let Some(ref default_provider) = input.default_provider {
+    if let Some(ref payment_provider) = input.payment_provider {
         // Some(None) clears the value, Some(Some(value)) sets it
         conn.execute(
-            "UPDATE organizations SET default_provider = ?1, updated_at = ?2 WHERE id = ?3",
-            params![default_provider, now, id],
+            "UPDATE organizations SET payment_provider = ?1, updated_at = ?2 WHERE id = ?3",
+            params![payment_provider, now, id],
         )?;
         updated = true;
     }
@@ -471,26 +701,27 @@ pub fn delete_organization(conn: &Connection, id: &str) -> Result<bool> {
 
 // ============ Org Members ============
 
+/// Create an org member WITHOUT an API key.
+/// Use create_org_member_api_key to add keys after creation.
 pub fn create_org_member(
     conn: &Connection,
     org_id: &str,
     input: &CreateOrgMember,
-    api_key: &str,
+    _api_key: &str, // Deprecated parameter, kept for backwards compatibility
 ) -> Result<OrgMember> {
     let id = gen_id();
     let now = now();
-    let api_key_hash = hash_secret(api_key);
 
     conn.execute(
-        "INSERT INTO org_members (id, org_id, email, name, role, api_key_hash, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO org_members (id, org_id, email, name, role, api_key_hash, external_user_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7)",
         params![
             &id,
             org_id,
             &input.email,
             &input.name,
             input.role.as_ref(),
-            &api_key_hash,
+            &input.external_user_id,
             now
         ],
     )?;
@@ -501,7 +732,8 @@ pub fn create_org_member(
         email: input.email.clone(),
         name: input.name.clone(),
         role: input.role,
-        api_key_hash,
+        api_key_hash: None,
+        external_user_id: input.external_user_id.clone(),
         created_at: now,
     })
 }
@@ -514,8 +746,33 @@ pub fn get_org_member_by_id(conn: &Connection, id: &str) -> Result<Option<OrgMem
     )
 }
 
+/// Authenticate an org member by API key.
+/// Checks the org_member_api_keys table and validates the key is active.
 pub fn get_org_member_by_api_key(conn: &Connection, api_key: &str) -> Result<Option<OrgMember>> {
     let hash = hash_secret(api_key);
+
+    // First try the new api keys table
+    let key: Option<OrgMemberApiKey> = query_one(
+        conn,
+        &format!(
+            "SELECT {} FROM org_member_api_keys WHERE key_hash = ?1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > unixepoch())",
+            ORG_MEMBER_API_KEY_COLS
+        ),
+        &[&hash],
+    )?;
+
+    if let Some(key) = key {
+        // Update last_used_at (fire and forget - don't fail auth on this)
+        let _ = conn.execute(
+            "UPDATE org_member_api_keys SET last_used_at = ?1 WHERE id = ?2",
+            params![now(), &key.id],
+        );
+
+        // Get the member
+        return get_org_member_by_id(conn, &key.org_member_id);
+    }
+
+    // Fall back to legacy api_key_hash column for backwards compatibility
     query_one(
         conn,
         &format!(
@@ -524,6 +781,60 @@ pub fn get_org_member_by_api_key(conn: &Connection, api_key: &str) -> Result<Opt
         ),
         &[&hash],
     )
+}
+
+/// Get org member by external user ID (e.g., Console user ID)
+pub fn get_org_member_by_external_user_id(
+    conn: &Connection,
+    external_user_id: &str,
+) -> Result<Option<OrgMember>> {
+    query_one(
+        conn,
+        &format!(
+            "SELECT {} FROM org_members WHERE external_user_id = ?1",
+            ORG_MEMBER_COLS
+        ),
+        &[&external_user_id],
+    )
+}
+
+/// List all orgs where a user is a member (by external_user_id)
+pub fn list_orgs_by_external_user_id(
+    conn: &Connection,
+    external_user_id: &str,
+) -> Result<Vec<Organization>> {
+    query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM organizations WHERE id IN (SELECT org_id FROM org_members WHERE external_user_id = ?1) ORDER BY created_at DESC",
+            ORGANIZATION_COLS
+        ),
+        &[&external_user_id],
+    )
+}
+
+pub fn list_orgs_by_external_user_id_paginated(
+    conn: &Connection,
+    external_user_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<Organization>, i64)> {
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM organizations WHERE id IN (SELECT org_id FROM org_members WHERE external_user_id = ?1)",
+        params![external_user_id],
+        |row| row.get(0),
+    )?;
+
+    let orgs = query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM organizations WHERE id IN (SELECT org_id FROM org_members WHERE external_user_id = ?1) ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            ORGANIZATION_COLS
+        ),
+        params![external_user_id, limit, offset],
+    )?;
+
+    Ok((orgs, total))
 }
 
 pub fn list_org_members(conn: &Connection, org_id: &str) -> Result<Vec<OrgMember>> {
@@ -537,6 +848,31 @@ pub fn list_org_members(conn: &Connection, org_id: &str) -> Result<Vec<OrgMember
     )
 }
 
+/// List org members with pagination
+pub fn list_org_members_paginated(
+    conn: &Connection,
+    org_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<OrgMember>, i64)> {
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM org_members WHERE org_id = ?1",
+        params![org_id],
+        |row| row.get(0),
+    )?;
+
+    let items = query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM org_members WHERE org_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            ORG_MEMBER_COLS
+        ),
+        params![org_id, limit, offset],
+    )?;
+
+    Ok((items, total))
+}
+
 pub fn update_org_member(conn: &Connection, id: &str, input: &UpdateOrgMember) -> Result<()> {
     UpdateBuilder::new("org_members", id)
         .set_opt("name", input.name.clone())
@@ -548,6 +884,111 @@ pub fn update_org_member(conn: &Connection, id: &str, input: &UpdateOrgMember) -
 pub fn delete_org_member(conn: &Connection, id: &str) -> Result<bool> {
     let deleted = conn.execute("DELETE FROM org_members WHERE id = ?1", params![id])?;
     Ok(deleted > 0)
+}
+
+// ============ Org Member API Keys ============
+
+/// Generate an org member API key
+pub fn generate_org_member_api_key() -> String {
+    format!("pc_{}", Uuid::new_v4().to_string().replace("-", ""))
+}
+
+/// Create an API key for an org member
+pub fn create_org_member_api_key(
+    conn: &Connection,
+    org_member_id: &str,
+    name: &str,
+    expires_in_days: Option<i64>,
+) -> Result<(OrgMemberApiKey, String)> {
+    let id = gen_id();
+    let now = now();
+    let key = generate_org_member_api_key();
+    let prefix = &key[..8];
+    let key_hash = hash_secret(&key);
+    let expires_at = expires_in_days.map(|days| now + days * 86400);
+
+    conn.execute(
+        "INSERT INTO org_member_api_keys (id, org_member_id, name, key_prefix, key_hash, created_at, last_used_at, expires_at, revoked_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, NULL)",
+        params![&id, org_member_id, name, prefix, &key_hash, now, expires_at],
+    )?;
+
+    Ok((
+        OrgMemberApiKey {
+            id,
+            org_member_id: org_member_id.to_string(),
+            name: name.to_string(),
+            prefix: prefix.to_string(),
+            key_hash,
+            created_at: now,
+            last_used_at: None,
+            expires_at,
+            revoked_at: None,
+        },
+        key,
+    ))
+}
+
+/// List API keys for an org member (active only, excludes revoked)
+pub fn list_org_member_api_keys(
+    conn: &Connection,
+    org_member_id: &str,
+) -> Result<Vec<OrgMemberApiKey>> {
+    query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM org_member_api_keys WHERE org_member_id = ?1 AND revoked_at IS NULL ORDER BY created_at DESC",
+            ORG_MEMBER_API_KEY_COLS
+        ),
+        &[&org_member_id],
+    )
+}
+
+pub fn list_org_member_api_keys_paginated(
+    conn: &Connection,
+    org_member_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<OrgMemberApiKey>, i64)> {
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM org_member_api_keys WHERE org_member_id = ?1 AND revoked_at IS NULL",
+        params![org_member_id],
+        |row| row.get(0),
+    )?;
+    let keys = query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM org_member_api_keys WHERE org_member_id = ?1 AND revoked_at IS NULL ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            ORG_MEMBER_API_KEY_COLS
+        ),
+        params![org_member_id, limit, offset],
+    )?;
+    Ok((keys, total))
+}
+
+/// Get an API key by ID
+pub fn get_org_member_api_key_by_id(
+    conn: &Connection,
+    key_id: &str,
+) -> Result<Option<OrgMemberApiKey>> {
+    query_one(
+        conn,
+        &format!(
+            "SELECT {} FROM org_member_api_keys WHERE id = ?1",
+            ORG_MEMBER_API_KEY_COLS
+        ),
+        &[&key_id],
+    )
+}
+
+/// Revoke an API key (soft delete)
+pub fn revoke_org_member_api_key(conn: &Connection, key_id: &str) -> Result<bool> {
+    let now = now();
+    let affected = conn.execute(
+        "UPDATE org_member_api_keys SET revoked_at = ?1 WHERE id = ?2 AND revoked_at IS NULL",
+        params![now, key_id],
+    )?;
+    Ok(affected > 0)
 }
 
 // ============ Projects ============
@@ -564,24 +1005,22 @@ pub fn create_project(
 ) -> Result<Project> {
     let id = gen_id();
     let now = now();
-    let redirect_urls_json = serde_json::to_string(&input.allowed_redirect_urls)?;
     let encrypted_private_key = master_key.encrypt_private_key(&id, private_key)?;
 
     conn.execute(
-        "INSERT INTO projects (id, org_id, name, domain, license_key_prefix, private_key, public_key, allowed_redirect_urls, email_from, email_enabled, email_webhook_url, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-        params![&id, org_id, &input.name, &input.domain, &input.license_key_prefix, &encrypted_private_key, public_key, &redirect_urls_json, &input.email_from, input.email_enabled, &input.email_webhook_url, now, now],
+        "INSERT INTO projects (id, org_id, name, license_key_prefix, private_key, public_key, redirect_url, email_from, email_enabled, email_webhook_url, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![&id, org_id, &input.name, &input.license_key_prefix, &encrypted_private_key, public_key, &input.redirect_url, &input.email_from, input.email_enabled, &input.email_webhook_url, now, now],
     )?;
 
     Ok(Project {
         id,
         org_id: org_id.to_string(),
         name: input.name.clone(),
-        domain: input.domain.clone(),
         license_key_prefix: input.license_key_prefix.clone(),
         private_key: encrypted_private_key,
         public_key: public_key.to_string(),
-        allowed_redirect_urls: input.allowed_redirect_urls.clone(),
+        redirect_url: input.redirect_url.clone(),
         email_from: input.email_from.clone(),
         email_enabled: input.email_enabled,
         email_webhook_url: input.email_webhook_url.clone(),
@@ -609,6 +1048,63 @@ pub fn list_projects_for_org(conn: &Connection, org_id: &str) -> Result<Vec<Proj
     )
 }
 
+/// List projects for an org with pagination
+pub fn list_projects_for_org_paginated(
+    conn: &Connection,
+    org_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<Project>, i64)> {
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM projects WHERE org_id = ?1",
+        params![org_id],
+        |row| row.get(0),
+    )?;
+
+    let items = query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM projects WHERE org_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            PROJECT_COLS
+        ),
+        params![org_id, limit, offset],
+    )?;
+
+    Ok((items, total))
+}
+
+/// List projects accessible by a specific org member with pagination
+/// For "member" role users who only see projects they're explicitly added to
+pub fn list_accessible_projects_for_member_paginated(
+    conn: &Connection,
+    org_id: &str,
+    org_member_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<Project>, i64)> {
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM projects
+         WHERE org_id = ?1
+         AND id IN (SELECT project_id FROM project_members WHERE org_member_id = ?2)",
+        params![org_id, org_member_id],
+        |row| row.get(0),
+    )?;
+
+    let items = query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM projects
+             WHERE org_id = ?1
+             AND id IN (SELECT project_id FROM project_members WHERE org_member_id = ?2)
+             ORDER BY created_at DESC LIMIT ?3 OFFSET ?4",
+            PROJECT_COLS
+        ),
+        params![org_id, org_member_id, limit, offset],
+    )?;
+
+    Ok((items, total))
+}
+
 /// List all projects (for migration purposes)
 pub fn list_all_projects(conn: &Connection) -> Result<Vec<Project>> {
     query_all(
@@ -628,20 +1124,17 @@ pub fn update_project_private_key(conn: &Connection, id: &str, private_key: &[u8
 }
 
 pub fn update_project(conn: &Connection, id: &str, input: &UpdateProject) -> Result<()> {
-    let redirect_json = input
-        .allowed_redirect_urls
-        .as_ref()
-        .map(serde_json::to_string)
-        .transpose()?;
-
-    // email_from and email_webhook_url use Option<Option<T>> pattern:
+    // All nullable fields use Option<Option<T>> pattern:
     // None = leave unchanged, Some(None) = clear, Some(Some(v)) = set
     let mut builder = UpdateBuilder::new("projects", id)
         .with_updated_at()
         .set_opt("name", input.name.clone())
-        .set_opt("domain", input.domain.clone())
-        .set_opt("license_key_prefix", input.license_key_prefix.clone())
-        .set_opt("allowed_redirect_urls", redirect_json);
+        .set_opt("license_key_prefix", input.license_key_prefix.clone());
+
+    // Handle redirect_url: Option<Option<String>>
+    if let Some(ref redirect_url) = input.redirect_url {
+        builder = builder.set_nullable("redirect_url", redirect_url.clone());
+    }
 
     // Handle email_from: Option<Option<String>>
     if let Some(ref email_from) = input.email_from {
@@ -726,6 +1219,23 @@ pub fn get_project_member(
     )
 }
 
+/// Get a project member by ID with org member details
+pub fn get_project_member_by_id(
+    conn: &Connection,
+    id: &str,
+) -> Result<Option<ProjectMemberWithDetails>> {
+    query_one(
+        conn,
+        &format!(
+            "SELECT pm.{}, om.email, om.name FROM project_members pm
+             JOIN org_members om ON pm.org_member_id = om.id
+             WHERE pm.id = ?1",
+            PROJECT_MEMBER_COLS
+        ),
+        &[&id],
+    )
+}
+
 pub fn list_project_members(
     conn: &Connection,
     project_id: &str,
@@ -739,6 +1249,33 @@ pub fn list_project_members(
          ORDER BY pm.created_at DESC",
         &[&project_id],
     )
+}
+
+/// List project members with pagination
+pub fn list_project_members_paginated(
+    conn: &Connection,
+    project_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<ProjectMemberWithDetails>, i64)> {
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM project_members WHERE project_id = ?1",
+        params![project_id],
+        |row| row.get(0),
+    )?;
+
+    let items = query_all(
+        conn,
+        "SELECT pm.id, pm.org_member_id, pm.project_id, pm.role, pm.created_at, om.email, om.name
+         FROM project_members pm
+         JOIN org_members om ON pm.org_member_id = om.id
+         WHERE pm.project_id = ?1
+         ORDER BY pm.created_at DESC
+         LIMIT ?2 OFFSET ?3",
+        params![project_id, limit, offset],
+    )?;
+
+    Ok((items, total))
 }
 
 pub fn update_project_member(
@@ -821,6 +1358,30 @@ pub fn list_products_for_project(conn: &Connection, project_id: &str) -> Result<
         ),
         &[&project_id],
     )
+}
+
+pub fn list_products_for_project_paginated(
+    conn: &Connection,
+    project_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<Product>, i64)> {
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM products WHERE project_id = ?1",
+        params![project_id],
+        |row| row.get(0),
+    )?;
+
+    let products = query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM products WHERE project_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            PRODUCT_COLS
+        ),
+        params![project_id, limit, offset],
+    )?;
+
+    Ok((products, total))
 }
 
 pub fn update_product(conn: &Connection, id: &str, input: &UpdateProduct) -> Result<()> {
@@ -1028,6 +1589,60 @@ pub fn list_products_with_config(
         .collect();
 
     Ok(result)
+}
+
+pub fn list_products_with_config_paginated(
+    conn: &Connection,
+    project_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<ProductWithPaymentConfig>, i64)> {
+    // Get paginated products for the project
+    let (products, total) = list_products_for_project_paginated(conn, project_id, limit, offset)?;
+
+    if products.is_empty() {
+        return Ok((vec![], total));
+    }
+
+    // Get all payment configs for these products in one query
+    let product_ids: Vec<&str> = products.iter().map(|p| p.id.as_str()).collect();
+    let placeholders: Vec<String> = (1..=product_ids.len()).map(|i| format!("?{}", i)).collect();
+    let sql = format!(
+        "SELECT {} FROM product_payment_config WHERE product_id IN ({}) ORDER BY product_id, created_at",
+        PAYMENT_CONFIG_COLS,
+        placeholders.join(", ")
+    );
+
+    let params: Vec<&dyn rusqlite::ToSql> = product_ids
+        .iter()
+        .map(|id| id as &dyn rusqlite::ToSql)
+        .collect();
+
+    let configs: Vec<ProductPaymentConfig> = query_all(conn, &sql, &params)?;
+
+    // Group configs by product_id
+    let mut config_map: std::collections::HashMap<String, Vec<ProductPaymentConfig>> =
+        std::collections::HashMap::new();
+    for config in configs {
+        config_map
+            .entry(config.product_id.clone())
+            .or_default()
+            .push(config);
+    }
+
+    // Build result
+    let result = products
+        .into_iter()
+        .map(|product| {
+            let payment_config = config_map.remove(&product.id).unwrap_or_default();
+            ProductWithPaymentConfig {
+                product,
+                payment_config,
+            }
+        })
+        .collect();
+
+    Ok((result, total))
 }
 
 // ============ Licenses ============
@@ -1303,6 +1918,64 @@ pub fn add_revoked_jti(conn: &Connection, license_id: &str, jti: &str) -> Result
     Ok(())
 }
 
+/// Look up licenses by payment provider order ID (for admin support via receipt).
+/// Includes expired and revoked licenses so support can see full history.
+pub fn get_licenses_by_payment_order_id_paginated(
+    conn: &Connection,
+    project_id: &str,
+    payment_provider_order_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<LicenseWithProduct>, i64)> {
+    // Get total count
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM licenses WHERE project_id = ?1 AND payment_provider_order_id = ?2",
+        params![project_id, payment_provider_order_id],
+        |row| row.get(0),
+    )?;
+
+    let mut stmt = conn.prepare(&format!(
+        "SELECT l.{}, p.name
+         FROM licenses l
+         JOIN products p ON l.product_id = p.id
+         WHERE l.project_id = ?1 AND l.payment_provider_order_id = ?2
+         ORDER BY l.created_at DESC
+         LIMIT ?3 OFFSET ?4",
+        LICENSE_COLS.replace(", ", ", l.")
+    ))?;
+
+    let rows = stmt
+        .query_map(
+            params![project_id, payment_provider_order_id, limit, offset],
+            |row| {
+                let jtis_str: String = row.get(7)?;
+                Ok(LicenseWithProduct {
+                    license: License {
+                        id: row.get(0)?,
+                        email_hash: row.get(1)?,
+                        project_id: row.get(2)?,
+                        product_id: row.get(3)?,
+                        customer_id: row.get(4)?,
+                        activation_count: row.get(5)?,
+                        revoked: row.get::<_, i32>(6)? != 0,
+                        revoked_jtis: serde_json::from_str(&jtis_str).unwrap_or_default(),
+                        created_at: row.get(8)?,
+                        expires_at: row.get(9)?,
+                        updates_expires_at: row.get(10)?,
+                        payment_provider: row.get(11)?,
+                        payment_provider_customer_id: row.get(12)?,
+                        payment_provider_subscription_id: row.get(13)?,
+                        payment_provider_order_id: row.get(14)?,
+                    },
+                    product_name: row.get(15)?,
+                })
+            },
+        )?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok((rows, total))
+}
+
 /// Find a license by payment provider and subscription ID (for subscription renewals)
 pub fn get_license_by_subscription(
     conn: &Connection,
@@ -1317,6 +1990,16 @@ pub fn get_license_by_subscription(
         ),
         &[&provider, &subscription_id],
     )
+}
+
+/// Update a license's email hash (for fixing typo'd purchase emails).
+/// This enables self-service recovery with the corrected email address.
+pub fn update_license_email_hash(conn: &Connection, license_id: &str, email_hash: &str) -> Result<bool> {
+    let affected = conn.execute(
+        "UPDATE licenses SET email_hash = ?1 WHERE id = ?2",
+        params![email_hash, license_id],
+    )?;
+    Ok(affected > 0)
 }
 
 /// Extend license expiration dates (for subscription renewals)
@@ -1615,16 +2298,15 @@ pub fn create_payment_session(
     let now = now();
 
     conn.execute(
-        "INSERT INTO payment_sessions (id, product_id, customer_id, redirect_url, created_at, completed)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0)",
-        params![&id, &input.product_id, &input.customer_id, &input.redirect_url, now],
+        "INSERT INTO payment_sessions (id, product_id, customer_id, created_at, completed)
+         VALUES (?1, ?2, ?3, ?4, 0)",
+        params![&id, &input.product_id, &input.customer_id, now],
     )?;
 
     Ok(PaymentSession {
         id,
         product_id: input.product_id.clone(),
         customer_id: input.customer_id.clone(),
-        redirect_url: input.redirect_url.clone(),
         created_at: now,
         completed: false,
         license_id: None,
@@ -1691,13 +2373,14 @@ pub fn try_record_webhook_event(conn: &Connection, provider: &str, event_id: &st
 
 // ============ Audit Log Maintenance ============
 
-/// Purge audit logs older than the specified number of days.
+/// Purge old audit logs for public (end-user) actions only.
+/// Internal actions (operator, org_member, system) are kept forever for audit trail.
 /// Returns the number of deleted records.
-/// This should be called periodically (e.g., on startup or via cron) for GDPR compliance.
-pub fn purge_old_audit_logs(conn: &Connection, retention_days: i64) -> Result<usize> {
+/// Called on startup when PUBLIC_AUDIT_LOG_RETENTION_DAYS > 0.
+pub fn purge_old_public_audit_logs(conn: &Connection, retention_days: i64) -> Result<usize> {
     let cutoff = now() - (retention_days * 86400);
     let deleted = conn.execute(
-        "DELETE FROM audit_logs WHERE timestamp < ?1",
+        "DELETE FROM audit_logs WHERE timestamp < ?1 AND actor_type = 'public'",
         params![cutoff],
     )?;
     Ok(deleted)

@@ -7,7 +7,7 @@ use crate::db::{AppState, queries};
 use crate::error::{AppError, Result};
 use crate::extractors::Json;
 use crate::jwt::{self, LicenseClaims};
-use crate::models::ActorType;
+use crate::models::{ActorType, AuditLogNames};
 use crate::util::{LicenseExpirations, audit_log, extract_bearer_token};
 
 /// Validate that a string is a valid UUID format.
@@ -53,7 +53,7 @@ pub async fn refresh_token(
         queries::get_project_by_id(&conn, &product.project_id)?.ok_or(AppError::Unauthorized)?;
 
     // Now verify the token signature (allowing expired tokens)
-    let verified = jwt::verify_token_allow_expired(token, &project.public_key, &project.domain)
+    let verified = jwt::verify_token_allow_expired(token, &project.public_key)
         .map_err(|_| AppError::Unauthorized)?;
 
     let jti = verified.jwt_id.ok_or(AppError::Unauthorized)?;
@@ -119,7 +119,7 @@ pub async fn refresh_token(
     let private_key = state
         .master_key
         .decrypt_private_key(&project.id, &project.private_key)?;
-    let new_token = jwt::sign_claims(&claims, &private_key, &license.id, &project.domain, &jti)?;
+    let new_token = jwt::sign_claims(&claims, &private_key, &license.id, &project.name, &jti)?;
 
     // Audit log the refresh
     audit_log(
@@ -127,6 +127,7 @@ pub async fn refresh_token(
         state.audit_log_enabled,
         ActorType::Public,
         Some(&jti),
+        None, // Public endpoints don't use impersonation
         &headers,
         "refresh_token",
         "device",
@@ -134,6 +135,11 @@ pub async fn refresh_token(
         Some(&serde_json::json!({ "license_id": license.id, "product_id": product.id })),
         Some(&project.org_id),
         Some(&project.id),
+        &AuditLogNames {
+            resource_name: device.name.clone(),
+            project_name: Some(project.name.clone()),
+            ..Default::default()
+        },
     )?;
 
     Ok(Json(RefreshResponse { token: new_token }))
