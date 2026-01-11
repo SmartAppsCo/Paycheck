@@ -30,8 +30,7 @@ pub async fn create_org_member(
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
-    // Create the member (deprecated api_key param ignored)
-    let member = queries::create_org_member(&conn, &org_id, &input, "")?;
+    let member = queries::create_org_member(&conn, &org_id, &input)?;
 
     // Create a default API key for the new member
     let (key_record, full_key) = queries::create_org_member_api_key(

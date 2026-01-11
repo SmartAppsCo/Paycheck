@@ -79,7 +79,7 @@ pub fn create_test_org_member(
         role,
         external_user_id: None,
     };
-    let member = queries::create_org_member(conn, org_id, &input, "")
+    let member = queries::create_org_member(conn, org_id, &input)
         .expect("Failed to create test org member");
 
     // Create an API key in the new table

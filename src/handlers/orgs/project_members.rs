@@ -126,6 +126,14 @@ pub async fn update_project_member(
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
+    // Fetch member first for audit log (before update)
+    let existing = queries::get_project_member_by_id(&conn, &path.id)?
+        .ok_or_else(|| AppError::NotFound("Project member not found".into()))?;
+
+    if existing.project_id != path.project_id {
+        return Err(AppError::NotFound("Project member not found".into()));
+    }
+
     let updated = queries::update_project_member(&conn, &path.id, &path.project_id, &input)?;
     if !updated {
         return Err(AppError::NotFound("Project member not found".into()));
@@ -144,7 +152,7 @@ pub async fn update_project_member(
         Some(&serde_json::json!({ "role": input.role })),
         Some(&path.org_id),
         Some(&path.project_id),
-        &ctx.audit_names(),
+        &ctx.audit_names().resource(existing.name),
     )?;
 
     Ok(Json(serde_json::json!({ "updated": true })))
@@ -162,6 +170,14 @@ pub async fn delete_project_member(
 
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
+
+    // Fetch member first for audit log (before delete)
+    let existing = queries::get_project_member_by_id(&conn, &path.id)?
+        .ok_or_else(|| AppError::NotFound("Project member not found".into()))?;
+
+    if existing.project_id != path.project_id {
+        return Err(AppError::NotFound("Project member not found".into()));
+    }
 
     let deleted = queries::delete_project_member(&conn, &path.id, &path.project_id)?;
     if !deleted {
@@ -181,7 +197,7 @@ pub async fn delete_project_member(
         None,
         Some(&path.org_id),
         Some(&path.project_id),
-        &ctx.audit_names(),
+        &ctx.audit_names().resource(existing.name),
     )?;
 
     Ok(Json(serde_json::json!({ "deleted": true })))

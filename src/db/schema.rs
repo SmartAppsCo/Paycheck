@@ -10,7 +10,6 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             email TEXT NOT NULL UNIQUE,
             name TEXT NOT NULL,
             role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'view')),
-            api_key_hash TEXT,                    -- deprecated: migrated to operator_api_keys
             created_at INTEGER NOT NULL
         );
 
@@ -50,7 +49,6 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             email TEXT NOT NULL,
             name TEXT NOT NULL,
             role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'member')),
-            api_key_hash TEXT,                    -- deprecated: migrated to org_member_api_keys
             external_user_id TEXT,                -- external system user ID (e.g., Console user ID)
             created_at INTEGER NOT NULL,
             UNIQUE(org_id, email)

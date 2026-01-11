@@ -27,9 +27,6 @@ pub struct OrgMember {
     pub email: String,
     pub name: String,
     pub role: OrgMemberRole,
-    /// Deprecated: migrated to org_member_api_keys table
-    #[serde(skip_serializing)]
-    pub api_key_hash: Option<String>,
     /// External system user ID (e.g., Console user ID for linkage)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_user_id: Option<String>,

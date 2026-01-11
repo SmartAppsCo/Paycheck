@@ -222,7 +222,7 @@ fn test_unique_email_per_org() {
         role: OrgMemberRole::Member,
         external_user_id: None,
     };
-    let result = queries::create_org_member(&conn, &org.id, &input, "");
+    let result = queries::create_org_member(&conn, &org.id, &input);
     assert!(result.is_err());
 }
 

@@ -43,12 +43,12 @@ pub fn query_all<T: FromRow>(
 
 // ============ SQL SELECT Constants ============
 
-pub const OPERATOR_COLS: &str = "id, email, name, role, api_key_hash, created_at";
+pub const OPERATOR_COLS: &str = "id, email, name, role, created_at";
 
 pub const ORGANIZATION_COLS: &str =
     "id, name, stripe_config, ls_config, resend_api_key, payment_provider, created_at, updated_at";
 
-pub const ORG_MEMBER_COLS: &str = "id, org_id, email, name, role, api_key_hash, external_user_id, created_at";
+pub const ORG_MEMBER_COLS: &str = "id, org_id, email, name, role, external_user_id, created_at";
 
 pub const ORG_MEMBER_API_KEY_COLS: &str = "id, org_member_id, name, key_prefix, key_hash, created_at, last_used_at, expires_at, revoked_at";
 
@@ -82,8 +82,7 @@ impl FromRow for Operator {
             email: row.get(1)?,
             name: row.get(2)?,
             role: row.get::<_, String>(3)?.parse::<OperatorRole>().unwrap(),
-            api_key_hash: row.get(4)?,
-            created_at: row.get(5)?,
+            created_at: row.get(4)?,
         })
     }
 }
@@ -115,9 +114,8 @@ impl FromRow for OrgMember {
             email: row.get(2)?,
             name: row.get(3)?,
             role: row.get::<_, String>(4)?.parse::<OrgMemberRole>().unwrap(),
-            api_key_hash: row.get(5)?,
-            external_user_id: row.get(6)?,
-            created_at: row.get(7)?,
+            external_user_id: row.get(5)?,
+            created_at: row.get(6)?,
         })
     }
 }

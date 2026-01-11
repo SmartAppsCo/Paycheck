@@ -23,9 +23,6 @@ pub struct Operator {
     pub email: String,
     pub name: String,
     pub role: OperatorRole,
-    /// Deprecated: migrated to operator_api_keys table
-    #[serde(skip_serializing)]
-    pub api_key_hash: Option<String>,
     pub created_at: i64,
 }
 

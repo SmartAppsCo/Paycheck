@@ -107,8 +107,8 @@ pub fn create_operator(conn: &Connection, input: &CreateOperator) -> Result<(Ope
     let now = now();
 
     conn.execute(
-        "INSERT INTO operators (id, email, name, role, api_key_hash, created_at)
-         VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
+        "INSERT INTO operators (id, email, name, role, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
         params![&id, &input.email, &input.name, input.role.as_ref(), now],
     )?;
 
@@ -117,7 +117,6 @@ pub fn create_operator(conn: &Connection, input: &CreateOperator) -> Result<(Ope
         email: input.email.clone(),
         name: input.name.clone(),
         role: input.role,
-        api_key_hash: None,
         created_at: now,
     };
 
@@ -196,7 +195,6 @@ pub fn generate_operator_api_key() -> String {
 pub fn get_operator_by_api_key(conn: &Connection, api_key: &str) -> Result<Option<Operator>> {
     let hash = hash_secret(api_key);
 
-    // First try the new api keys table
     let key: Option<OperatorApiKey> = query_one(
         conn,
         &format!(
@@ -217,15 +215,7 @@ pub fn get_operator_by_api_key(conn: &Connection, api_key: &str) -> Result<Optio
         return get_operator_by_id(conn, &key.operator_id);
     }
 
-    // Fall back to legacy api_key_hash column
-    query_one(
-        conn,
-        &format!(
-            "SELECT {} FROM operators WHERE api_key_hash = ?1",
-            OPERATOR_COLS
-        ),
-        &[&hash],
-    )
+    Ok(None)
 }
 
 /// Create an API key for an operator
@@ -707,14 +697,13 @@ pub fn create_org_member(
     conn: &Connection,
     org_id: &str,
     input: &CreateOrgMember,
-    _api_key: &str, // Deprecated parameter, kept for backwards compatibility
 ) -> Result<OrgMember> {
     let id = gen_id();
     let now = now();
 
     conn.execute(
-        "INSERT INTO org_members (id, org_id, email, name, role, api_key_hash, external_user_id, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7)",
+        "INSERT INTO org_members (id, org_id, email, name, role, external_user_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             &id,
             org_id,
@@ -732,7 +721,6 @@ pub fn create_org_member(
         email: input.email.clone(),
         name: input.name.clone(),
         role: input.role,
-        api_key_hash: None,
         external_user_id: input.external_user_id.clone(),
         created_at: now,
     })
@@ -751,7 +739,6 @@ pub fn get_org_member_by_id(conn: &Connection, id: &str) -> Result<Option<OrgMem
 pub fn get_org_member_by_api_key(conn: &Connection, api_key: &str) -> Result<Option<OrgMember>> {
     let hash = hash_secret(api_key);
 
-    // First try the new api keys table
     let key: Option<OrgMemberApiKey> = query_one(
         conn,
         &format!(
@@ -772,15 +759,7 @@ pub fn get_org_member_by_api_key(conn: &Connection, api_key: &str) -> Result<Opt
         return get_org_member_by_id(conn, &key.org_member_id);
     }
 
-    // Fall back to legacy api_key_hash column for backwards compatibility
-    query_one(
-        conn,
-        &format!(
-            "SELECT {} FROM org_members WHERE api_key_hash = ?1",
-            ORG_MEMBER_COLS
-        ),
-        &[&hash],
-    )
+    Ok(None)
 }
 
 /// Get org member by external user ID (e.g., Console user ID)
@@ -1226,12 +1205,10 @@ pub fn get_project_member_by_id(
 ) -> Result<Option<ProjectMemberWithDetails>> {
     query_one(
         conn,
-        &format!(
-            "SELECT pm.{}, om.email, om.name FROM project_members pm
-             JOIN org_members om ON pm.org_member_id = om.id
-             WHERE pm.id = ?1",
-            PROJECT_MEMBER_COLS
-        ),
+        "SELECT pm.id, pm.org_member_id, pm.project_id, pm.role, pm.created_at, om.email, om.name
+         FROM project_members pm
+         JOIN org_members om ON pm.org_member_id = om.id
+         WHERE pm.id = ?1",
         &[&id],
     )
 }

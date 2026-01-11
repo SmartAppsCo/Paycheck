@@ -85,7 +85,7 @@ fn bootstrap_first_operator(state: &AppState, email: &str) {
         None,
         None,
         None,
-        &AuditLogNames::default(),
+        &AuditLogNames::default().resource(operator.name.clone()),
     )
     .expect("Failed to create audit log for bootstrap");
 
@@ -182,7 +182,7 @@ fn seed_dev_data(state: &AppState) {
         role: OrgMemberRole::Owner,
         external_user_id: None,
     };
-    let member = queries::create_org_member(&conn, &org.id, &member_input, "")
+    let member = queries::create_org_member(&conn, &org.id, &member_input)
         .expect("Failed to create dev org member");
 
     // Create an API key for the member

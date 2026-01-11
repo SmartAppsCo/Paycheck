@@ -45,7 +45,6 @@ pub async fn create_organization(
                 role: OrgMemberRole::Owner,
                 external_user_id: input.external_user_id.clone(),
             },
-            "", // Deprecated parameter
         )?;
         Some(member)
     } else {

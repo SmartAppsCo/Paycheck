@@ -300,6 +300,10 @@ pub async fn update_license(
         return Err(AppError::NotFound("License not found".into()));
     }
 
+    // Fetch project for audit log context
+    let project = queries::get_project_by_id(&conn, &path.project_id)?
+        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+
     // Update email hash if provided
     if let Some(ref email) = body.email {
         let new_email_hash = queries::hash_email(email);
@@ -322,7 +326,7 @@ pub async fn update_license(
             })),
             Some(&path.org_id),
             Some(&path.project_id),
-            &ctx.audit_names(),
+            &ctx.audit_names().project(project.name.clone()),
         )?;
 
         tracing::info!(
@@ -401,6 +405,10 @@ pub async fn revoke_license(
         return Err(AppError::BadRequest("License is already revoked".into()));
     }
 
+    // Fetch project for audit log context
+    let project = queries::get_project_by_id(&conn, &path.project_id)?
+        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+
     queries::revoke_license(&conn, &license.id)?;
 
     audit_log(
@@ -416,7 +424,7 @@ pub async fn revoke_license(
         None,
         Some(&path.org_id),
         Some(&path.project_id),
-        &ctx.audit_names(),
+        &ctx.audit_names().project(project.name.clone()),
     )?;
 
     Ok(Json(serde_json::json!({ "revoked": true })))
