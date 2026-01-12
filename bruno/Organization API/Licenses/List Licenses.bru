@@ -12,6 +12,7 @@ get {
 
 params:query {
   ~email: customer@example.com
+  ~customer_id: your-customer-123
   ~payment_provider_order_id: cs_test_xxxxx
   ~limit: 50
   ~offset: 0
@@ -26,6 +27,8 @@ docs {
 
   Query params:
   - email: (optional) Filter by customer email for support lookups.
+           When set, returns ALL licenses including expired/revoked.
+  - customer_id: (optional) Filter by your developer-managed customer ID.
            When set, returns ALL licenses including expired/revoked.
   - payment_provider_order_id: (optional) Filter by payment provider order ID.
            Useful for support lookups via customer receipt.

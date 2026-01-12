@@ -5,9 +5,13 @@ meta {
 }
 
 get {
-  url: {{base_url}}/license
+  url: {{base_url}}/license?public_key={{project_pub_key}}
   body: none
   auth: bearer
+}
+
+params:query {
+  public_key: {{project_pub_key}}
 }
 
 auth:bearer {
@@ -17,6 +21,9 @@ auth:bearer {
 docs {
   Get license information for the authenticated device.
   JWT token is passed in Authorization header.
+
+  Query params:
+  - public_key: (required) Project's public key
 
   Headers:
   - Authorization: Bearer <jwt_token>
@@ -31,8 +38,6 @@ docs {
     "activation_limit": 0,
     "device_count": 2,
     "device_limit": 5,
-    "tier": "pro",
-    "features": ["feature1", "feature2"],
     "devices": [
       {
         "device_id": "...",
@@ -49,4 +54,7 @@ docs {
   updates_expires_at: when update access ends (null = lifetime updates)
   activation_limit: 0 = unlimited
   device_limit: 0 = unlimited
+
+  Note: tier and features are not included - they are in the JWT claims.
+  Use your SDK to decode the JWT for those fields.
 }
