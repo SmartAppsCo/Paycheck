@@ -107,20 +107,26 @@ async fn authenticate_operator_jwt(
     Ok((operator, user, auth_method))
 }
 
+/// Authenticate operator from request headers (API key or JWT).
+async fn authenticate_from_request(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(OperatorWithUser, User, AuthMethod), StatusCode> {
+    let token = extract_bearer_token(headers).ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if token.starts_with("eyJ") {
+        authenticate_operator_jwt(state, token).await
+    } else {
+        authenticate_operator(state, headers)
+    }
+}
+
 pub async fn operator_auth(
     State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let token = extract_bearer_token(request.headers()).ok_or(StatusCode::UNAUTHORIZED)?;
-
-    let (operator, user, auth_method) = if token.starts_with("eyJ") {
-        // JWT token path
-        authenticate_operator_jwt(&state, token).await?
-    } else {
-        // API key path
-        authenticate_operator(&state, request.headers())?
-    };
+    let (operator, user, auth_method) = authenticate_from_request(&state, request.headers()).await?;
 
     request.extensions_mut().insert(OperatorContext {
         operator,
@@ -135,13 +141,7 @@ pub async fn require_owner_role(
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let token = extract_bearer_token(request.headers()).ok_or(StatusCode::UNAUTHORIZED)?;
-
-    let (operator, user, auth_method) = if token.starts_with("eyJ") {
-        authenticate_operator_jwt(&state, token).await?
-    } else {
-        authenticate_operator(&state, request.headers())?
-    };
+    let (operator, user, auth_method) = authenticate_from_request(&state, request.headers()).await?;
 
     if !matches!(operator.role, OperatorRole::Owner) {
         return Err(StatusCode::FORBIDDEN);
@@ -160,13 +160,7 @@ pub async fn require_admin_role(
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let token = extract_bearer_token(request.headers()).ok_or(StatusCode::UNAUTHORIZED)?;
-
-    let (operator, user, auth_method) = if token.starts_with("eyJ") {
-        authenticate_operator_jwt(&state, token).await?
-    } else {
-        authenticate_operator(&state, request.headers())?
-    };
+    let (operator, user, auth_method) = authenticate_from_request(&state, request.headers()).await?;
 
     if !matches!(operator.role, OperatorRole::Owner | OperatorRole::Admin) {
         return Err(StatusCode::FORBIDDEN);

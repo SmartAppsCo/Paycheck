@@ -117,16 +117,16 @@ pub struct UpdateOrganization {
 
 impl UpdateOrganization {
     pub fn validate(&self) -> Result<()> {
-        if let Some(ref name) = self.name {
-            if name.trim().is_empty() {
-                return Err(AppError::BadRequest("name cannot be empty".into()));
-            }
+        if let Some(ref name) = self.name
+            && name.trim().is_empty()
+        {
+            return Err(AppError::BadRequest("name cannot be empty".into()));
         }
         // payment_provider can be cleared with null, but if set it shouldn't be empty
-        if let Some(Some(ref provider)) = self.payment_provider {
-            if provider.trim().is_empty() {
-                return Err(AppError::BadRequest("payment_provider cannot be empty".into()));
-            }
+        if let Some(Some(ref provider)) = self.payment_provider
+            && provider.trim().is_empty()
+        {
+            return Err(AppError::BadRequest("payment_provider cannot be empty".into()));
         }
         Ok(())
     }

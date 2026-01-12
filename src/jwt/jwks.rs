@@ -62,17 +62,17 @@ impl JwksCache {
         // Try to get from cache first
         {
             let cache = self.cache.read().unwrap();
-            if let Some(cached) = cache.get(jwks_url) {
-                if !cached.is_stale() {
-                    if let Some(key) = cached.keys.get(kid) {
-                        return Ok(key.clone());
-                    }
-                    // Key ID not found in cached JWKS - don't refresh, just error
-                    return Err(AppError::JwtValidationFailed(format!(
-                        "Key ID '{}' not found in JWKS",
-                        kid
-                    )));
+            if let Some(cached) = cache.get(jwks_url)
+                && !cached.is_stale()
+            {
+                if let Some(key) = cached.keys.get(kid) {
+                    return Ok(key.clone());
                 }
+                // Key ID not found in cached JWKS - don't refresh, just error
+                return Err(AppError::JwtValidationFailed(format!(
+                    "Key ID '{}' not found in JWKS",
+                    kid
+                )));
             }
         }
 
@@ -128,10 +128,10 @@ impl JwksCache {
             if jwk.kty != "RSA" {
                 continue;
             }
-            if let Some(ref alg) = jwk.alg {
-                if alg != "RS256" {
-                    continue;
-                }
+            if let Some(ref alg) = jwk.alg
+                && alg != "RS256"
+            {
+                continue;
             }
 
             // Skip keys without a key ID

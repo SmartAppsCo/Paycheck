@@ -33,12 +33,10 @@ pub async fn create_api_key(
     Json(input): Json<CreateApiKey>,
 ) -> Result<Json<ApiKeyCreated>> {
     // Only owner can manage other operators' keys, or operator can manage their own
-    if path.operator_id != ctx.operator.id {
-        if !ctx.operator.role.can_manage_operators() {
-            return Err(AppError::Forbidden(
-                "Only owners can manage other operators' API keys".into(),
-            ));
-        }
+    if path.operator_id != ctx.operator.id && !ctx.operator.role.can_manage_operators() {
+        return Err(AppError::Forbidden(
+            "Only owners can manage other operators' API keys".into(),
+        ));
     }
 
     let conn = state.db.get()?;
@@ -101,12 +99,10 @@ pub async fn list_api_keys(
     Query(query): Query<PaginationQuery>,
 ) -> Result<Json<Paginated<ApiKeyInfo>>> {
     // Only owner can see other operators' keys, or operator can see their own
-    if path.operator_id != ctx.operator.id {
-        if !ctx.operator.role.can_manage_operators() {
-            return Err(AppError::Forbidden(
-                "Only owners can view other operators' API keys".into(),
-            ));
-        }
+    if path.operator_id != ctx.operator.id && !ctx.operator.role.can_manage_operators() {
+        return Err(AppError::Forbidden(
+            "Only owners can view other operators' API keys".into(),
+        ));
     }
 
     let conn = state.db.get()?;
@@ -147,12 +143,10 @@ pub async fn revoke_api_key(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>> {
     // Only owner can revoke other operators' keys, or operator can revoke their own
-    if path.operator_id != ctx.operator.id {
-        if !ctx.operator.role.can_manage_operators() {
-            return Err(AppError::Forbidden(
-                "Only owners can revoke other operators' API keys".into(),
-            ));
-        }
+    if path.operator_id != ctx.operator.id && !ctx.operator.role.can_manage_operators() {
+        return Err(AppError::Forbidden(
+            "Only owners can revoke other operators' API keys".into(),
+        ));
     }
 
     let conn = state.db.get()?;

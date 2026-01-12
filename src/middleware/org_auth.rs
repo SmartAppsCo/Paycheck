@@ -300,29 +300,29 @@ pub async fn org_member_auth(
     let operator = queries::get_operator_by_user_id(&conn, &user.id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if let Some(operator) = operator {
-        if matches!(operator.role, OperatorRole::Owner | OperatorRole::Admin) {
-            // Operator with admin+ role gets synthetic owner access
-            let synthetic_member = OrgMemberWithUser {
-                id: format!("operator:{}", operator.id),
-                user_id: user.id.clone(),
-                email: user.email.clone(),
-                name: user.name.clone(),
-                org_id: org_id.to_string(),
-                role: OrgMemberRole::Owner, // Operators get owner-level access
-                created_at: operator.created_at,
-                deleted_at: None,
-                deleted_cascade_depth: None,
-            };
-            request.extensions_mut().insert(OrgMemberContext {
-                member: synthetic_member,
-                user,
-                project_role: None,
-                impersonator: None,
-                auth_method,
-            });
-            return Ok(next.run(request).await);
-        }
+    if let Some(operator) = operator
+        && matches!(operator.role, OperatorRole::Owner | OperatorRole::Admin)
+    {
+        // Operator with admin+ role gets synthetic owner access
+        let synthetic_member = OrgMemberWithUser {
+            id: format!("operator:{}", operator.id),
+            user_id: user.id.clone(),
+            email: user.email.clone(),
+            name: user.name.clone(),
+            org_id: org_id.to_string(),
+            role: OrgMemberRole::Owner, // Operators get owner-level access
+            created_at: operator.created_at,
+            deleted_at: None,
+            deleted_cascade_depth: None,
+        };
+        request.extensions_mut().insert(OrgMemberContext {
+            member: synthetic_member,
+            user,
+            project_role: None,
+            impersonator: None,
+            auth_method,
+        });
+        return Ok(next.run(request).await);
     }
 
     // Not an org member and not an admin+ operator

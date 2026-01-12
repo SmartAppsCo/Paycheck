@@ -978,57 +978,84 @@ pub fn query_audit_logs(
     conn: &Connection,
     query: &AuditLogQuery,
 ) -> Result<(Vec<AuditLog>, i64)> {
-    // Build WHERE clause (shared between COUNT and SELECT)
-    let mut where_clause = String::from("WHERE 1=1");
-    let mut filter_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    // Helper to build filter params (avoids duplication between COUNT and SELECT)
+    let build_filter_params = || -> Vec<Box<dyn rusqlite::ToSql>> {
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(ref v) = query.actor_type {
+            params.push(Box::new(v.as_ref().to_string()));
+        }
+        if let Some(ref v) = query.user_id {
+            params.push(Box::new(v.clone()));
+        }
+        if let Some(ref v) = query.action {
+            params.push(Box::new(v.clone()));
+        }
+        if let Some(ref v) = query.resource_type {
+            params.push(Box::new(v.clone()));
+        }
+        if let Some(ref v) = query.resource_id {
+            params.push(Box::new(v.clone()));
+        }
+        if let Some(ref v) = query.org_id {
+            params.push(Box::new(v.clone()));
+        }
+        if let Some(ref v) = query.project_id {
+            params.push(Box::new(v.clone()));
+        }
+        if let Some(v) = query.from_timestamp {
+            params.push(Box::new(v));
+        }
+        if let Some(v) = query.to_timestamp {
+            params.push(Box::new(v));
+        }
+        if let Some(ref v) = query.auth_type {
+            params.push(Box::new(v.clone()));
+        }
+        if let Some(ref v) = query.auth_credential {
+            params.push(Box::new(v.clone()));
+        }
+        params
+    };
 
-    if let Some(ref actor_type) = query.actor_type {
+    // Build WHERE clause
+    let mut where_clause = String::from("WHERE 1=1");
+    if query.actor_type.is_some() {
         where_clause.push_str(" AND actor_type = ?");
-        filter_params.push(Box::new(actor_type.as_ref().to_string()));
     }
-    if let Some(ref user_id) = query.user_id {
+    if query.user_id.is_some() {
         where_clause.push_str(" AND user_id = ?");
-        filter_params.push(Box::new(user_id.clone()));
     }
-    if let Some(ref action) = query.action {
+    if query.action.is_some() {
         where_clause.push_str(" AND action = ?");
-        filter_params.push(Box::new(action.clone()));
     }
-    if let Some(ref resource_type) = query.resource_type {
+    if query.resource_type.is_some() {
         where_clause.push_str(" AND resource_type = ?");
-        filter_params.push(Box::new(resource_type.clone()));
     }
-    if let Some(ref resource_id) = query.resource_id {
+    if query.resource_id.is_some() {
         where_clause.push_str(" AND resource_id = ?");
-        filter_params.push(Box::new(resource_id.clone()));
     }
-    if let Some(ref org_id) = query.org_id {
+    if query.org_id.is_some() {
         where_clause.push_str(" AND org_id = ?");
-        filter_params.push(Box::new(org_id.clone()));
     }
-    if let Some(ref project_id) = query.project_id {
+    if query.project_id.is_some() {
         where_clause.push_str(" AND project_id = ?");
-        filter_params.push(Box::new(project_id.clone()));
     }
-    if let Some(from_ts) = query.from_timestamp {
+    if query.from_timestamp.is_some() {
         where_clause.push_str(" AND timestamp >= ?");
-        filter_params.push(Box::new(from_ts));
     }
-    if let Some(to_ts) = query.to_timestamp {
+    if query.to_timestamp.is_some() {
         where_clause.push_str(" AND timestamp <= ?");
-        filter_params.push(Box::new(to_ts));
     }
-    if let Some(ref auth_type) = query.auth_type {
+    if query.auth_type.is_some() {
         where_clause.push_str(" AND auth_type = ?");
-        filter_params.push(Box::new(auth_type.clone()));
     }
-    if let Some(ref auth_credential) = query.auth_credential {
+    if query.auth_credential.is_some() {
         where_clause.push_str(" AND auth_credential = ?");
-        filter_params.push(Box::new(auth_credential.clone()));
     }
 
     // Get total count
     let count_sql = format!("SELECT COUNT(*) FROM audit_logs {}", where_clause);
+    let filter_params = build_filter_params();
     let filter_refs: Vec<&dyn rusqlite::ToSql> =
         filter_params.iter().map(|b| b.as_ref()).collect();
     let total: i64 = conn.query_row(&count_sql, filter_refs.as_slice(), |row| row.get(0))?;
@@ -1042,41 +1069,8 @@ pub fn query_audit_logs(
         where_clause
     );
 
-    // Rebuild params with limit/offset
-    let mut select_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-    if let Some(ref actor_type) = query.actor_type {
-        select_params.push(Box::new(actor_type.as_ref().to_string()));
-    }
-    if let Some(ref user_id) = query.user_id {
-        select_params.push(Box::new(user_id.clone()));
-    }
-    if let Some(ref action) = query.action {
-        select_params.push(Box::new(action.clone()));
-    }
-    if let Some(ref resource_type) = query.resource_type {
-        select_params.push(Box::new(resource_type.clone()));
-    }
-    if let Some(ref resource_id) = query.resource_id {
-        select_params.push(Box::new(resource_id.clone()));
-    }
-    if let Some(ref org_id) = query.org_id {
-        select_params.push(Box::new(org_id.clone()));
-    }
-    if let Some(ref project_id) = query.project_id {
-        select_params.push(Box::new(project_id.clone()));
-    }
-    if let Some(from_ts) = query.from_timestamp {
-        select_params.push(Box::new(from_ts));
-    }
-    if let Some(to_ts) = query.to_timestamp {
-        select_params.push(Box::new(to_ts));
-    }
-    if let Some(ref auth_type) = query.auth_type {
-        select_params.push(Box::new(auth_type.clone()));
-    }
-    if let Some(ref auth_credential) = query.auth_credential {
-        select_params.push(Box::new(auth_credential.clone()));
-    }
+    // Reuse filter params and add pagination
+    let mut select_params = build_filter_params();
     select_params.push(Box::new(limit));
     select_params.push(Box::new(offset));
 
@@ -3345,53 +3339,38 @@ impl PurgeResult {
 /// Called periodically when SOFT_DELETE_RETENTION_DAYS > 0.
 pub fn purge_soft_deleted_records(conn: &Connection, retention_days: i64) -> Result<PurgeResult> {
     let cutoff = now() - (retention_days * 86400);
-    let mut result = PurgeResult::default();
 
     // Delete in order: deepest children first to respect FK constraints
     // Note: devices, activation_codes, revoked_jtis use FK CASCADE so they'll be deleted
     // automatically when their parent license is deleted.
-
-    // 1. Licenses (leaf level for soft-delete)
-    result.licenses = conn.execute(
-        "DELETE FROM licenses WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
-        params![cutoff],
-    )?;
-
-    // 2. Products (has licenses as children, but we deleted those above)
-    result.products = conn.execute(
-        "DELETE FROM products WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
-        params![cutoff],
-    )?;
-
-    // 3. Projects (has products as children, but we deleted those above)
-    result.projects = conn.execute(
-        "DELETE FROM projects WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
-        params![cutoff],
-    )?;
-
-    // 4. Org members (has project_members as children via FK CASCADE)
-    result.org_members = conn.execute(
-        "DELETE FROM org_members WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
-        params![cutoff],
-    )?;
-
-    // 5. Organizations (has projects and org_members as children, but we deleted those above)
-    result.organizations = conn.execute(
-        "DELETE FROM organizations WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
-        params![cutoff],
-    )?;
-
-    // 6. Operators (has api_keys via FK CASCADE)
-    result.operators = conn.execute(
-        "DELETE FROM operators WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
-        params![cutoff],
-    )?;
-
-    // 7. Users (has operators and org_members as children, but we deleted those above)
-    result.users = conn.execute(
-        "DELETE FROM users WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
-        params![cutoff],
-    )?;
-
-    Ok(result)
+    Ok(PurgeResult {
+        licenses: conn.execute(
+            "DELETE FROM licenses WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+            params![cutoff],
+        )?,
+        products: conn.execute(
+            "DELETE FROM products WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+            params![cutoff],
+        )?,
+        projects: conn.execute(
+            "DELETE FROM projects WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+            params![cutoff],
+        )?,
+        org_members: conn.execute(
+            "DELETE FROM org_members WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+            params![cutoff],
+        )?,
+        organizations: conn.execute(
+            "DELETE FROM organizations WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+            params![cutoff],
+        )?,
+        operators: conn.execute(
+            "DELETE FROM operators WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+            params![cutoff],
+        )?,
+        users: conn.execute(
+            "DELETE FROM users WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+            params![cutoff],
+        )?,
+    })
 }

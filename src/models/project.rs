@@ -191,15 +191,15 @@ pub struct UpdateProject {
 
 impl UpdateProject {
     pub fn validate(&self) -> Result<()> {
-        if let Some(ref name) = self.name {
-            if name.trim().is_empty() {
-                return Err(AppError::BadRequest("name cannot be empty".into()));
-            }
+        if let Some(ref name) = self.name
+            && name.trim().is_empty()
+        {
+            return Err(AppError::BadRequest("name cannot be empty".into()));
         }
-        if let Some(ref prefix) = self.license_key_prefix {
-            if prefix.trim().is_empty() {
-                return Err(AppError::BadRequest("license_key_prefix cannot be empty".into()));
-            }
+        if let Some(ref prefix) = self.license_key_prefix
+            && prefix.trim().is_empty()
+        {
+            return Err(AppError::BadRequest("license_key_prefix cannot be empty".into()));
         }
         Ok(())
     }

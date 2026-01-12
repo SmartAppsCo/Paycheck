@@ -38,8 +38,7 @@ pub async fn create_organization(
     // If owner_user_id is provided, create the first org member as owner
     // The user must already exist in the users table
     // No API key is created - owner uses Console (impersonation) or creates a key later
-    let owner = if let Some(owner_user_id) = &input.owner_user_id {
-        // Verify the user exists
+    let (owner, audit_details) = if let Some(owner_user_id) = &input.owner_user_id {
         let user = queries::get_user_by_id(&conn, owner_user_id)?
             .ok_or_else(|| AppError::BadRequest("Owner user not found".into()))?;
 
@@ -52,35 +51,26 @@ pub async fn create_organization(
             },
         )?;
 
-        // Log details with user info
-        AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
-            .actor(ActorType::User, Some(&ctx.user.id))
-            .action(AuditAction::CreateOrg)
-            .resource("org", &organization.id)
-            .details(&serde_json::json!({
+        (
+            Some(member),
+            serde_json::json!({
                 "name": input.name,
                 "owner_user_id": owner_user_id,
                 "owner_email": user.email
-            }))
-            .names(&ctx.audit_names().resource(organization.name.clone()))
-            .auth_method(&ctx.auth_method)
-            .save()?;
-
-        Some(member)
+            }),
+        )
     } else {
-        AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
-            .actor(ActorType::User, Some(&ctx.user.id))
-            .action(AuditAction::CreateOrg)
-            .resource("org", &organization.id)
-            .details(&serde_json::json!({
-                "name": input.name
-            }))
-            .names(&ctx.audit_names().resource(organization.name.clone()))
-            .auth_method(&ctx.auth_method)
-            .save()?;
-
-        None
+        (None, serde_json::json!({ "name": input.name }))
     };
+
+    AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
+        .actor(ActorType::User, Some(&ctx.user.id))
+        .action(AuditAction::CreateOrg)
+        .resource("org", &organization.id)
+        .details(&audit_details)
+        .names(&ctx.audit_names().resource(organization.name.clone()))
+        .auth_method(&ctx.auth_method)
+        .save()?;
 
     Ok(Json(OrganizationCreated { organization, owner }))
 }

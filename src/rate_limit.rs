@@ -41,27 +41,25 @@ fn create_layer(requests_per_minute: u32) -> RateLimitLayer {
     GovernorLayer::new(Arc::new(config))
 }
 
-/// Creates a rate limiter layer for the strict tier.
-/// Used for endpoints that make external API calls (e.g., /buy).
+/// Creates a rate limiter layer with the specified requests per minute.
+///
+/// Tier documentation (for reference):
+/// - Strict (10 RPM default): External API calls like /buy, /activation/request-code
+/// - Standard (30 RPM default): Crypto/DB operations like /redeem, /validate
+/// - Relaxed (60 RPM default): Lightweight endpoints like /health
+/// - Org ops (3000 RPM default): Authenticated /orgs/* endpoints
 pub fn strict_layer(requests_per_minute: u32) -> RateLimitLayer {
     create_layer(requests_per_minute)
 }
 
-/// Creates a rate limiter layer for the standard tier.
-/// Used for most public endpoints that do crypto/DB operations.
 pub fn standard_layer(requests_per_minute: u32) -> RateLimitLayer {
     create_layer(requests_per_minute)
 }
 
-/// Creates a rate limiter layer for the relaxed tier.
-/// Used for lightweight endpoints like health checks.
 pub fn relaxed_layer(requests_per_minute: u32) -> RateLimitLayer {
     create_layer(requests_per_minute)
 }
 
-/// Creates a rate limiter layer for org operations.
-/// High limit to only stop extreme abuse (runaway scripts, DDoS attempts).
-/// Used for /orgs/* authenticated endpoints.
 pub fn org_ops_layer(requests_per_minute: u32) -> RateLimitLayer {
     create_layer(requests_per_minute)
 }

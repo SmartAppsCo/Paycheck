@@ -44,15 +44,15 @@ pub struct UpdateUser {
 
 impl UpdateUser {
     pub fn validate(&self) -> Result<()> {
-        if let Some(ref email) = self.email {
-            if email.trim().is_empty() {
-                return Err(AppError::BadRequest("email cannot be empty".into()));
-            }
+        if let Some(ref email) = self.email
+            && email.trim().is_empty()
+        {
+            return Err(AppError::BadRequest("email cannot be empty".into()));
         }
-        if let Some(ref name) = self.name {
-            if name.trim().is_empty() {
-                return Err(AppError::BadRequest("name cannot be empty".into()));
-            }
+        if let Some(ref name) = self.name
+            && name.trim().is_empty()
+        {
+            return Err(AppError::BadRequest("name cannot be empty".into()));
         }
         Ok(())
     }

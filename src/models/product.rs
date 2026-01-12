@@ -63,15 +63,15 @@ pub struct UpdateProduct {
 
 impl UpdateProduct {
     pub fn validate(&self) -> Result<()> {
-        if let Some(ref name) = self.name {
-            if name.trim().is_empty() {
-                return Err(AppError::BadRequest("name cannot be empty".into()));
-            }
+        if let Some(ref name) = self.name
+            && name.trim().is_empty()
+        {
+            return Err(AppError::BadRequest("name cannot be empty".into()));
         }
-        if let Some(ref tier) = self.tier {
-            if tier.trim().is_empty() {
-                return Err(AppError::BadRequest("tier cannot be empty".into()));
-            }
+        if let Some(ref tier) = self.tier
+            && tier.trim().is_empty()
+        {
+            return Err(AppError::BadRequest("tier cannot be empty".into()));
         }
         Ok(())
     }

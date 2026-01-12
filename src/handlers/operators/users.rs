@@ -115,12 +115,11 @@ pub async fn update_user(
         .ok_or_else(|| AppError::NotFound("User not found".into()))?;
 
     // If changing email, check it doesn't conflict
-    if let Some(ref new_email) = input.email {
-        if new_email != &existing.email {
-            if queries::get_user_by_email(&conn, new_email)?.is_some() {
-                return Err(AppError::BadRequest("Email already exists".into()));
-            }
-        }
+    if let Some(ref new_email) = input.email
+        && new_email != &existing.email
+        && queries::get_user_by_email(&conn, new_email)?.is_some()
+    {
+        return Err(AppError::BadRequest("Email already exists".into()));
     }
 
     queries::update_user(&conn, &id, &input)?;
