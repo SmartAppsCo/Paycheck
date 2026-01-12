@@ -2825,6 +2825,64 @@ pub fn get_licenses_by_payment_order_id_paginated(
     Ok((rows, total))
 }
 
+/// Get licenses by developer-managed customer ID for a project (paginated).
+/// Use this to find all licenses linked to a customer in your own system.
+pub fn get_licenses_by_customer_id_paginated(
+    conn: &Connection,
+    project_id: &str,
+    customer_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<LicenseWithProduct>, i64)> {
+    // Get total count
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM licenses WHERE project_id = ?1 AND customer_id = ?2 AND deleted_at IS NULL",
+        params![project_id, customer_id],
+        |row| row.get(0),
+    )?;
+
+    let mut stmt = conn.prepare(&format!(
+        "SELECT l.{}, p.name
+         FROM licenses l
+         JOIN products p ON l.product_id = p.id
+         WHERE l.project_id = ?1 AND l.customer_id = ?2 AND l.deleted_at IS NULL
+         ORDER BY l.created_at DESC
+         LIMIT ?3 OFFSET ?4",
+        LICENSE_COLS.replace(", ", ", l.")
+    ))?;
+
+    let rows = stmt
+        .query_map(
+            params![project_id, customer_id, limit, offset],
+            |row| {
+                Ok(LicenseWithProduct {
+                    license: License {
+                        id: row.get(0)?,
+                        email_hash: row.get(1)?,
+                        project_id: row.get(2)?,
+                        product_id: row.get(3)?,
+                        customer_id: row.get(4)?,
+                        activation_count: row.get(5)?,
+                        revoked: row.get::<_, i32>(6)? != 0,
+                        created_at: row.get(7)?,
+                        expires_at: row.get(8)?,
+                        updates_expires_at: row.get(9)?,
+                        payment_provider: row.get(10)?,
+                        payment_provider_customer_id: row.get(11)?,
+                        payment_provider_subscription_id: row.get(12)?,
+                        payment_provider_order_id: row.get(13)?,
+                        deleted_at: row.get(14)?,
+                        deleted_cascade_depth: row.get(15)?,
+                    },
+                    product_name: row.get(16)?,
+                })
+            },
+        )?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok((rows, total))
+}
+
 /// Find a license by payment provider and subscription ID (for subscription renewals)
 pub fn get_license_by_subscription(
     conn: &Connection,
@@ -3204,6 +3262,19 @@ pub fn set_payment_session_license(
     Ok(())
 }
 
+/// Purge old incomplete payment sessions beyond the retention period.
+/// Only deletes sessions where completed = 0 (abandoned carts).
+/// Completed sessions are kept as they link to licenses.
+/// Returns the number of deleted records.
+pub fn purge_old_payment_sessions(conn: &Connection, retention_days: i64) -> Result<usize> {
+    let cutoff = now() - (retention_days * 86400);
+    let deleted = conn.execute(
+        "DELETE FROM payment_sessions WHERE completed = 0 AND created_at < ?1",
+        params![cutoff],
+    )?;
+    Ok(deleted)
+}
+
 // ============ Webhook Event Deduplication ============
 
 /// Atomically record a webhook event, returning true if this is a new event.
@@ -3218,6 +3289,18 @@ pub fn try_record_webhook_event(conn: &Connection, provider: &str, event_id: &st
         params![id, provider, event_id, now()],
     )?;
     Ok(affected > 0)
+}
+
+/// Purge old webhook events beyond the retention period.
+/// These are only used for replay attack prevention (Stripe/LemonSqueezy retry for ~3 days max).
+/// Returns the number of deleted records.
+pub fn purge_old_webhook_events(conn: &Connection, retention_days: i64) -> Result<usize> {
+    let cutoff = now() - (retention_days * 86400);
+    let deleted = conn.execute(
+        "DELETE FROM webhook_events WHERE created_at < ?1",
+        params![cutoff],
+    )?;
+    Ok(deleted)
 }
 
 // ============ Audit Log Maintenance ============

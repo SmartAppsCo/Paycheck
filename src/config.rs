@@ -71,6 +71,14 @@ pub struct Config {
     /// Days to retain soft-deleted records before permanent purge.
     /// 0 = never auto-purge (default). Must use explicit hard delete.
     pub soft_delete_retention_days: i64,
+    /// Days to retain webhook events before purging.
+    /// These are only used for replay attack prevention.
+    /// Default: 30 days. 0 = never purge.
+    pub webhook_event_retention_days: i64,
+    /// Days to retain incomplete payment sessions before purging.
+    /// Abandoned carts have no value after checkout expiry (~24h).
+    /// Default: 7 days. 0 = never purge.
+    pub payment_session_retention_days: i64,
     /// Master key for envelope encryption of project private keys.
     /// Required in production; auto-generated in dev mode if not set.
     pub master_key: MasterKey,
@@ -181,6 +189,16 @@ impl Config {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
+
+        let webhook_event_retention_days: i64 = env::var("WEBHOOK_EVENT_RETENTION_DAYS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30); // Default 30 days - webhook events only needed for replay protection
+
+        let payment_session_retention_days: i64 = env::var("PAYMENT_SESSION_RETENTION_DAYS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(7); // Default 7 days - checkout sessions expire in ~24h
 
         // Master key for envelope encryption - loaded from file with permission checks
         let master_key = match env::var("PAYCHECK_MASTER_KEY_FILE") {
@@ -302,6 +320,8 @@ impl Config {
             audit_log_enabled,
             public_audit_log_retention_days,
             soft_delete_retention_days,
+            webhook_event_retention_days,
+            payment_session_retention_days,
             master_key,
             success_page_url,
             rate_limit,

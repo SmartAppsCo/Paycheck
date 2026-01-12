@@ -40,6 +40,8 @@ pub struct ListLicensesQuery {
     pub email: Option<String>,
     /// Filter by payment provider order ID (for support lookups via receipt)
     pub payment_provider_order_id: Option<String>,
+    /// Filter by developer-managed customer ID (for linking to your own user system)
+    pub customer_id: Option<String>,
     /// Max results to return (default 50, max 100)
     pub limit: Option<i64>,
     /// Offset for pagination (default 0)
@@ -57,8 +59,8 @@ impl ListLicensesQuery {
 }
 
 /// GET /orgs/{org_id}/projects/{project_id}/licenses
-/// List licenses for a project with pagination, optionally filtered by email or payment order ID.
-/// When filtering by email or order ID, returns ALL licenses including expired/revoked (for support).
+/// List licenses for a project with pagination, optionally filtered by email, payment order ID, or customer ID.
+/// When filtering, returns ALL licenses including expired/revoked (for support lookups).
 pub async fn list_licenses(
     State(state): State<AppState>,
     Path(path): Path<crate::middleware::OrgProjectPath>,
@@ -85,6 +87,15 @@ pub async fn list_licenses(
             &conn,
             &path.project_id,
             order_id,
+            limit,
+            offset,
+        )?
+    } else if let Some(ref customer_id) = query.customer_id {
+        // Lookup by developer-managed customer ID (for linking to your own user system)
+        queries::get_licenses_by_customer_id_paginated(
+            &conn,
+            &path.project_id,
+            customer_id,
             limit,
             offset,
         )?

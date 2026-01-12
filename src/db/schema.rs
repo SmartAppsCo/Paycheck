@@ -191,7 +191,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_licenses_project ON licenses(project_id);
         CREATE INDEX IF NOT EXISTS idx_licenses_project_email ON licenses(project_id, email_hash);
         CREATE INDEX IF NOT EXISTS idx_licenses_project_order ON licenses(project_id, payment_provider_order_id);
-        CREATE INDEX IF NOT EXISTS idx_licenses_customer ON licenses(customer_id);
+        CREATE INDEX IF NOT EXISTS idx_licenses_project_customer ON licenses(project_id, customer_id);
         CREATE INDEX IF NOT EXISTS idx_licenses_provider_customer ON licenses(payment_provider, payment_provider_customer_id);
         CREATE INDEX IF NOT EXISTS idx_licenses_provider_subscription ON licenses(payment_provider, payment_provider_subscription_id);
         CREATE INDEX IF NOT EXISTS idx_licenses_provider_order ON licenses(payment_provider, payment_provider_order_id);

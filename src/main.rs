@@ -557,16 +557,26 @@ fn rotate_master_key(
     Ok(())
 }
 
-/// Spawns a background task that periodically cleans up expired activation codes.
-/// Runs every 5 minutes to remove codes that have expired or been used.
-fn spawn_cleanup_task(state: AppState) {
+/// Spawns a background task that periodically runs maintenance routines.
+/// Different routines run at offset intervals to spread the load:
+/// - Activation codes: every 5 minutes (every tick)
+/// - Rate limiter: every 5 minutes (every tick)
+/// - Webhook events: every hour, offset by 15 min (iteration % 12 == 3)
+/// - Payment sessions: every hour, offset by 30 min (iteration % 12 == 6)
+fn spawn_cleanup_task(
+    state: AppState,
+    webhook_event_retention_days: i64,
+    payment_session_retention_days: i64,
+) {
     tokio::spawn(async move {
-        let interval = Duration::from_secs(5 * 60); // 5 minutes
+        let interval = Duration::from_secs(5 * 60); // 5 minutes per tick
+        let mut iteration: u64 = 0;
 
         loop {
             tokio::time::sleep(interval).await;
+            iteration += 1;
 
-            // Clean up expired activation codes
+            // Clean up expired activation codes (every tick = 5 min)
             match state.db.get() {
                 Ok(conn) => match queries::cleanup_expired_activation_codes(&conn) {
                     Ok(count) => {
@@ -583,12 +593,60 @@ fn spawn_cleanup_task(state: AppState) {
                 }
             }
 
-            // Also clean up rate limiter expired entries
+            // Clean up rate limiter expired entries (every tick = 5 min)
             state.activation_rate_limiter.cleanup();
+
+            // Clean up old webhook events (every 12 ticks = 1 hour, offset by 3 ticks = 15 min)
+            // Only runs if retention is configured (> 0)
+            if webhook_event_retention_days > 0 && iteration % 12 == 3 {
+                match state.db.get() {
+                    Ok(conn) => match queries::purge_old_webhook_events(&conn, webhook_event_retention_days) {
+                        Ok(count) => {
+                            if count > 0 {
+                                tracing::info!(
+                                    "Purged {} webhook events older than {} days",
+                                    count,
+                                    webhook_event_retention_days
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to purge old webhook events: {}", e);
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!("Failed to get db connection for webhook cleanup: {}", e);
+                    }
+                }
+            }
+
+            // Clean up old incomplete payment sessions (every 12 ticks = 1 hour, offset by 6 ticks = 30 min)
+            // Only runs if retention is configured (> 0)
+            if payment_session_retention_days > 0 && iteration % 12 == 6 {
+                match state.db.get() {
+                    Ok(conn) => match queries::purge_old_payment_sessions(&conn, payment_session_retention_days) {
+                        Ok(count) => {
+                            if count > 0 {
+                                tracing::info!(
+                                    "Purged {} abandoned payment sessions older than {} days",
+                                    count,
+                                    payment_session_retention_days
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to purge old payment sessions: {}", e);
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!("Failed to get db connection for payment session cleanup: {}", e);
+                    }
+                }
+            }
         }
     });
 
-    tracing::info!("Background cleanup task started (runs every 5 minutes)");
+    tracing::info!("Background maintenance task started (activation codes: 5min, hourly: webhook events, payment sessions)");
 }
 
 #[tokio::main]
@@ -783,8 +841,12 @@ async fn main() {
         bootstrap_first_operator(&state, email);
     }
 
-    // Start background cleanup task for expired redemption codes
-    spawn_cleanup_task(state.clone());
+    // Start background maintenance task (activation codes, webhook events, payment sessions, rate limiter)
+    spawn_cleanup_task(
+        state.clone(),
+        config.webhook_event_retention_days,
+        config.payment_session_retention_days,
+    );
 
     // Build the application router
     let console_cors = config.console_cors_layer();
