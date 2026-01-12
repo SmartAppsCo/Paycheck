@@ -9,8 +9,8 @@ use crate::error::{AppError, Result};
 use crate::extractors::{Json, Path};
 use crate::middleware::OperatorContext;
 use crate::models::{
-    ActorType, AuditAction, CreateOrgMember, CreateOrganization, OrgMember, OrgMemberRole, Organization,
-    UpdateOrganization,
+    ActorType, AuditAction, CreateOrgMember, CreateOrganization, OrgMember, OrgMemberRole,
+    Organization, UpdateOrganization,
 };
 use crate::pagination::Paginated;
 use crate::util::AuditLogBuilder;
@@ -55,26 +55,28 @@ pub async fn create_organization(
         // Log details with user info
         AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
             .actor(ActorType::User, Some(&ctx.user.id))
-            .action(AuditAction::CreateOrganization)
-            .resource("organization", &organization.id)
+            .action(AuditAction::CreateOrg)
+            .resource("org", &organization.id)
             .details(&serde_json::json!({
                 "name": input.name,
                 "owner_user_id": owner_user_id,
                 "owner_email": user.email
             }))
             .names(&ctx.audit_names().resource(organization.name.clone()))
+            .auth_method(&ctx.auth_method)
             .save()?;
 
         Some(member)
     } else {
         AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
             .actor(ActorType::User, Some(&ctx.user.id))
-            .action(AuditAction::CreateOrganization)
-            .resource("organization", &organization.id)
+            .action(AuditAction::CreateOrg)
+            .resource("org", &organization.id)
             .details(&serde_json::json!({
                 "name": input.name
             }))
             .names(&ctx.audit_names().resource(organization.name.clone()))
+            .auth_method(&ctx.auth_method)
             .save()?;
 
         None
@@ -92,6 +94,9 @@ pub struct ListOrgsQuery {
     pub limit: Option<i64>,
     /// Pagination: items to skip (default: 0)
     pub offset: Option<i64>,
+    /// Include soft-deleted organizations (default: false)
+    #[serde(default)]
+    pub include_deleted: bool,
 }
 
 impl ListOrgsQuery {
@@ -114,9 +119,10 @@ pub async fn list_organizations(
 
     let (organizations, total) = if let Some(user_id) = &query.user_id {
         // Filter by user ID - returns orgs where user is a member
+        // Note: include_deleted is not supported for this filter
         queries::list_orgs_by_user_id_paginated(&conn, user_id, limit, offset)?
     } else {
-        queries::list_organizations_paginated(&conn, limit, offset)?
+        queries::list_organizations_paginated(&conn, limit, offset, query.include_deleted)?
     };
 
     Ok(Json(Paginated::new(organizations, total, limit, offset)))
@@ -156,10 +162,11 @@ pub async fn update_organization(
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.user.id))
-        .action(AuditAction::UpdateOrganization)
-        .resource("organization", &id)
+        .action(AuditAction::UpdateOrg)
+        .resource("org", &id)
         .details(&serde_json::json!({ "old_name": existing.name, "new_name": input.name, "stripe_updated": input.stripe_config.is_some(), "ls_updated": input.ls_config.is_some() }))
         .names(&ctx.audit_names().resource(organization.name.clone()))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(organization))
@@ -177,15 +184,93 @@ pub async fn delete_organization(
     let existing = queries::get_organization_by_id(&conn, &id)?
         .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
 
+    queries::soft_delete_organization(&conn, &id)?;
+
+    AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
+        .actor(ActorType::User, Some(&ctx.user.id))
+        .action(AuditAction::DeleteOrg)
+        .resource("org", &id)
+        .details(&serde_json::json!({ "name": existing.name }))
+        .names(&ctx.audit_names().resource(existing.name.clone()))
+        .auth_method(&ctx.auth_method)
+        .save()?;
+
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+/// Restore a soft-deleted organization and its cascade-deleted children
+pub async fn restore_organization(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<OperatorContext>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Organization>> {
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
+
+    // Get the deleted organization (need to check it exists and was deleted)
+    let existing = queries::get_deleted_organization_by_id(&conn, &id)?
+        .ok_or_else(|| AppError::NotFound("Deleted organization not found".into()))?;
+
+    // Restore the organization and cascade-deleted children
+    queries::restore_organization(&conn, &id)?;
+
+    // Get the restored organization
+    let organization = queries::get_organization_by_id(&conn, &id)?
+        .ok_or_else(|| AppError::Internal("Organization not found after restore".into()))?;
+
+    AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
+        .actor(ActorType::User, Some(&ctx.user.id))
+        .action(AuditAction::RestoreOrg)
+        .resource("org", &id)
+        .details(&serde_json::json!({ "name": existing.name }))
+        .names(&ctx.audit_names().resource(organization.name.clone()))
+        .auth_method(&ctx.auth_method)
+        .save()?;
+
+    Ok(Json(organization))
+}
+
+/// Hard delete an organization (GDPR compliance - permanently removes all data).
+/// This is irreversible and removes all associated data including:
+/// - All org members
+/// - All projects and their products
+/// - All licenses
+pub async fn hard_delete_organization(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<OperatorContext>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>> {
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
+
+    // Get org info for audit log (may be soft-deleted already)
+    let existing = queries::get_organization_by_id(&conn, &id)?
+        .or_else(|| queries::get_deleted_organization_by_id(&conn, &id).ok().flatten())
+        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+
+    // Perform hard delete (CASCADE removes all related data)
     queries::delete_organization(&conn, &id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.user.id))
-        .action(AuditAction::DeleteOrganization)
-        .resource("organization", &id)
-        .details(&serde_json::json!({ "name": existing.name }))
+        .action(AuditAction::HardDeleteOrg)
+        .resource("org", &id)
+        .details(&serde_json::json!({
+            "name": existing.name,
+            "reason": "gdpr_request"
+        }))
         .names(&ctx.audit_names().resource(existing.name.clone()))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
-    Ok(Json(serde_json::json!({ "success": true })))
+    tracing::warn!(
+        "GDPR hard delete: Organization {} ({}) permanently deleted by operator {}",
+        id,
+        existing.name,
+        ctx.user.id
+    );
+
+    Ok(Json(serde_json::json!({ "success": true, "permanently_deleted": true })))
 }

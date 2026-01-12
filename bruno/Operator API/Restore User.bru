@@ -1,0 +1,35 @@
+meta {
+  name: Restore User
+  type: http
+  seq: 25
+}
+
+post {
+  url: {{base_url}}/operators/users/{{user_id}}/restore
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+body:json {
+  {
+    "force": false
+  }
+}
+
+docs {
+  Restore a soft-deleted user (requires admin+ operator role).
+
+  This will restore the user and any cascade-deleted related records
+  (operator role, org memberships) that were deleted at the same time.
+
+  Body params:
+  - force (optional, default false): If true, restore even if the user
+    was cascade-deleted (e.g., deleted as part of an organization deletion).
+    Without force, cascade-deleted items return an error.
+
+  Returns the restored User object.
+}

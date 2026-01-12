@@ -1,0 +1,33 @@
+meta {
+  name: Hard Delete User
+  type: http
+  seq: 26
+}
+
+post {
+  url: {{base_url}}/operators/users/{{user_id}}/hard-delete
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+docs {
+  Permanently delete a user for GDPR compliance (requires admin+ operator role).
+
+  WARNING: This is IRREVERSIBLE. The user and all associated data will be
+  permanently removed from the database, including:
+  - Operator record (if any)
+  - All org memberships
+  - All API keys
+
+  Use this only for GDPR data deletion requests.
+  For normal deletion, use DELETE /operators/users/{user_id} which soft-deletes.
+
+  You cannot hard delete yourself.
+
+  Returns:
+  { "success": true, "permanently_deleted": true }
+}

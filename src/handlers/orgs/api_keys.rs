@@ -85,6 +85,7 @@ pub async fn create_api_key(
         }))
         .org(&path.org_id)
         .names(&ctx.audit_names().resource(key_record.name.clone()))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(ApiKeyCreated {
@@ -193,6 +194,7 @@ pub async fn revoke_api_key(
         }))
         .org(&path.org_id)
         .names(&ctx.audit_names().resource(key.name.clone()))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(serde_json::json!({ "success": true })))

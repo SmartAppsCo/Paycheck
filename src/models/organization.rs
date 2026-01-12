@@ -20,6 +20,12 @@ pub struct Organization {
     pub payment_provider: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Soft delete timestamp (None = active, Some = deleted at this time)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<i64>,
+    /// Cascade depth (0 = directly deleted, >0 = cascaded from parent)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_cascade_depth: Option<i32>,
 }
 
 impl Organization {
@@ -150,6 +156,12 @@ pub struct OrganizationPublic {
     pub payment_provider: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Soft delete timestamp (None = active, Some = deleted at this time)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<i64>,
+    /// Cascade depth (0 = directly deleted, >0 = cascaded from parent)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_cascade_depth: Option<i32>,
 }
 
 impl From<Organization> for OrganizationPublic {
@@ -166,6 +178,8 @@ impl From<Organization> for OrganizationPublic {
             payment_provider: o.payment_provider,
             created_at: o.created_at,
             updated_at: o.updated_at,
+            deleted_at: o.deleted_at,
+            deleted_cascade_depth: o.deleted_cascade_depth,
         }
     }
 }

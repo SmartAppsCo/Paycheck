@@ -101,6 +101,8 @@ fn setup_refresh_test() -> (Router, String, String, String, String) {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(None, "test@example.com".to_string())),
+        jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
+        trusted_issuers: vec![],
     };
 
     let app = Router::new()
@@ -246,6 +248,8 @@ async fn test_refresh_rejects_non_uuid_product_id() {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(None, "test@example.com".to_string())),
+        jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
+        trusted_issuers: vec![],
     };
 
     let app = Router::new()
@@ -342,6 +346,8 @@ async fn test_refresh_with_revoked_license_fails() {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(None, "test@example.com".to_string())),
+        jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
+        trusted_issuers: vec![],
     };
 
     let app = Router::new()
@@ -411,7 +417,7 @@ async fn test_refresh_with_revoked_jti_fails() {
         .unwrap();
 
         // Revoke this specific JTI
-        queries::add_revoked_jti(&conn, &license.id, &device.jti).unwrap();
+        queries::add_revoked_jti(&conn, &license.id, &device.jti, Some("test revocation")).unwrap();
     }
 
     let audit_manager = SqliteConnectionManager::memory();
@@ -432,6 +438,8 @@ async fn test_refresh_with_revoked_jti_fails() {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(None, "test@example.com".to_string())),
+        jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
+        trusted_issuers: vec![],
     };
 
     let app = Router::new()

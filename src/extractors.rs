@@ -8,7 +8,7 @@ use axum::{
     http::request::Parts,
     response::{IntoResponse, Response},
 };
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::error::AppError;
 
@@ -115,4 +115,12 @@ impl<T> std::ops::DerefMut for Path<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
+}
+
+/// Request body for restore operations on soft-deleted entities.
+#[derive(Debug, Deserialize)]
+pub struct RestoreRequest {
+    /// If true, restore even if item was cascade-deleted (otherwise requires parent to be restored first)
+    #[serde(default)]
+    pub force: bool,
 }

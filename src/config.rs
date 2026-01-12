@@ -4,6 +4,18 @@ use std::path::Path;
 
 use crate::crypto::MasterKey;
 
+/// Configuration for a trusted JWT issuer (e.g., Console, mobile app).
+/// JWTs from these issuers can authenticate to the API alongside API keys.
+#[derive(Clone, Debug)]
+pub struct TrustedIssuer {
+    /// Issuer URL (must match `iss` claim in JWT)
+    pub issuer: String,
+    /// JWKS endpoint URL for fetching public keys
+    pub jwks_url: String,
+    /// Expected audience (must match `aud` claim in JWT)
+    pub audience: String,
+}
+
 /// Rate limiting configuration for API endpoints
 #[derive(Clone, Copy, Debug)]
 pub struct RateLimitConfig {
@@ -56,6 +68,9 @@ pub struct Config {
     /// Internal actions (operator, org_member, system) are kept forever.
     /// 0 = never purge (default).
     pub public_audit_log_retention_days: i64,
+    /// Days to retain soft-deleted records before permanent purge.
+    /// 0 = never auto-purge (default). Must use explicit hard delete.
+    pub soft_delete_retention_days: i64,
     /// Master key for envelope encryption of project private keys.
     /// Required in production; auto-generated in dev mode if not set.
     pub master_key: MasterKey,
@@ -75,6 +90,9 @@ pub struct Config {
     /// Set via PAYCHECK_DEFAULT_FROM_EMAIL.
     /// Projects can override with their own email_from setting.
     pub default_from_email: String,
+    /// Trusted JWT issuers for first-party app authentication.
+    /// Set via PAYCHECK_TRUSTED_ISSUERS (JSON array).
+    pub trusted_issuers: Vec<TrustedIssuer>,
 }
 
 /// Check that a file has secure permissions (owner read-only, no write, no group/other access).
@@ -159,6 +177,11 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
 
+        let soft_delete_retention_days: i64 = env::var("SOFT_DELETE_RETENTION_DAYS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
         // Master key for envelope encryption - loaded from file with permission checks
         let master_key = match env::var("PAYCHECK_MASTER_KEY_FILE") {
             Ok(path) => load_master_key_from_file(&path).unwrap_or_else(|e| {
@@ -237,6 +260,36 @@ impl Config {
         let default_from_email = env::var("PAYCHECK_DEFAULT_FROM_EMAIL")
             .unwrap_or_else(|_| "noreply@paycheck.dev".to_string());
 
+        // Trusted JWT issuers for first-party app authentication
+        // Format: JSON array of {issuer, jwks_url, audience} objects
+        let trusted_issuers: Vec<TrustedIssuer> = env::var("PAYCHECK_TRUSTED_ISSUERS")
+            .ok()
+            .and_then(|json| {
+                #[derive(serde::Deserialize)]
+                struct IssuerConfig {
+                    issuer: String,
+                    jwks_url: String,
+                    audience: String,
+                }
+                serde_json::from_str::<Vec<IssuerConfig>>(&json)
+                    .map_err(|e| {
+                        eprintln!("WARNING: Failed to parse PAYCHECK_TRUSTED_ISSUERS: {}", e);
+                        e
+                    })
+                    .ok()
+            })
+            .map(|configs| {
+                configs
+                    .into_iter()
+                    .map(|c| TrustedIssuer {
+                        issuer: c.issuer,
+                        jwks_url: c.jwks_url,
+                        audience: c.audience,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         Self {
             host,
             port,
@@ -248,12 +301,14 @@ impl Config {
             dev_mode,
             audit_log_enabled,
             public_audit_log_retention_days,
+            soft_delete_retention_days,
             master_key,
             success_page_url,
             rate_limit,
             console_origins,
             resend_api_key,
             default_from_email,
+            trusted_issuers,
         }
     }
 

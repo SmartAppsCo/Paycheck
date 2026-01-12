@@ -34,6 +34,10 @@ pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<App
         .route("/orgs/{org_id}/members/{member_id}", get(get_org_member))
         .route("/orgs/{org_id}/members/{member_id}", put(update_org_member))
         .route("/orgs/{org_id}/members/{member_id}", delete(delete_org_member))
+        .route(
+            "/orgs/{org_id}/members/{member_id}/restore",
+            post(restore_org_member),
+        )
         // Member API keys
         .route(
             "/orgs/{org_id}/members/{member_id}/api-keys",
@@ -65,6 +69,10 @@ pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<App
         .route(
             "/orgs/{org_id}/projects/{project_id}",
             delete(delete_project),
+        )
+        .route(
+            "/orgs/{org_id}/projects/{project_id}/restore",
+            post(restore_project),
         )
         // Project members
         .route(
@@ -108,6 +116,10 @@ pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<App
             "/orgs/{org_id}/projects/{project_id}/products/{product_id}",
             delete(delete_product),
         )
+        .route(
+            "/orgs/{org_id}/projects/{project_id}/products/{product_id}/restore",
+            post(restore_product),
+        )
         // Product payment config
         .route(
             "/orgs/{org_id}/projects/{project_id}/products/{product_id}/payment-config",
@@ -149,6 +161,10 @@ pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<App
         .route(
             "/orgs/{org_id}/projects/{project_id}/licenses/{license_id}/revoke",
             post(revoke_license),
+        )
+        .route(
+            "/orgs/{org_id}/projects/{project_id}/licenses/{license_id}/restore",
+            post(restore_license),
         )
         .route(
             "/orgs/{org_id}/projects/{project_id}/licenses/{license_id}/send-code",

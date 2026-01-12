@@ -28,6 +28,12 @@ pub struct OrgMember {
     pub org_id: String,
     pub role: OrgMemberRole,
     pub created_at: i64,
+    /// Soft delete timestamp (None = active, Some = deleted at this time)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<i64>,
+    /// Cascade depth (0 = directly deleted, >0 = cascaded from parent)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_cascade_depth: Option<i32>,
 }
 
 /// Org member with user info joined (for API responses)
@@ -40,6 +46,12 @@ pub struct OrgMemberWithUser {
     pub org_id: String,
     pub role: OrgMemberRole,
     pub created_at: i64,
+    /// Soft delete timestamp (None = active, Some = deleted at this time)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<i64>,
+    /// Cascade depth (0 = directly deleted, >0 = cascaded from parent)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_cascade_depth: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,5 +1,5 @@
 use chrono::Utc;
-use rusqlite::{Connection, params, types::Value};
+use rusqlite::{Connection, OptionalExtension, params, types::Value};
 use uuid::Uuid;
 
 use crate::crypto::{MasterKey, hash_secret};
@@ -105,34 +105,38 @@ impl UpdateBuilder {
 pub fn create_user(conn: &Connection, input: &CreateUser) -> Result<User> {
     let id = gen_id();
     let now = now();
+    let email = input.email.trim().to_lowercase();
 
     conn.execute(
         "INSERT INTO users (id, email, name, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![&id, &input.email, &input.name, now, now],
+        params![&id, &email, &input.name, now, now],
     )?;
 
     Ok(User {
         id,
-        email: input.email.clone(),
+        email,
         name: input.name.clone(),
         created_at: now,
         updated_at: now,
+        deleted_at: None,
+        deleted_cascade_depth: None,
     })
 }
 
 pub fn get_user_by_id(conn: &Connection, id: &str) -> Result<Option<User>> {
     query_one(
         conn,
-        &format!("SELECT {} FROM users WHERE id = ?1", USER_COLS),
+        &format!("SELECT {} FROM users WHERE id = ?1 AND deleted_at IS NULL", USER_COLS),
         &[&id],
     )
 }
 
 pub fn get_user_by_email(conn: &Connection, email: &str) -> Result<Option<User>> {
+    let email = email.trim().to_lowercase();
     query_one(
         conn,
-        &format!("SELECT {} FROM users WHERE email = ?1", USER_COLS),
+        &format!("SELECT {} FROM users WHERE email = ?1 AND deleted_at IS NULL", USER_COLS),
         &[&email],
     )
 }
@@ -140,7 +144,7 @@ pub fn get_user_by_email(conn: &Connection, email: &str) -> Result<Option<User>>
 pub fn list_users(conn: &Connection) -> Result<Vec<User>> {
     query_all(
         conn,
-        &format!("SELECT {} FROM users ORDER BY created_at DESC", USER_COLS),
+        &format!("SELECT {} FROM users WHERE deleted_at IS NULL ORDER BY created_at DESC", USER_COLS),
         &[],
     )
 }
@@ -149,13 +153,19 @@ pub fn list_users_paginated(
     conn: &Connection,
     limit: i64,
     offset: i64,
+    include_deleted: bool,
 ) -> Result<(Vec<User>, i64)> {
-    let total: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))?;
+    let deleted_filter = if include_deleted { "" } else { "WHERE deleted_at IS NULL" };
+    let total: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM users {}", deleted_filter),
+        [],
+        |row| row.get(0),
+    )?;
     let items = query_all(
         conn,
         &format!(
-            "SELECT {} FROM users ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
-            USER_COLS
+            "SELECT {} FROM users {} ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+            USER_COLS, deleted_filter
         ),
         params![limit, offset],
     )?;
@@ -163,9 +173,10 @@ pub fn list_users_paginated(
 }
 
 pub fn update_user(conn: &Connection, id: &str, input: &UpdateUser) -> Result<bool> {
+    let email = input.email.as_ref().map(|e| e.trim().to_lowercase());
     UpdateBuilder::new("users", id)
         .with_updated_at()
-        .set_opt("email", input.email.clone())
+        .set_opt("email", email)
         .set_opt("name", input.name.clone())
         .execute(conn)
 }
@@ -173,6 +184,87 @@ pub fn update_user(conn: &Connection, id: &str, input: &UpdateUser) -> Result<bo
 pub fn delete_user(conn: &Connection, id: &str) -> Result<bool> {
     let deleted = conn.execute("DELETE FROM users WHERE id = ?1", params![id])?;
     Ok(deleted > 0)
+}
+
+/// Soft delete a user and cascade to operators and org_members.
+/// Returns true if the user was found and soft deleted.
+pub fn soft_delete_user(conn: &Connection, id: &str) -> Result<bool> {
+    let now = now();
+
+    // Soft delete the user (depth 0 = direct delete)
+    let updated = conn.execute(
+        "UPDATE users SET deleted_at = ?1, deleted_cascade_depth = 0 WHERE id = ?2 AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+
+    if updated == 0 {
+        return Ok(false);
+    }
+
+    // Cascade to operators (depth 1)
+    conn.execute(
+        "UPDATE operators SET deleted_at = ?1, deleted_cascade_depth = 1 WHERE user_id = ?2 AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+
+    // Cascade to org_members (depth 1) - project_members will be orphaned but that's OK
+    conn.execute(
+        "UPDATE org_members SET deleted_at = ?1, deleted_cascade_depth = 1 WHERE user_id = ?2 AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+
+    Ok(true)
+}
+
+/// Get a soft-deleted user by ID (for restore operations).
+pub fn get_deleted_user_by_id(conn: &Connection, id: &str) -> Result<Option<User>> {
+    query_one(
+        conn,
+        &format!("SELECT {} FROM users WHERE id = ?1 AND deleted_at IS NOT NULL", USER_COLS),
+        &[&id],
+    )
+}
+
+/// Restore a soft-deleted user and optionally cascade to children.
+/// Returns Err if depth > 0 and force=false (was cascaded from parent).
+/// If force=true or depth=0, restores user and all cascaded children.
+pub fn restore_user(conn: &Connection, id: &str, force: bool) -> Result<bool> {
+    // Get the deleted user
+    let user: Option<User> = get_deleted_user_by_id(conn, id)?;
+    let user = match user {
+        Some(u) => u,
+        None => return Ok(false),
+    };
+
+    // Check if this was a cascaded delete
+    if user.deleted_cascade_depth.unwrap_or(0) > 0 && !force {
+        return Err(AppError::BadRequest(
+            "User was deleted via cascade. Use force=true or restore the parent entity first.".into()
+        ));
+    }
+
+    let deleted_at = user.deleted_at.unwrap();
+
+    // Restore cascaded children first (operators, org_members with matching timestamp and depth > 0)
+    conn.execute(
+        "UPDATE operators SET deleted_at = NULL, deleted_cascade_depth = NULL
+         WHERE user_id = ?1 AND deleted_at = ?2 AND deleted_cascade_depth > 0",
+        params![id, deleted_at],
+    )?;
+
+    conn.execute(
+        "UPDATE org_members SET deleted_at = NULL, deleted_cascade_depth = NULL
+         WHERE user_id = ?1 AND deleted_at = ?2 AND deleted_cascade_depth > 0",
+        params![id, deleted_at],
+    )?;
+
+    // Restore the user
+    conn.execute(
+        "UPDATE users SET deleted_at = NULL, deleted_cascade_depth = NULL WHERE id = ?1",
+        params![id],
+    )?;
+
+    Ok(true)
 }
 
 /// Get a user with their operator role and org memberships.
@@ -240,14 +332,20 @@ pub fn list_users_with_roles_paginated(
     conn: &Connection,
     limit: i64,
     offset: i64,
+    include_deleted: bool,
 ) -> Result<(Vec<UserWithRoles>, i64)> {
-    let total: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))?;
+    let deleted_filter = if include_deleted { "" } else { "WHERE deleted_at IS NULL" };
+    let total: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM users {}", deleted_filter),
+        [],
+        |row| row.get(0),
+    )?;
 
     let users: Vec<User> = query_all(
         conn,
         &format!(
-            "SELECT {} FROM users ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
-            USER_COLS
+            "SELECT {} FROM users {} ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+            USER_COLS, deleted_filter
         ),
         params![limit, offset],
     )?;
@@ -323,13 +421,15 @@ pub fn create_operator(conn: &Connection, input: &CreateOperator) -> Result<Oper
         user_id: input.user_id.clone(),
         role: input.role,
         created_at: now,
+        deleted_at: None,
+        deleted_cascade_depth: None,
     })
 }
 
 pub fn get_operator_by_id(conn: &Connection, id: &str) -> Result<Option<Operator>> {
     query_one(
         conn,
-        &format!("SELECT {} FROM operators WHERE id = ?1", OPERATOR_COLS),
+        &format!("SELECT {} FROM operators WHERE id = ?1 AND deleted_at IS NULL", OPERATOR_COLS),
         &[&id],
     )
 }
@@ -338,7 +438,7 @@ pub fn get_operator_with_user_by_id(conn: &Connection, id: &str) -> Result<Optio
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM operators o JOIN users u ON o.user_id = u.id WHERE o.id = ?1",
+            "SELECT {} FROM operators o JOIN users u ON o.user_id = u.id WHERE o.id = ?1 AND o.deleted_at IS NULL AND u.deleted_at IS NULL",
             OPERATOR_WITH_USER_COLS
         ),
         &[&id],
@@ -348,7 +448,7 @@ pub fn get_operator_with_user_by_id(conn: &Connection, id: &str) -> Result<Optio
 pub fn get_operator_by_user_id(conn: &Connection, user_id: &str) -> Result<Option<Operator>> {
     query_one(
         conn,
-        &format!("SELECT {} FROM operators WHERE user_id = ?1", OPERATOR_COLS),
+        &format!("SELECT {} FROM operators WHERE user_id = ?1 AND deleted_at IS NULL", OPERATOR_COLS),
         &[&user_id],
     )
 }
@@ -360,7 +460,7 @@ pub fn get_operator_with_user_by_user_id(
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM operators o JOIN users u ON o.user_id = u.id WHERE o.user_id = ?1",
+            "SELECT {} FROM operators o JOIN users u ON o.user_id = u.id WHERE o.user_id = ?1 AND o.deleted_at IS NULL AND u.deleted_at IS NULL",
             OPERATOR_WITH_USER_COLS
         ),
         &[&user_id],
@@ -371,7 +471,7 @@ pub fn list_operators(conn: &Connection) -> Result<Vec<OperatorWithUser>> {
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM operators o JOIN users u ON o.user_id = u.id ORDER BY o.created_at DESC",
+            "SELECT {} FROM operators o JOIN users u ON o.user_id = u.id WHERE o.deleted_at IS NULL AND u.deleted_at IS NULL ORDER BY o.created_at DESC",
             OPERATOR_WITH_USER_COLS
         ),
         &[],
@@ -383,11 +483,11 @@ pub fn list_operators_paginated(
     limit: i64,
     offset: i64,
 ) -> Result<(Vec<OperatorWithUser>, i64)> {
-    let total: i64 = conn.query_row("SELECT COUNT(*) FROM operators", [], |row| row.get(0))?;
+    let total: i64 = conn.query_row("SELECT COUNT(*) FROM operators WHERE deleted_at IS NULL", [], |row| row.get(0))?;
     let items = query_all(
         conn,
         &format!(
-            "SELECT {} FROM operators o JOIN users u ON o.user_id = u.id ORDER BY o.created_at DESC LIMIT ?1 OFFSET ?2",
+            "SELECT {} FROM operators o JOIN users u ON o.user_id = u.id WHERE o.deleted_at IS NULL AND u.deleted_at IS NULL ORDER BY o.created_at DESC LIMIT ?1 OFFSET ?2",
             OPERATOR_WITH_USER_COLS
         ),
         params![limit, offset],
@@ -405,6 +505,48 @@ pub fn update_operator(conn: &Connection, id: &str, input: &UpdateOperator) -> R
 pub fn delete_operator(conn: &Connection, id: &str) -> Result<bool> {
     let deleted = conn.execute("DELETE FROM operators WHERE id = ?1", params![id])?;
     Ok(deleted > 0)
+}
+
+/// Soft delete an operator. No cascade needed (standalone entity).
+pub fn soft_delete_operator(conn: &Connection, id: &str) -> Result<bool> {
+    let now = now();
+    let updated = conn.execute(
+        "UPDATE operators SET deleted_at = ?1, deleted_cascade_depth = 0 WHERE id = ?2 AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+    Ok(updated > 0)
+}
+
+/// Get a soft-deleted operator by ID (for restore operations).
+pub fn get_deleted_operator_by_id(conn: &Connection, id: &str) -> Result<Option<Operator>> {
+    query_one(
+        conn,
+        &format!("SELECT {} FROM operators WHERE id = ?1 AND deleted_at IS NOT NULL", OPERATOR_COLS),
+        &[&id],
+    )
+}
+
+/// Restore a soft-deleted operator.
+/// Returns Err if depth > 0 and force=false (was cascaded from user delete).
+pub fn restore_operator(conn: &Connection, id: &str, force: bool) -> Result<bool> {
+    let operator = get_deleted_operator_by_id(conn, id)?;
+    let operator = match operator {
+        Some(o) => o,
+        None => return Ok(false),
+    };
+
+    if operator.deleted_cascade_depth.unwrap_or(0) > 0 && !force {
+        return Err(AppError::BadRequest(
+            "Operator was deleted via user cascade. Use force=true or restore the user first.".into()
+        ));
+    }
+
+    conn.execute(
+        "UPDATE operators SET deleted_at = NULL, deleted_cascade_depth = NULL WHERE id = ?1",
+        params![id],
+    )?;
+
+    Ok(true)
 }
 
 pub fn count_operators(conn: &Connection) -> Result<i64> {
@@ -457,6 +599,38 @@ pub fn create_api_key(
     user_manageable: bool,
     scopes: Option<&[CreateApiKeyScope]>,
 ) -> Result<(ApiKey, String)> {
+    // Validate all scopes BEFORE creating anything
+    if let Some(scopes) = scopes {
+        for scope in scopes {
+            // Validate that project belongs to org (if project_id is specified)
+            if let Some(ref project_id) = scope.project_id {
+                let project_org_id: Option<String> = conn
+                    .query_row(
+                        "SELECT org_id FROM projects WHERE id = ?1",
+                        params![project_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+
+                match project_org_id {
+                    None => {
+                        return Err(AppError::BadRequest(format!(
+                            "Project '{}' not found",
+                            project_id
+                        )));
+                    }
+                    Some(org_id) if org_id != scope.org_id => {
+                        return Err(AppError::BadRequest(format!(
+                            "Project '{}' does not belong to org '{}'",
+                            project_id, scope.org_id
+                        )));
+                    }
+                    _ => {} // Valid: project exists and belongs to the org
+                }
+            }
+        }
+    }
+
     let id = gen_id();
     let now = now();
     let key = generate_api_key();
@@ -470,7 +644,7 @@ pub fn create_api_key(
         params![&id, user_id, name, prefix, &key_hash, user_manageable as i32, now, expires_at],
     )?;
 
-    // Insert scopes if provided
+    // Insert scopes (already validated above)
     if let Some(scopes) = scopes {
         for scope in scopes {
             let scope_id = gen_id();
@@ -715,6 +889,8 @@ pub fn create_audit_log(
     ip_address: Option<&str>,
     user_agent: Option<&str>,
     names: &AuditLogNames,
+    auth_type: Option<&str>,
+    auth_credential: Option<&str>,
 ) -> Result<AuditLog> {
     let id = gen_id();
     let timestamp = now();
@@ -732,6 +908,7 @@ pub fn create_audit_log(
             resource_type: resource_type.to_string(),
             resource_id: resource_id.to_string(),
             resource_name: names.resource_name.clone(),
+            resource_email: names.resource_email.clone(),
             details: details.cloned(),
             org_id: org_id.map(String::from),
             org_name: names.org_name.clone(),
@@ -739,14 +916,16 @@ pub fn create_audit_log(
             project_name: names.project_name.clone(),
             ip_address: ip_address.map(String::from),
             user_agent: user_agent.map(String::from),
+            auth_type: auth_type.map(String::from),
+            auth_credential: auth_credential.map(String::from),
         });
     }
 
     let details_str = details.map(|d| d.to_string());
 
     conn.execute(
-        "INSERT INTO audit_logs (id, timestamp, actor_type, user_id, user_email, user_name, action, resource_type, resource_id, resource_name, details, org_id, org_name, project_id, project_name, ip_address, user_agent)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+        "INSERT INTO audit_logs (id, timestamp, actor_type, user_id, user_email, user_name, action, resource_type, resource_id, resource_name, resource_email, details, org_id, org_name, project_id, project_name, ip_address, user_agent, auth_type, auth_credential)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         params![
             &id,
             timestamp,
@@ -758,13 +937,16 @@ pub fn create_audit_log(
             resource_type,
             resource_id,
             &names.resource_name,
+            &names.resource_email,
             &details_str,
             org_id,
             &names.org_name,
             project_id,
             &names.project_name,
             ip_address,
-            user_agent
+            user_agent,
+            auth_type,
+            auth_credential
         ],
     )?;
 
@@ -779,6 +961,7 @@ pub fn create_audit_log(
         resource_type: resource_type.to_string(),
         resource_id: resource_id.to_string(),
         resource_name: names.resource_name.clone(),
+        resource_email: names.resource_email.clone(),
         details: details.cloned(),
         org_id: org_id.map(String::from),
         org_name: names.org_name.clone(),
@@ -786,6 +969,8 @@ pub fn create_audit_log(
         project_name: names.project_name.clone(),
         ip_address: ip_address.map(String::from),
         user_agent: user_agent.map(String::from),
+        auth_type: auth_type.map(String::from),
+        auth_credential: auth_credential.map(String::from),
     })
 }
 
@@ -833,6 +1018,14 @@ pub fn query_audit_logs(
         where_clause.push_str(" AND timestamp <= ?");
         filter_params.push(Box::new(to_ts));
     }
+    if let Some(ref auth_type) = query.auth_type {
+        where_clause.push_str(" AND auth_type = ?");
+        filter_params.push(Box::new(auth_type.clone()));
+    }
+    if let Some(ref auth_credential) = query.auth_credential {
+        where_clause.push_str(" AND auth_credential = ?");
+        filter_params.push(Box::new(auth_credential.clone()));
+    }
 
     // Get total count
     let count_sql = format!("SELECT COUNT(*) FROM audit_logs {}", where_clause);
@@ -844,7 +1037,7 @@ pub fn query_audit_logs(
     let limit = query.limit();
     let offset = query.offset();
     let select_sql = format!(
-        "SELECT id, timestamp, actor_type, user_id, user_email, user_name, action, resource_type, resource_id, resource_name, details, org_id, org_name, project_id, project_name, ip_address, user_agent
+        "SELECT id, timestamp, actor_type, user_id, user_email, user_name, action, resource_type, resource_id, resource_name, resource_email, details, org_id, org_name, project_id, project_name, ip_address, user_agent, auth_type, auth_credential
          FROM audit_logs {} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
         where_clause
     );
@@ -878,6 +1071,12 @@ pub fn query_audit_logs(
     if let Some(to_ts) = query.to_timestamp {
         select_params.push(Box::new(to_ts));
     }
+    if let Some(ref auth_type) = query.auth_type {
+        select_params.push(Box::new(auth_type.clone()));
+    }
+    if let Some(ref auth_credential) = query.auth_credential {
+        select_params.push(Box::new(auth_credential.clone()));
+    }
     select_params.push(Box::new(limit));
     select_params.push(Box::new(offset));
 
@@ -887,7 +1086,7 @@ pub fn query_audit_logs(
 
     let logs = stmt
         .query_map(select_refs.as_slice(), |row| {
-            let details_str: Option<String> = row.get(10)?;
+            let details_str: Option<String> = row.get(11)?;
             Ok(AuditLog {
                 id: row.get(0)?,
                 timestamp: row.get(1)?,
@@ -899,13 +1098,16 @@ pub fn query_audit_logs(
                 resource_type: row.get(7)?,
                 resource_id: row.get(8)?,
                 resource_name: row.get(9)?,
+                resource_email: row.get(10)?,
                 details: details_str.and_then(|s| serde_json::from_str(&s).ok()),
-                org_id: row.get(11)?,
-                org_name: row.get(12)?,
-                project_id: row.get(13)?,
-                project_name: row.get(14)?,
-                ip_address: row.get(15)?,
-                user_agent: row.get(16)?,
+                org_id: row.get(12)?,
+                org_name: row.get(13)?,
+                project_id: row.get(14)?,
+                project_name: row.get(15)?,
+                ip_address: row.get(16)?,
+                user_agent: row.get(17)?,
+                auth_type: row.get(18)?,
+                auth_credential: row.get(19)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -934,6 +1136,8 @@ pub fn create_organization(conn: &Connection, input: &CreateOrganization) -> Res
         payment_provider: None,
         created_at: now,
         updated_at: now,
+        deleted_at: None,
+        deleted_cascade_depth: None,
     })
 }
 
@@ -941,7 +1145,7 @@ pub fn get_organization_by_id(conn: &Connection, id: &str) -> Result<Option<Orga
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM organizations WHERE id = ?1",
+            "SELECT {} FROM organizations WHERE id = ?1 AND deleted_at IS NULL",
             ORGANIZATION_COLS
         ),
         &[&id],
@@ -952,7 +1156,7 @@ pub fn list_organizations(conn: &Connection) -> Result<Vec<Organization>> {
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM organizations ORDER BY created_at DESC",
+            "SELECT {} FROM organizations WHERE deleted_at IS NULL ORDER BY created_at DESC",
             ORGANIZATION_COLS
         ),
         &[],
@@ -964,15 +1168,20 @@ pub fn list_organizations_paginated(
     conn: &Connection,
     limit: i64,
     offset: i64,
+    include_deleted: bool,
 ) -> Result<(Vec<Organization>, i64)> {
-    let total: i64 =
-        conn.query_row("SELECT COUNT(*) FROM organizations", [], |row| row.get(0))?;
+    let deleted_filter = if include_deleted { "" } else { "WHERE deleted_at IS NULL" };
+    let total: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM organizations {}", deleted_filter),
+        [],
+        |row| row.get(0),
+    )?;
 
     let items = query_all(
         conn,
         &format!(
-            "SELECT {} FROM organizations ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
-            ORGANIZATION_COLS
+            "SELECT {} FROM organizations {} ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+            ORGANIZATION_COLS, deleted_filter
         ),
         params![limit, offset],
     )?;
@@ -1059,6 +1268,114 @@ pub fn delete_organization(conn: &Connection, id: &str) -> Result<bool> {
     Ok(deleted > 0)
 }
 
+/// Soft delete an organization and cascade to all children.
+/// Cascade: org_members (depth 1), projects (depth 1), products (depth 2), licenses (depth 3)
+pub fn soft_delete_organization(conn: &Connection, id: &str) -> Result<bool> {
+    let now = now();
+
+    // Soft delete the organization (depth 0)
+    let updated = conn.execute(
+        "UPDATE organizations SET deleted_at = ?1, deleted_cascade_depth = 0 WHERE id = ?2 AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+
+    if updated == 0 {
+        return Ok(false);
+    }
+
+    // Cascade to org_members (depth 1)
+    conn.execute(
+        "UPDATE org_members SET deleted_at = ?1, deleted_cascade_depth = 1 WHERE org_id = ?2 AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+
+    // Cascade to projects (depth 1)
+    conn.execute(
+        "UPDATE projects SET deleted_at = ?1, deleted_cascade_depth = 1 WHERE org_id = ?2 AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+
+    // Cascade to products (depth 2) - products belong to projects in this org
+    conn.execute(
+        "UPDATE products SET deleted_at = ?1, deleted_cascade_depth = 2
+         WHERE project_id IN (SELECT id FROM projects WHERE org_id = ?2) AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+
+    // Cascade to licenses (depth 3) - licenses belong to projects in this org
+    conn.execute(
+        "UPDATE licenses SET deleted_at = ?1, deleted_cascade_depth = 3
+         WHERE project_id IN (SELECT id FROM projects WHERE org_id = ?2) AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+
+    Ok(true)
+}
+
+/// Get a soft-deleted organization by ID (for restore operations).
+pub fn get_deleted_organization_by_id(conn: &Connection, id: &str) -> Result<Option<Organization>> {
+    query_one(
+        conn,
+        &format!(
+            "SELECT {} FROM organizations WHERE id = ?1 AND deleted_at IS NOT NULL",
+            ORGANIZATION_COLS
+        ),
+        &[&id],
+    )
+}
+
+/// Restore a soft-deleted organization and all cascaded children.
+/// Organizations are always directly deleted (depth=0), so no cascade check needed.
+pub fn restore_organization(conn: &Connection, id: &str) -> Result<bool> {
+    let org = get_deleted_organization_by_id(conn, id)?;
+    let org = match org {
+        Some(o) => o,
+        None => return Ok(false),
+    };
+
+    let deleted_at = org.deleted_at.unwrap();
+
+    // Restore in reverse order: deepest children first
+
+    // Restore licenses (depth 3) that were cascaded
+    conn.execute(
+        "UPDATE licenses SET deleted_at = NULL, deleted_cascade_depth = NULL
+         WHERE project_id IN (SELECT id FROM projects WHERE org_id = ?1)
+         AND deleted_at = ?2 AND deleted_cascade_depth > 0",
+        params![id, deleted_at],
+    )?;
+
+    // Restore products (depth 2) that were cascaded
+    conn.execute(
+        "UPDATE products SET deleted_at = NULL, deleted_cascade_depth = NULL
+         WHERE project_id IN (SELECT id FROM projects WHERE org_id = ?1)
+         AND deleted_at = ?2 AND deleted_cascade_depth > 0",
+        params![id, deleted_at],
+    )?;
+
+    // Restore projects (depth 1) that were cascaded
+    conn.execute(
+        "UPDATE projects SET deleted_at = NULL, deleted_cascade_depth = NULL
+         WHERE org_id = ?1 AND deleted_at = ?2 AND deleted_cascade_depth > 0",
+        params![id, deleted_at],
+    )?;
+
+    // Restore org_members (depth 1) that were cascaded
+    conn.execute(
+        "UPDATE org_members SET deleted_at = NULL, deleted_cascade_depth = NULL
+         WHERE org_id = ?1 AND deleted_at = ?2 AND deleted_cascade_depth > 0",
+        params![id, deleted_at],
+    )?;
+
+    // Restore the organization itself
+    conn.execute(
+        "UPDATE organizations SET deleted_at = NULL, deleted_cascade_depth = NULL WHERE id = ?1",
+        params![id],
+    )?;
+
+    Ok(true)
+}
+
 // ============ Org Members ============
 
 /// Create an org member (links a user to an org with a role).
@@ -1082,13 +1399,15 @@ pub fn create_org_member(
         org_id: org_id.to_string(),
         role: input.role,
         created_at: now,
+        deleted_at: None,
+        deleted_cascade_depth: None,
     })
 }
 
 pub fn get_org_member_by_id(conn: &Connection, id: &str) -> Result<Option<OrgMember>> {
     query_one(
         conn,
-        &format!("SELECT {} FROM org_members WHERE id = ?1", ORG_MEMBER_COLS),
+        &format!("SELECT {} FROM org_members WHERE id = ?1 AND deleted_at IS NULL", ORG_MEMBER_COLS),
         &[&id],
     )
 }
@@ -1101,7 +1420,7 @@ pub fn get_org_member_with_user_by_id(
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM org_members m JOIN users u ON m.user_id = u.id WHERE m.id = ?1",
+            "SELECT {} FROM org_members m JOIN users u ON m.user_id = u.id WHERE m.id = ?1 AND m.deleted_at IS NULL AND u.deleted_at IS NULL",
             ORG_MEMBER_WITH_USER_COLS
         ),
         &[&id],
@@ -1117,7 +1436,7 @@ pub fn get_org_member_by_user_and_org(
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM org_members WHERE user_id = ?1 AND org_id = ?2",
+            "SELECT {} FROM org_members WHERE user_id = ?1 AND org_id = ?2 AND deleted_at IS NULL",
             ORG_MEMBER_COLS
         ),
         params![user_id, org_id],
@@ -1133,7 +1452,7 @@ pub fn get_org_member_with_user_by_user_and_org(
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM org_members m JOIN users u ON m.user_id = u.id WHERE m.user_id = ?1 AND m.org_id = ?2",
+            "SELECT {} FROM org_members m JOIN users u ON m.user_id = u.id WHERE m.user_id = ?1 AND m.org_id = ?2 AND m.deleted_at IS NULL AND u.deleted_at IS NULL",
             ORG_MEMBER_WITH_USER_COLS
         ),
         params![user_id, org_id],
@@ -1145,7 +1464,7 @@ pub fn list_orgs_by_user_id(conn: &Connection, user_id: &str) -> Result<Vec<Orga
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM organizations WHERE id IN (SELECT org_id FROM org_members WHERE user_id = ?1) ORDER BY created_at DESC",
+            "SELECT {} FROM organizations WHERE deleted_at IS NULL AND id IN (SELECT org_id FROM org_members WHERE user_id = ?1 AND deleted_at IS NULL) ORDER BY created_at DESC",
             ORGANIZATION_COLS
         ),
         &[&user_id],
@@ -1159,7 +1478,7 @@ pub fn list_orgs_by_user_id_paginated(
     offset: i64,
 ) -> Result<(Vec<Organization>, i64)> {
     let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM organizations WHERE id IN (SELECT org_id FROM org_members WHERE user_id = ?1)",
+        "SELECT COUNT(*) FROM organizations WHERE deleted_at IS NULL AND id IN (SELECT org_id FROM org_members WHERE user_id = ?1 AND deleted_at IS NULL)",
         params![user_id],
         |row| row.get(0),
     )?;
@@ -1167,7 +1486,7 @@ pub fn list_orgs_by_user_id_paginated(
     let orgs = query_all(
         conn,
         &format!(
-            "SELECT {} FROM organizations WHERE id IN (SELECT org_id FROM org_members WHERE user_id = ?1) ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            "SELECT {} FROM organizations WHERE deleted_at IS NULL AND id IN (SELECT org_id FROM org_members WHERE user_id = ?1 AND deleted_at IS NULL) ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
             ORGANIZATION_COLS
         ),
         params![user_id, limit, offset],
@@ -1180,7 +1499,7 @@ pub fn list_org_members(conn: &Connection, org_id: &str) -> Result<Vec<OrgMember
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM org_members WHERE org_id = ?1 ORDER BY created_at DESC",
+            "SELECT {} FROM org_members WHERE org_id = ?1 AND deleted_at IS NULL ORDER BY created_at DESC",
             ORG_MEMBER_COLS
         ),
         &[&org_id],
@@ -1195,7 +1514,7 @@ pub fn list_org_members_with_user(
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM org_members m JOIN users u ON m.user_id = u.id WHERE m.org_id = ?1 ORDER BY m.created_at DESC",
+            "SELECT {} FROM org_members m JOIN users u ON m.user_id = u.id WHERE m.org_id = ?1 AND m.deleted_at IS NULL AND u.deleted_at IS NULL ORDER BY m.created_at DESC",
             ORG_MEMBER_WITH_USER_COLS
         ),
         &[&org_id],
@@ -1210,7 +1529,7 @@ pub fn list_org_members_paginated(
     offset: i64,
 ) -> Result<(Vec<OrgMember>, i64)> {
     let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM org_members WHERE org_id = ?1",
+        "SELECT COUNT(*) FROM org_members WHERE org_id = ?1 AND deleted_at IS NULL",
         params![org_id],
         |row| row.get(0),
     )?;
@@ -1218,7 +1537,7 @@ pub fn list_org_members_paginated(
     let items = query_all(
         conn,
         &format!(
-            "SELECT {} FROM org_members WHERE org_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            "SELECT {} FROM org_members WHERE org_id = ?1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
             ORG_MEMBER_COLS
         ),
         params![org_id, limit, offset],
@@ -1235,7 +1554,7 @@ pub fn list_org_members_with_user_paginated(
     offset: i64,
 ) -> Result<(Vec<OrgMemberWithUser>, i64)> {
     let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM org_members WHERE org_id = ?1",
+        "SELECT COUNT(*) FROM org_members WHERE org_id = ?1 AND deleted_at IS NULL",
         params![org_id],
         |row| row.get(0),
     )?;
@@ -1243,7 +1562,7 @@ pub fn list_org_members_with_user_paginated(
     let items = query_all(
         conn,
         &format!(
-            "SELECT {} FROM org_members m JOIN users u ON m.user_id = u.id WHERE m.org_id = ?1 ORDER BY m.created_at DESC LIMIT ?2 OFFSET ?3",
+            "SELECT {} FROM org_members m JOIN users u ON m.user_id = u.id WHERE m.org_id = ?1 AND m.deleted_at IS NULL AND u.deleted_at IS NULL ORDER BY m.created_at DESC LIMIT ?2 OFFSET ?3",
             ORG_MEMBER_WITH_USER_COLS
         ),
         params![org_id, limit, offset],
@@ -1262,6 +1581,48 @@ pub fn update_org_member(conn: &Connection, id: &str, input: &UpdateOrgMember) -
 pub fn delete_org_member(conn: &Connection, id: &str) -> Result<bool> {
     let deleted = conn.execute("DELETE FROM org_members WHERE id = ?1", params![id])?;
     Ok(deleted > 0)
+}
+
+/// Soft delete an org member. Project_members will become orphaned (OK - they use FK CASCADE).
+pub fn soft_delete_org_member(conn: &Connection, id: &str) -> Result<bool> {
+    let now = now();
+    let updated = conn.execute(
+        "UPDATE org_members SET deleted_at = ?1, deleted_cascade_depth = 0 WHERE id = ?2 AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+    Ok(updated > 0)
+}
+
+/// Get a soft-deleted org member by ID (for restore operations).
+pub fn get_deleted_org_member_by_id(conn: &Connection, id: &str) -> Result<Option<OrgMember>> {
+    query_one(
+        conn,
+        &format!("SELECT {} FROM org_members WHERE id = ?1 AND deleted_at IS NOT NULL", ORG_MEMBER_COLS),
+        &[&id],
+    )
+}
+
+/// Restore a soft-deleted org member.
+/// Returns Err if depth > 0 and force=false (was cascaded from org/user delete).
+pub fn restore_org_member(conn: &Connection, id: &str, force: bool) -> Result<bool> {
+    let member = get_deleted_org_member_by_id(conn, id)?;
+    let member = match member {
+        Some(m) => m,
+        None => return Ok(false),
+    };
+
+    if member.deleted_cascade_depth.unwrap_or(0) > 0 && !force {
+        return Err(AppError::BadRequest(
+            "Org member was deleted via cascade. Use force=true or restore the parent (org/user) first.".into()
+        ));
+    }
+
+    conn.execute(
+        "UPDATE org_members SET deleted_at = NULL, deleted_cascade_depth = NULL WHERE id = ?1",
+        params![id],
+    )?;
+
+    Ok(true)
 }
 
 // ============ Projects ============
@@ -1299,13 +1660,15 @@ pub fn create_project(
         email_webhook_url: input.email_webhook_url.clone(),
         created_at: now,
         updated_at: now,
+        deleted_at: None,
+        deleted_cascade_depth: None,
     })
 }
 
 pub fn get_project_by_id(conn: &Connection, id: &str) -> Result<Option<Project>> {
     query_one(
         conn,
-        &format!("SELECT {} FROM projects WHERE id = ?1", PROJECT_COLS),
+        &format!("SELECT {} FROM projects WHERE id = ?1 AND deleted_at IS NULL", PROJECT_COLS),
         &[&id],
     )
 }
@@ -1314,7 +1677,7 @@ pub fn list_projects_for_org(conn: &Connection, org_id: &str) -> Result<Vec<Proj
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM projects WHERE org_id = ?1 ORDER BY created_at DESC",
+            "SELECT {} FROM projects WHERE org_id = ?1 AND deleted_at IS NULL ORDER BY created_at DESC",
             PROJECT_COLS
         ),
         &[&org_id],
@@ -1329,7 +1692,7 @@ pub fn list_projects_for_org_paginated(
     offset: i64,
 ) -> Result<(Vec<Project>, i64)> {
     let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM projects WHERE org_id = ?1",
+        "SELECT COUNT(*) FROM projects WHERE org_id = ?1 AND deleted_at IS NULL",
         params![org_id],
         |row| row.get(0),
     )?;
@@ -1337,7 +1700,7 @@ pub fn list_projects_for_org_paginated(
     let items = query_all(
         conn,
         &format!(
-            "SELECT {} FROM projects WHERE org_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            "SELECT {} FROM projects WHERE org_id = ?1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
             PROJECT_COLS
         ),
         params![org_id, limit, offset],
@@ -1357,7 +1720,7 @@ pub fn list_accessible_projects_for_member_paginated(
 ) -> Result<(Vec<Project>, i64)> {
     let total: i64 = conn.query_row(
         "SELECT COUNT(*) FROM projects
-         WHERE org_id = ?1
+         WHERE org_id = ?1 AND deleted_at IS NULL
          AND id IN (SELECT project_id FROM project_members WHERE org_member_id = ?2)",
         params![org_id, org_member_id],
         |row| row.get(0),
@@ -1367,7 +1730,7 @@ pub fn list_accessible_projects_for_member_paginated(
         conn,
         &format!(
             "SELECT {} FROM projects
-             WHERE org_id = ?1
+             WHERE org_id = ?1 AND deleted_at IS NULL
              AND id IN (SELECT project_id FROM project_members WHERE org_member_id = ?2)
              ORDER BY created_at DESC LIMIT ?3 OFFSET ?4",
             PROJECT_COLS
@@ -1378,7 +1741,7 @@ pub fn list_accessible_projects_for_member_paginated(
     Ok((items, total))
 }
 
-/// List all projects (for migration purposes)
+/// List all projects (for migration purposes - includes soft-deleted)
 pub fn list_all_projects(conn: &Connection) -> Result<Vec<Project>> {
     query_all(
         conn,
@@ -1433,13 +1796,93 @@ pub fn delete_project(conn: &Connection, id: &str) -> Result<bool> {
     Ok(deleted > 0)
 }
 
+/// Soft delete a project and cascade to products and licenses.
+pub fn soft_delete_project(conn: &Connection, id: &str) -> Result<bool> {
+    let now = now();
+
+    // Soft delete the project (depth 0)
+    let updated = conn.execute(
+        "UPDATE projects SET deleted_at = ?1, deleted_cascade_depth = 0 WHERE id = ?2 AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+
+    if updated == 0 {
+        return Ok(false);
+    }
+
+    // Cascade to products (depth 1)
+    conn.execute(
+        "UPDATE products SET deleted_at = ?1, deleted_cascade_depth = 1 WHERE project_id = ?2 AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+
+    // Cascade to licenses (depth 2)
+    conn.execute(
+        "UPDATE licenses SET deleted_at = ?1, deleted_cascade_depth = 2 WHERE project_id = ?2 AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+
+    Ok(true)
+}
+
+/// Get a soft-deleted project by ID (for restore operations).
+pub fn get_deleted_project_by_id(conn: &Connection, id: &str) -> Result<Option<Project>> {
+    query_one(
+        conn,
+        &format!("SELECT {} FROM projects WHERE id = ?1 AND deleted_at IS NOT NULL", PROJECT_COLS),
+        &[&id],
+    )
+}
+
+/// Restore a soft-deleted project and all cascaded children.
+/// Returns Err if depth > 0 and force=false (was cascaded from org delete).
+pub fn restore_project(conn: &Connection, id: &str, force: bool) -> Result<bool> {
+    let project = get_deleted_project_by_id(conn, id)?;
+    let project = match project {
+        Some(p) => p,
+        None => return Ok(false),
+    };
+
+    if project.deleted_cascade_depth.unwrap_or(0) > 0 && !force {
+        return Err(AppError::BadRequest(
+            "Project was deleted via org cascade. Use force=true or restore the organization first.".into()
+        ));
+    }
+
+    let deleted_at = project.deleted_at.unwrap();
+
+    // Restore in reverse order: deepest children first
+
+    // Restore licenses (depth 2) that were cascaded
+    conn.execute(
+        "UPDATE licenses SET deleted_at = NULL, deleted_cascade_depth = NULL
+         WHERE project_id = ?1 AND deleted_at = ?2 AND deleted_cascade_depth > 0",
+        params![id, deleted_at],
+    )?;
+
+    // Restore products (depth 1) that were cascaded
+    conn.execute(
+        "UPDATE products SET deleted_at = NULL, deleted_cascade_depth = NULL
+         WHERE project_id = ?1 AND deleted_at = ?2 AND deleted_cascade_depth > 0",
+        params![id, deleted_at],
+    )?;
+
+    // Restore the project itself
+    conn.execute(
+        "UPDATE projects SET deleted_at = NULL, deleted_cascade_depth = NULL WHERE id = ?1",
+        params![id],
+    )?;
+
+    Ok(true)
+}
+
 /// Look up a project by its public key.
 /// Used by public endpoints to identify the project without requiring a project_id.
 pub fn get_project_by_public_key(conn: &Connection, public_key: &str) -> Result<Option<Project>> {
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM projects WHERE public_key = ?1",
+            "SELECT {} FROM projects WHERE public_key = ?1 AND deleted_at IS NULL",
             PROJECT_COLS
         ),
         &[&public_key],
@@ -1612,13 +2055,15 @@ pub fn create_product(
         device_limit: input.device_limit,
         features: input.features.clone(),
         created_at: now,
+        deleted_at: None,
+        deleted_cascade_depth: None,
     })
 }
 
 pub fn get_product_by_id(conn: &Connection, id: &str) -> Result<Option<Product>> {
     query_one(
         conn,
-        &format!("SELECT {} FROM products WHERE id = ?1", PRODUCT_COLS),
+        &format!("SELECT {} FROM products WHERE id = ?1 AND deleted_at IS NULL", PRODUCT_COLS),
         &[&id],
     )
 }
@@ -1627,7 +2072,7 @@ pub fn list_products_for_project(conn: &Connection, project_id: &str) -> Result<
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM products WHERE project_id = ?1 ORDER BY created_at DESC",
+            "SELECT {} FROM products WHERE project_id = ?1 AND deleted_at IS NULL ORDER BY created_at DESC",
             PRODUCT_COLS
         ),
         &[&project_id],
@@ -1641,7 +2086,7 @@ pub fn list_products_for_project_paginated(
     offset: i64,
 ) -> Result<(Vec<Product>, i64)> {
     let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM products WHERE project_id = ?1",
+        "SELECT COUNT(*) FROM products WHERE project_id = ?1 AND deleted_at IS NULL",
         params![project_id],
         |row| row.get(0),
     )?;
@@ -1649,7 +2094,7 @@ pub fn list_products_for_project_paginated(
     let products = query_all(
         conn,
         &format!(
-            "SELECT {} FROM products WHERE project_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            "SELECT {} FROM products WHERE project_id = ?1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
             PRODUCT_COLS
         ),
         params![project_id, limit, offset],
@@ -1680,6 +2125,71 @@ pub fn update_product(conn: &Connection, id: &str, input: &UpdateProduct) -> Res
 pub fn delete_product(conn: &Connection, id: &str) -> Result<bool> {
     let deleted = conn.execute("DELETE FROM products WHERE id = ?1", params![id])?;
     Ok(deleted > 0)
+}
+
+/// Soft delete a product and cascade to licenses.
+pub fn soft_delete_product(conn: &Connection, id: &str) -> Result<bool> {
+    let now = now();
+
+    // Soft delete the product (depth 0)
+    let updated = conn.execute(
+        "UPDATE products SET deleted_at = ?1, deleted_cascade_depth = 0 WHERE id = ?2 AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+
+    if updated == 0 {
+        return Ok(false);
+    }
+
+    // Cascade to licenses (depth 1)
+    conn.execute(
+        "UPDATE licenses SET deleted_at = ?1, deleted_cascade_depth = 1 WHERE product_id = ?2 AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+
+    Ok(true)
+}
+
+/// Get a soft-deleted product by ID (for restore operations).
+pub fn get_deleted_product_by_id(conn: &Connection, id: &str) -> Result<Option<Product>> {
+    query_one(
+        conn,
+        &format!("SELECT {} FROM products WHERE id = ?1 AND deleted_at IS NOT NULL", PRODUCT_COLS),
+        &[&id],
+    )
+}
+
+/// Restore a soft-deleted product and all cascaded licenses.
+/// Returns Err if depth > 0 and force=false (was cascaded from project/org delete).
+pub fn restore_product(conn: &Connection, id: &str, force: bool) -> Result<bool> {
+    let product = get_deleted_product_by_id(conn, id)?;
+    let product = match product {
+        Some(p) => p,
+        None => return Ok(false),
+    };
+
+    if product.deleted_cascade_depth.unwrap_or(0) > 0 && !force {
+        return Err(AppError::BadRequest(
+            "Product was deleted via cascade. Use force=true or restore the parent (project/org) first.".into()
+        ));
+    }
+
+    let deleted_at = product.deleted_at.unwrap();
+
+    // Restore licenses that were cascaded
+    conn.execute(
+        "UPDATE licenses SET deleted_at = NULL, deleted_cascade_depth = NULL
+         WHERE product_id = ?1 AND deleted_at = ?2 AND deleted_cascade_depth > 0",
+        params![id, deleted_at],
+    )?;
+
+    // Restore the product itself
+    conn.execute(
+        "UPDATE products SET deleted_at = NULL, deleted_cascade_depth = NULL WHERE id = ?1",
+        params![id],
+    )?;
+
+    Ok(true)
 }
 
 // ============ Product Payment Config ============
@@ -1943,12 +2453,23 @@ pub fn create_license(
     product_id: &str,
     input: &CreateLicense,
 ) -> Result<License> {
+    // Validate that at least one identifier is present for license recovery
+    let has_identifier = input.email_hash.is_some()
+        || input.customer_id.is_some()
+        || input.payment_provider_order_id.is_some();
+
+    if !has_identifier {
+        return Err(AppError::BadRequest(
+            "License must have at least one identifier: email, customer_id, or payment_provider_order_id".into(),
+        ));
+    }
+
     let id = gen_id();
     let now = now();
 
     conn.execute(
-        "INSERT INTO licenses (id, email_hash, project_id, product_id, customer_id, activation_count, revoked, revoked_jtis, created_at, expires_at, updates_expires_at, payment_provider, payment_provider_customer_id, payment_provider_subscription_id, payment_provider_order_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, '[]', ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        "INSERT INTO licenses (id, email_hash, project_id, product_id, customer_id, activation_count, revoked, created_at, expires_at, updates_expires_at, payment_provider, payment_provider_customer_id, payment_provider_subscription_id, payment_provider_order_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![&id, &input.email_hash, project_id, product_id, &input.customer_id, now, input.expires_at, input.updates_expires_at, &input.payment_provider, &input.payment_provider_customer_id, &input.payment_provider_subscription_id, &input.payment_provider_order_id],
     )?;
 
@@ -1960,7 +2481,6 @@ pub fn create_license(
         customer_id: input.customer_id.clone(),
         activation_count: 0,
         revoked: false,
-        revoked_jtis: vec![],
         created_at: now,
         expires_at: input.expires_at,
         updates_expires_at: input.updates_expires_at,
@@ -1968,13 +2488,15 @@ pub fn create_license(
         payment_provider_customer_id: input.payment_provider_customer_id.clone(),
         payment_provider_subscription_id: input.payment_provider_subscription_id.clone(),
         payment_provider_order_id: input.payment_provider_order_id.clone(),
+        deleted_at: None,
+        deleted_cascade_depth: None,
     })
 }
 
 pub fn get_license_by_id(conn: &Connection, id: &str) -> Result<Option<License>> {
     query_one(
         conn,
-        &format!("SELECT {} FROM licenses WHERE id = ?1", LICENSE_COLS),
+        &format!("SELECT {} FROM licenses WHERE id = ?1 AND deleted_at IS NULL", LICENSE_COLS),
         &[&id],
     )
 }
@@ -1988,7 +2510,7 @@ pub fn get_license_by_email_hash(
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM licenses WHERE project_id = ?1 AND email_hash = ?2 AND revoked = 0 AND (expires_at IS NULL OR expires_at > unixepoch())",
+            "SELECT {} FROM licenses WHERE project_id = ?1 AND email_hash = ?2 AND revoked = 0 AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > unixepoch())",
             LICENSE_COLS
         ),
         &[&project_id, &email_hash],
@@ -2005,7 +2527,7 @@ pub fn get_licenses_by_email_hash(
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM licenses WHERE project_id = ?1 AND email_hash = ?2 AND revoked = 0 AND (expires_at IS NULL OR expires_at > unixepoch()) ORDER BY created_at DESC",
+            "SELECT {} FROM licenses WHERE project_id = ?1 AND email_hash = ?2 AND revoked = 0 AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > unixepoch()) ORDER BY created_at DESC",
             LICENSE_COLS
         ),
         &[&project_id, &email_hash],
@@ -2014,6 +2536,7 @@ pub fn get_licenses_by_email_hash(
 
 /// Look up ALL licenses by email hash and project (for admin support) with pagination.
 /// Includes expired and revoked licenses so support can see full history.
+/// Note: Excludes soft-deleted licenses.
 pub fn get_all_licenses_by_email_hash_for_admin_paginated(
     conn: &Connection,
     project_id: &str,
@@ -2023,7 +2546,7 @@ pub fn get_all_licenses_by_email_hash_for_admin_paginated(
 ) -> Result<(Vec<LicenseWithProduct>, i64)> {
     // Get total count
     let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM licenses WHERE project_id = ?1 AND email_hash = ?2",
+        "SELECT COUNT(*) FROM licenses WHERE project_id = ?1 AND email_hash = ?2 AND deleted_at IS NULL",
         params![project_id, email_hash],
         |row| row.get(0),
     )?;
@@ -2032,7 +2555,7 @@ pub fn get_all_licenses_by_email_hash_for_admin_paginated(
         "SELECT l.{}, p.name
          FROM licenses l
          JOIN products p ON l.product_id = p.id
-         WHERE l.project_id = ?1 AND l.email_hash = ?2
+         WHERE l.project_id = ?1 AND l.email_hash = ?2 AND l.deleted_at IS NULL
          ORDER BY l.created_at DESC
          LIMIT ?3 OFFSET ?4",
         LICENSE_COLS.replace(", ", ", l.")
@@ -2040,7 +2563,6 @@ pub fn get_all_licenses_by_email_hash_for_admin_paginated(
 
     let rows = stmt
         .query_map(params![project_id, email_hash, limit, offset], |row| {
-            let jtis_str: String = row.get(7)?;
             Ok(LicenseWithProduct {
                 license: License {
                     id: row.get(0)?,
@@ -2050,16 +2572,17 @@ pub fn get_all_licenses_by_email_hash_for_admin_paginated(
                     customer_id: row.get(4)?,
                     activation_count: row.get(5)?,
                     revoked: row.get::<_, i32>(6)? != 0,
-                    revoked_jtis: serde_json::from_str(&jtis_str).unwrap_or_default(),
-                    created_at: row.get(8)?,
-                    expires_at: row.get(9)?,
-                    updates_expires_at: row.get(10)?,
-                    payment_provider: row.get(11)?,
-                    payment_provider_customer_id: row.get(12)?,
-                    payment_provider_subscription_id: row.get(13)?,
-                    payment_provider_order_id: row.get(14)?,
+                    created_at: row.get(7)?,
+                    expires_at: row.get(8)?,
+                    updates_expires_at: row.get(9)?,
+                    payment_provider: row.get(10)?,
+                    payment_provider_customer_id: row.get(11)?,
+                    payment_provider_subscription_id: row.get(12)?,
+                    payment_provider_order_id: row.get(13)?,
+                    deleted_at: row.get(14)?,
+                    deleted_cascade_depth: row.get(15)?,
                 },
-                product_name: row.get(15)?,
+                product_name: row.get(16)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -2075,7 +2598,7 @@ pub fn list_licenses_for_project_paginated(
 ) -> Result<(Vec<LicenseWithProduct>, i64)> {
     // Get total count
     let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM licenses WHERE project_id = ?1",
+        "SELECT COUNT(*) FROM licenses WHERE project_id = ?1 AND deleted_at IS NULL",
         params![project_id],
         |row| row.get(0),
     )?;
@@ -2084,7 +2607,7 @@ pub fn list_licenses_for_project_paginated(
         "SELECT l.{}, p.name
          FROM licenses l
          JOIN products p ON l.product_id = p.id
-         WHERE l.project_id = ?1
+         WHERE l.project_id = ?1 AND l.deleted_at IS NULL
          ORDER BY l.created_at DESC
          LIMIT ?2 OFFSET ?3",
         LICENSE_COLS.replace(", ", ", l.")
@@ -2092,7 +2615,6 @@ pub fn list_licenses_for_project_paginated(
 
     let rows = stmt
         .query_map(params![project_id, limit, offset], |row| {
-            let jtis_str: String = row.get(7)?;
             Ok(LicenseWithProduct {
                 license: License {
                     id: row.get(0)?,
@@ -2102,16 +2624,17 @@ pub fn list_licenses_for_project_paginated(
                     customer_id: row.get(4)?,
                     activation_count: row.get(5)?,
                     revoked: row.get::<_, i32>(6)? != 0,
-                    revoked_jtis: serde_json::from_str(&jtis_str).unwrap_or_default(),
-                    created_at: row.get(8)?,
-                    expires_at: row.get(9)?,
-                    updates_expires_at: row.get(10)?,
-                    payment_provider: row.get(11)?,
-                    payment_provider_customer_id: row.get(12)?,
-                    payment_provider_subscription_id: row.get(13)?,
-                    payment_provider_order_id: row.get(14)?,
+                    created_at: row.get(7)?,
+                    expires_at: row.get(8)?,
+                    updates_expires_at: row.get(9)?,
+                    payment_provider: row.get(10)?,
+                    payment_provider_customer_id: row.get(11)?,
+                    payment_provider_subscription_id: row.get(12)?,
+                    payment_provider_order_id: row.get(13)?,
+                    deleted_at: row.get(14)?,
+                    deleted_cascade_depth: row.get(15)?,
                 },
-                product_name: row.get(15)?,
+                product_name: row.get(16)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -2127,14 +2650,13 @@ pub fn list_licenses_for_project(
         "SELECT l.{}, p.name
          FROM licenses l
          JOIN products p ON l.product_id = p.id
-         WHERE l.project_id = ?1
+         WHERE l.project_id = ?1 AND l.deleted_at IS NULL
          ORDER BY l.created_at DESC",
         LICENSE_COLS.replace(", ", ", l.")
     ))?;
 
     let rows = stmt
         .query_map(params![project_id], |row| {
-            let jtis_str: String = row.get(7)?;
             Ok(LicenseWithProduct {
                 license: License {
                     id: row.get(0)?,
@@ -2144,16 +2666,17 @@ pub fn list_licenses_for_project(
                     customer_id: row.get(4)?,
                     activation_count: row.get(5)?,
                     revoked: row.get::<_, i32>(6)? != 0,
-                    revoked_jtis: serde_json::from_str(&jtis_str).unwrap_or_default(),
-                    created_at: row.get(8)?,
-                    expires_at: row.get(9)?,
-                    updates_expires_at: row.get(10)?,
-                    payment_provider: row.get(11)?,
-                    payment_provider_customer_id: row.get(12)?,
-                    payment_provider_subscription_id: row.get(13)?,
-                    payment_provider_order_id: row.get(14)?,
+                    created_at: row.get(7)?,
+                    expires_at: row.get(8)?,
+                    updates_expires_at: row.get(9)?,
+                    payment_provider: row.get(10)?,
+                    payment_provider_customer_id: row.get(11)?,
+                    payment_provider_subscription_id: row.get(12)?,
+                    payment_provider_order_id: row.get(13)?,
+                    deleted_at: row.get(14)?,
+                    deleted_cascade_depth: row.get(15)?,
                 },
-                product_name: row.get(15)?,
+                product_name: row.get(16)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -2177,23 +2700,75 @@ pub fn revoke_license(conn: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn add_revoked_jti(conn: &Connection, license_id: &str, jti: &str) -> Result<()> {
-    let license = get_license_by_id(conn, license_id)?
-        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+/// Soft delete a license. No cascade needed (devices/codes use FK CASCADE for hard delete).
+pub fn soft_delete_license(conn: &Connection, id: &str) -> Result<bool> {
+    let now = now();
+    let updated = conn.execute(
+        "UPDATE licenses SET deleted_at = ?1, deleted_cascade_depth = 0 WHERE id = ?2 AND deleted_at IS NULL",
+        params![now, id],
+    )?;
+    Ok(updated > 0)
+}
 
-    let mut jtis = license.revoked_jtis;
-    jtis.push(jti.to_string());
-    let json = serde_json::to_string(&jtis)?;
+/// Get a soft-deleted license by ID (for restore operations).
+pub fn get_deleted_license_by_id(conn: &Connection, id: &str) -> Result<Option<License>> {
+    query_one(
+        conn,
+        &format!("SELECT {} FROM licenses WHERE id = ?1 AND deleted_at IS NOT NULL", LICENSE_COLS),
+        &[&id],
+    )
+}
+
+/// Restore a soft-deleted license.
+/// Returns Err if depth > 0 and force=false (was cascaded from product/project/org delete).
+pub fn restore_license(conn: &Connection, id: &str, force: bool) -> Result<bool> {
+    let license = get_deleted_license_by_id(conn, id)?;
+    let license = match license {
+        Some(l) => l,
+        None => return Ok(false),
+    };
+
+    if license.deleted_cascade_depth.unwrap_or(0) > 0 && !force {
+        return Err(AppError::BadRequest(
+            "License was deleted via cascade. Use force=true or restore the parent (product/project/org) first.".into()
+        ));
+    }
 
     conn.execute(
-        "UPDATE licenses SET revoked_jtis = ?1 WHERE id = ?2",
-        params![json, license_id],
+        "UPDATE licenses SET deleted_at = NULL, deleted_cascade_depth = NULL WHERE id = ?1",
+        params![id],
+    )?;
+
+    Ok(true)
+}
+
+pub fn add_revoked_jti(
+    conn: &Connection,
+    license_id: &str,
+    jti: &str,
+    details: Option<&str>,
+) -> Result<()> {
+    let id = gen_id();
+    let now = now();
+    conn.execute(
+        "INSERT OR IGNORE INTO revoked_jtis (id, license_id, jti, revoked_at, details) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, license_id, jti, now, details],
     )?;
     Ok(())
 }
 
+pub fn is_jti_revoked(conn: &Connection, license_id: &str, jti: &str) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM revoked_jtis WHERE license_id = ?1 AND jti = ?2",
+        params![license_id, jti],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
 /// Look up licenses by payment provider order ID (for admin support via receipt).
 /// Includes expired and revoked licenses so support can see full history.
+/// Note: Excludes soft-deleted licenses.
 pub fn get_licenses_by_payment_order_id_paginated(
     conn: &Connection,
     project_id: &str,
@@ -2203,7 +2778,7 @@ pub fn get_licenses_by_payment_order_id_paginated(
 ) -> Result<(Vec<LicenseWithProduct>, i64)> {
     // Get total count
     let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM licenses WHERE project_id = ?1 AND payment_provider_order_id = ?2",
+        "SELECT COUNT(*) FROM licenses WHERE project_id = ?1 AND payment_provider_order_id = ?2 AND deleted_at IS NULL",
         params![project_id, payment_provider_order_id],
         |row| row.get(0),
     )?;
@@ -2212,7 +2787,7 @@ pub fn get_licenses_by_payment_order_id_paginated(
         "SELECT l.{}, p.name
          FROM licenses l
          JOIN products p ON l.product_id = p.id
-         WHERE l.project_id = ?1 AND l.payment_provider_order_id = ?2
+         WHERE l.project_id = ?1 AND l.payment_provider_order_id = ?2 AND l.deleted_at IS NULL
          ORDER BY l.created_at DESC
          LIMIT ?3 OFFSET ?4",
         LICENSE_COLS.replace(", ", ", l.")
@@ -2222,7 +2797,6 @@ pub fn get_licenses_by_payment_order_id_paginated(
         .query_map(
             params![project_id, payment_provider_order_id, limit, offset],
             |row| {
-                let jtis_str: String = row.get(7)?;
                 Ok(LicenseWithProduct {
                     license: License {
                         id: row.get(0)?,
@@ -2232,16 +2806,17 @@ pub fn get_licenses_by_payment_order_id_paginated(
                         customer_id: row.get(4)?,
                         activation_count: row.get(5)?,
                         revoked: row.get::<_, i32>(6)? != 0,
-                        revoked_jtis: serde_json::from_str(&jtis_str).unwrap_or_default(),
-                        created_at: row.get(8)?,
-                        expires_at: row.get(9)?,
-                        updates_expires_at: row.get(10)?,
-                        payment_provider: row.get(11)?,
-                        payment_provider_customer_id: row.get(12)?,
-                        payment_provider_subscription_id: row.get(13)?,
-                        payment_provider_order_id: row.get(14)?,
+                        created_at: row.get(7)?,
+                        expires_at: row.get(8)?,
+                        updates_expires_at: row.get(9)?,
+                        payment_provider: row.get(10)?,
+                        payment_provider_customer_id: row.get(11)?,
+                        payment_provider_subscription_id: row.get(12)?,
+                        payment_provider_order_id: row.get(13)?,
+                        deleted_at: row.get(14)?,
+                        deleted_cascade_depth: row.get(15)?,
                     },
-                    product_name: row.get(15)?,
+                    product_name: row.get(16)?,
                 })
             },
         )?
@@ -2259,7 +2834,7 @@ pub fn get_license_by_subscription(
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM licenses WHERE payment_provider = ?1 AND payment_provider_subscription_id = ?2",
+            "SELECT {} FROM licenses WHERE payment_provider = ?1 AND payment_provider_subscription_id = ?2 AND deleted_at IS NULL",
             LICENSE_COLS
         ),
         &[&provider, &subscription_id],
@@ -2658,4 +3233,82 @@ pub fn purge_old_public_audit_logs(conn: &Connection, retention_days: i64) -> Re
         params![cutoff],
     )?;
     Ok(deleted)
+}
+
+// ============ Soft Delete Maintenance ============
+
+/// Result of purging soft-deleted records.
+#[derive(Debug, Default)]
+pub struct PurgeResult {
+    pub users: usize,
+    pub operators: usize,
+    pub organizations: usize,
+    pub org_members: usize,
+    pub projects: usize,
+    pub products: usize,
+    pub licenses: usize,
+}
+
+impl PurgeResult {
+    pub fn total(&self) -> usize {
+        self.users + self.operators + self.organizations + self.org_members
+            + self.projects + self.products + self.licenses
+    }
+}
+
+/// Permanently delete soft-deleted records older than retention_days.
+/// Deletes in order to respect FK constraints (children first).
+/// Returns counts of deleted records per table.
+/// Called periodically when SOFT_DELETE_RETENTION_DAYS > 0.
+pub fn purge_soft_deleted_records(conn: &Connection, retention_days: i64) -> Result<PurgeResult> {
+    let cutoff = now() - (retention_days * 86400);
+    let mut result = PurgeResult::default();
+
+    // Delete in order: deepest children first to respect FK constraints
+    // Note: devices, activation_codes, revoked_jtis use FK CASCADE so they'll be deleted
+    // automatically when their parent license is deleted.
+
+    // 1. Licenses (leaf level for soft-delete)
+    result.licenses = conn.execute(
+        "DELETE FROM licenses WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+        params![cutoff],
+    )?;
+
+    // 2. Products (has licenses as children, but we deleted those above)
+    result.products = conn.execute(
+        "DELETE FROM products WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+        params![cutoff],
+    )?;
+
+    // 3. Projects (has products as children, but we deleted those above)
+    result.projects = conn.execute(
+        "DELETE FROM projects WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+        params![cutoff],
+    )?;
+
+    // 4. Org members (has project_members as children via FK CASCADE)
+    result.org_members = conn.execute(
+        "DELETE FROM org_members WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+        params![cutoff],
+    )?;
+
+    // 5. Organizations (has projects and org_members as children, but we deleted those above)
+    result.organizations = conn.execute(
+        "DELETE FROM organizations WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+        params![cutoff],
+    )?;
+
+    // 6. Operators (has api_keys via FK CASCADE)
+    result.operators = conn.execute(
+        "DELETE FROM operators WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+        params![cutoff],
+    )?;
+
+    // 7. Users (has operators and org_members as children, but we deleted those above)
+    result.users = conn.execute(
+        "DELETE FROM users WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
+        params![cutoff],
+    )?;
+
+    Ok(result)
 }

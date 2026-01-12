@@ -15,5 +15,15 @@ auth:bearer {
 }
 
 docs {
-  Delete a project and all its data (products, licenses, etc.).
+  Soft-delete a project (requires admin role).
+
+  This performs a soft delete - the project can be restored later using
+  POST /orgs/{org_id}/projects/{project_id}/restore.
+
+  This will cascade soft-delete:
+  - All products
+  - All licenses
+
+  Returns:
+  { "success": true }
 }

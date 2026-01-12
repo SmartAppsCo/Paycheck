@@ -51,6 +51,8 @@ fn test_app() -> Router {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(None, "test@example.com".to_string())),
+        jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
+        trusted_issuers: vec![],
     };
 
     Router::new()

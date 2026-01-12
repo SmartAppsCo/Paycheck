@@ -15,6 +15,14 @@ auth:bearer {
 }
 
 docs {
-  Delete a product.
-  Existing licenses remain valid until expiration.
+  Soft-delete a product (requires write access).
+
+  This performs a soft delete - the product can be restored later using
+  POST /orgs/{org_id}/projects/{project_id}/products/{product_id}/restore.
+
+  This will cascade soft-delete all associated licenses.
+  Existing license JWTs remain valid until expiration (offline validation).
+
+  Returns:
+  { "success": true }
 }

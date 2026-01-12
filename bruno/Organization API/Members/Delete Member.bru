@@ -15,6 +15,13 @@ auth:bearer {
 }
 
 docs {
-  Delete a member (requires owner role).
+  Soft-delete an org member (requires owner role).
+
+  This performs a soft delete - the member can be restored later using
+  POST /orgs/{org_id}/members/{member_id}/restore.
+
   Cannot delete yourself.
+
+  Returns:
+  { "success": true }
 }

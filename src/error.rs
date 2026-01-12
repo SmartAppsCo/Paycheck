@@ -48,6 +48,22 @@ pub enum AppError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    // JWT authentication errors
+    #[error("Untrusted issuer")]
+    UntrustedIssuer,
+
+    #[error("Missing key ID in JWT header")]
+    MissingKeyId,
+
+    #[error("Failed to fetch JWKS: {0}")]
+    JwksFetchFailed(String),
+
+    #[error("JWT validation failed: {0}")]
+    JwtValidationFailed(String),
+
+    #[error("User not found")]
+    UserNotFound,
 }
 
 #[derive(Serialize)]
@@ -130,6 +146,22 @@ impl IntoResponse for AppError {
                     None,
                 )
             }
+            AppError::UntrustedIssuer => (StatusCode::UNAUTHORIZED, "Untrusted issuer", None),
+            AppError::MissingKeyId => (StatusCode::BAD_REQUEST, "Missing key ID in JWT", None),
+            AppError::JwksFetchFailed(msg) => {
+                tracing::error!("JWKS fetch failed: {}", msg);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate token",
+                    None,
+                )
+            }
+            AppError::JwtValidationFailed(msg) => (
+                StatusCode::UNAUTHORIZED,
+                "Invalid token",
+                Some(msg.clone()),
+            ),
+            AppError::UserNotFound => (StatusCode::UNAUTHORIZED, "User not found", None),
         };
 
         let body = ErrorResponse {

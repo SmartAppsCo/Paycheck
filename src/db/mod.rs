@@ -9,8 +9,10 @@ use std::sync::Arc;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 
+use crate::config::TrustedIssuer;
 use crate::crypto::MasterKey;
 use crate::email::EmailService;
+use crate::jwt::JwksCache;
 use crate::rate_limit::ActivationRateLimiter;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
@@ -34,6 +36,10 @@ pub struct AppState {
     pub activation_rate_limiter: Arc<ActivationRateLimiter>,
     /// Email service for sending activation codes
     pub email_service: Arc<EmailService>,
+    /// Cache for JWKS from trusted issuers
+    pub jwks_cache: Arc<JwksCache>,
+    /// Trusted JWT issuers for first-party app authentication
+    pub trusted_issuers: Vec<TrustedIssuer>,
 }
 
 pub fn create_pool(database_path: &str) -> Result<DbPool, r2d2::Error> {

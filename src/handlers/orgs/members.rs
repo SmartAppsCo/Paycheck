@@ -5,7 +5,7 @@ use axum::{
 
 use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
-use crate::extractors::{Json, Path};
+use crate::extractors::{Json, Path, RestoreRequest};
 use crate::middleware::OrgMemberContext;
 use crate::models::{ActorType, AuditAction, CreateOrgMember, OrgMember, OrgMemberWithUser, UpdateOrgMember};
 use crate::pagination::{Paginated, PaginationQuery};
@@ -46,7 +46,8 @@ pub async fn create_org_member(
             }))
         }))
         .org(&org_id)
-        .names(&ctx.audit_names().resource(user.name.clone()))
+        .names(&ctx.audit_names().resource_user(&user.name, &user.email))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(member))
@@ -126,7 +127,8 @@ pub async fn update_org_member(
             }))
         }))
         .org(&path.org_id)
-        .names(&ctx.audit_names().resource(existing.name.clone()))
+        .names(&ctx.audit_names().resource_user(&existing.name, &existing.email))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     let member = queries::get_org_member_with_user_by_id(&conn, &path.member_id)?
@@ -158,7 +160,7 @@ pub async fn delete_org_member(
         return Err(AppError::NotFound("Member not found".into()));
     }
 
-    queries::delete_org_member(&conn, &path.member_id)?;
+    queries::soft_delete_org_member(&conn, &path.member_id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))
@@ -173,8 +175,58 @@ pub async fn delete_org_member(
             }))
         }))
         .org(&path.org_id)
-        .names(&ctx.audit_names().resource(existing.name.clone()))
+        .names(&ctx.audit_names().resource_user(&existing.name, &existing.email))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(serde_json::json!({ "success": true })))
+}
+
+/// Restore a soft-deleted org member
+pub async fn restore_org_member(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<OrgMemberContext>,
+    Path(path): Path<OrgMemberPath>,
+    headers: HeaderMap,
+    Json(input): Json<RestoreRequest>,
+) -> Result<Json<OrgMemberWithUser>> {
+    ctx.require_owner()?;
+
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
+
+    let existing = queries::get_deleted_org_member_by_id(&conn, &path.member_id)?
+        .ok_or_else(|| AppError::NotFound("Deleted member not found".into()))?;
+
+    if existing.org_id != path.org_id {
+        return Err(AppError::NotFound("Deleted member not found".into()));
+    }
+
+    queries::restore_org_member(&conn, &path.member_id, input.force)?;
+
+    // Get user info for audit log
+    let user = queries::get_user_by_id(&conn, &existing.user_id)?
+        .ok_or_else(|| AppError::Internal("User not found".into()))?;
+
+    AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
+        .actor(ActorType::User, Some(&ctx.member.user_id))
+        .action(AuditAction::RestoreOrgMember)
+        .resource("org_member", &path.member_id)
+        .details(&serde_json::json!({
+            "user_id": existing.user_id,
+            "force": input.force,
+            "impersonator": ctx.impersonator.as_ref().map(|i| serde_json::json!({
+                "user_id": i.user_id,
+                "email": i.email
+            }))
+        }))
+        .org(&path.org_id)
+        .names(&ctx.audit_names().resource_user(&user.name, &user.email))
+        .auth_method(&ctx.auth_method)
+        .save()?;
+
+    let member = queries::get_org_member_with_user_by_id(&conn, &path.member_id)?
+        .ok_or_else(|| AppError::Internal("Member not found after restore".into()))?;
+
+    Ok(Json(member))
 }

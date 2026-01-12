@@ -8,11 +8,14 @@ use axum::{
 };
 
 use crate::db::{queries, AppState};
+use crate::jwt::validate_first_party_token;
 use crate::models::{
     AccessLevel, AuditLogNames, OrgMemberRole, OrgMemberWithUser, OperatorRole,
     ProjectMemberRole, User,
 };
 use crate::util::extract_bearer_token;
+
+use super::AuthMethod;
 
 /// Header name for operator impersonation
 const ON_BEHALF_OF_HEADER: &str = "x-on-behalf-of";
@@ -26,6 +29,8 @@ pub struct OrgMemberContext {
     pub project_role: Option<ProjectMemberRole>,
     /// If set, this request is being made by an operator on behalf of the member
     pub impersonator: Option<ImpersonatorInfo>,
+    /// How the request was authenticated (API key or JWT)
+    pub auth_method: AuthMethod,
 }
 
 #[derive(Clone)]
@@ -186,6 +191,37 @@ fn check_api_key_scope_for_org(
     }
 }
 
+/// Authenticate user from JWT token.
+/// Returns (User, AuthMethod) if authentication succeeds.
+async fn authenticate_user_jwt(
+    state: &AppState,
+    token: &str,
+) -> Result<(User, AuthMethod), StatusCode> {
+    // Validate the JWT
+    let validated = validate_first_party_token(token, &state.trusted_issuers, &state.jwks_cache)
+        .await
+        .map_err(|e| {
+            tracing::debug!("JWT validation failed: {}", e);
+            StatusCode::UNAUTHORIZED
+        })?;
+
+    let conn = state
+        .db
+        .get()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Look up user by email
+    let user = queries::get_user_by_email(&conn, &validated.claims.email)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let auth_method = AuthMethod::Jwt {
+        issuer: validated.issuer,
+    };
+
+    Ok((user, auth_method))
+}
+
 pub async fn org_member_auth(
     State(state): State<AppState>,
     Path(params): Path<HashMap<String, String>>,
@@ -193,21 +229,37 @@ pub async fn org_member_auth(
     next: Next,
 ) -> Result<Response, StatusCode> {
     let org_id = params.get("org_id").ok_or(StatusCode::BAD_REQUEST)?;
-    let api_key = extract_bearer_token(request.headers()).ok_or(StatusCode::UNAUTHORIZED)?;
+    let token = extract_bearer_token(request.headers()).ok_or(StatusCode::UNAUTHORIZED)?;
     let on_behalf_of = request
         .headers()
         .get(ON_BEHALF_OF_HEADER)
         .and_then(|v| v.to_str().ok());
 
+    // Authenticate user - either via JWT or API key
+    let (user, auth_method, api_key_record) = if token.starts_with("eyJ") {
+        // JWT authentication
+        let (user, auth_method) = authenticate_user_jwt(&state, token).await?;
+        (user, auth_method, None)
+    } else {
+        // API key authentication
+        let conn = state
+            .db
+            .get()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let (user, api_key_record) = queries::get_user_by_api_key(&conn, token)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .ok_or(StatusCode::UNAUTHORIZED)?;
+        let auth_method = AuthMethod::ApiKey {
+            key_id: api_key_record.id.clone(),
+            key_prefix: api_key_record.prefix.clone(),
+        };
+        (user, auth_method, Some(api_key_record))
+    };
+
     let conn = state
         .db
         .get()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    // Get user by API key (returns (User, ApiKey) tuple)
-    let (user, _api_key) = queries::get_user_by_api_key(&conn, api_key)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Try operator impersonation first
     if let Some((member, impersonator)) =
@@ -218,12 +270,15 @@ pub async fn org_member_auth(
             user,
             project_role: None,
             impersonator: Some(impersonator),
+            auth_method,
         });
         return Ok(next.run(request).await);
     }
 
-    // Check API key scopes (if any)
-    check_api_key_scope_for_org(&state, api_key, org_id, false)?;
+    // Check API key scopes (if any) - only for API key auth
+    if api_key_record.is_some() {
+        check_api_key_scope_for_org(&state, token, org_id, false)?;
+    }
 
     // Try normal org member authentication first
     let member = queries::get_org_member_with_user_by_user_and_org(&conn, &user.id, org_id)
@@ -236,6 +291,7 @@ pub async fn org_member_auth(
             user,
             project_role: None,
             impersonator: None,
+            auth_method,
         });
         return Ok(next.run(request).await);
     }
@@ -255,12 +311,15 @@ pub async fn org_member_auth(
                 org_id: org_id.to_string(),
                 role: OrgMemberRole::Owner, // Operators get owner-level access
                 created_at: operator.created_at,
+                deleted_at: None,
+                deleted_cascade_depth: None,
             };
             request.extensions_mut().insert(OrgMemberContext {
                 member: synthetic_member,
                 user,
                 project_role: None,
                 impersonator: None,
+                auth_method,
             });
             return Ok(next.run(request).await);
         }
@@ -286,21 +345,37 @@ pub async fn org_member_project_auth(
 ) -> Result<Response, StatusCode> {
     let org_id = params.get("org_id").ok_or(StatusCode::BAD_REQUEST)?;
     let project_id = params.get("project_id").ok_or(StatusCode::BAD_REQUEST)?;
-    let api_key = extract_bearer_token(request.headers()).ok_or(StatusCode::UNAUTHORIZED)?;
+    let token = extract_bearer_token(request.headers()).ok_or(StatusCode::UNAUTHORIZED)?;
     let on_behalf_of = request
         .headers()
         .get(ON_BEHALF_OF_HEADER)
         .and_then(|v| v.to_str().ok());
 
+    // Authenticate user - either via JWT or API key
+    let (user, auth_method, is_api_key) = if token.starts_with("eyJ") {
+        // JWT authentication
+        let (user, auth_method) = authenticate_user_jwt(&state, token).await?;
+        (user, auth_method, false)
+    } else {
+        // API key authentication
+        let conn = state
+            .db
+            .get()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let (user, api_key_record) = queries::get_user_by_api_key(&conn, token)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .ok_or(StatusCode::UNAUTHORIZED)?;
+        let auth_method = AuthMethod::ApiKey {
+            key_id: api_key_record.id,
+            key_prefix: api_key_record.prefix,
+        };
+        (user, auth_method, true)
+    };
+
     let conn = state
         .db
         .get()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    // Get user by API key (returns (User, ApiKey) tuple)
-    let (user, _api_key) = queries::get_user_by_api_key(&conn, api_key)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Try operator impersonation first
     let (member, impersonator) =
@@ -309,8 +384,10 @@ pub async fn org_member_project_auth(
         {
             (member, Some(impersonator))
         } else {
-            // Check API key scopes (if any)
-            check_api_key_scope_for_org(&state, api_key, org_id, false)?;
+            // Check API key scopes (if any) - only for API key auth
+            if is_api_key {
+                check_api_key_scope_for_org(&state, token, org_id, false)?;
+            }
 
             // Try normal org member authentication
             let member =
@@ -335,6 +412,8 @@ pub async fn org_member_project_auth(
                             org_id: org_id.to_string(),
                             role: OrgMemberRole::Owner,
                             created_at: operator.created_at,
+                            deleted_at: None,
+                            deleted_cascade_depth: None,
                         };
                         (synthetic_member, None)
                     } else {
@@ -375,6 +454,7 @@ pub async fn org_member_project_auth(
         user,
         project_role,
         impersonator,
+        auth_method,
     });
 
     Ok(next.run(request).await)

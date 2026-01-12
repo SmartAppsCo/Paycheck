@@ -10,10 +10,25 @@ get {
   auth: bearer
 }
 
+params:query {
+  ~limit: 50
+  ~offset: 0
+  ~user_id:
+  ~include_deleted: false
+}
+
 auth:bearer {
   token: {{operator_api_key}}
 }
 
 docs {
-  List all organizations.
+  List all organizations (requires admin+ operator role).
+
+  Query parameters:
+  - limit: Max items to return (default: 50, max: 100)
+  - offset: Items to skip (default: 0)
+  - user_id: Filter by user ID (returns orgs where user is a member)
+  - include_deleted: Include soft-deleted organizations (default: false)
+
+  Returns paginated list of organizations.
 }

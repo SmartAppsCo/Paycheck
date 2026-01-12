@@ -1,0 +1,35 @@
+meta {
+  name: Restore Product
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/products/{{product_id}}/restore
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_member_api_key}}
+}
+
+body:json {
+  {
+    "force": false
+  }
+}
+
+docs {
+  Restore a soft-deleted product (requires write access).
+
+  This will restore the product and all cascade-deleted licenses.
+  Only licenses deleted at the same time as the product will be restored.
+
+  Body params:
+  - force (optional, default false): If true, restore even if the product
+    was cascade-deleted (e.g., deleted when the project was deleted).
+    Without force, cascade-deleted items return an error.
+
+  Returns the restored ProductWithPaymentConfig object.
+}

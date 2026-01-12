@@ -49,6 +49,8 @@ fn operator_app() -> (Router, AppState) {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(None, "test@example.com".to_string())),
+        jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
+        trusted_issuers: vec![],
     };
 
     let app = handlers::operators::router(state.clone()).with_state(state.clone());
@@ -1061,7 +1063,7 @@ mod audit_log_tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/operators/audit-logs?action=create_organization")
+                    .uri("/operators/audit-logs?action=create_org")
                     .header("Authorization", format!("Bearer {}", api_key))
                     .body(Body::empty())
                     .unwrap(),
@@ -1170,10 +1172,10 @@ mod audit_log_tests {
             .unwrap();
         let text = String::from_utf8(body.to_vec()).unwrap();
 
-        // Should have at least one line with create_organization action
+        // Should have at least one line with create_org action
         assert!(!text.is_empty(), "Should have audit log content");
         assert!(
-            text.contains("created organization"),
+            text.contains("created org"),
             "Should contain the org creation action"
         );
         assert!(text.contains("Operator"), "Should contain actor type");
@@ -1195,7 +1197,7 @@ mod audit_log_tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/operators/audit-logs/text?action=create_organization&limit=5")
+                    .uri("/operators/audit-logs/text?action=create_org&limit=5")
                     .header("Authorization", format!("Bearer {}", api_key))
                     .body(Body::empty())
                     .unwrap(),

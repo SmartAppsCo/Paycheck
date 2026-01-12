@@ -1,0 +1,31 @@
+meta {
+  name: Restore Organization
+  type: http
+  seq: 27
+}
+
+post {
+  url: {{base_url}}/operators/organizations/{{org_id}}/restore
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+docs {
+  Restore a soft-deleted organization (requires admin+ operator role).
+
+  This will restore the organization and all cascade-deleted children:
+  - Org members
+  - Projects
+  - Products
+  - Licenses
+
+  Only items that were deleted at the same time (same deleted_at timestamp)
+  as the organization will be restored. Items deleted separately before
+  the organization was deleted will remain deleted.
+
+  Returns the restored Organization object.
+}

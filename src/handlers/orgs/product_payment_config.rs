@@ -65,6 +65,7 @@ pub async fn create_payment_config(
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(product.name.clone()))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(config))
@@ -153,6 +154,7 @@ pub async fn update_payment_config_handler(
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(product.name.clone()))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     let config = queries::get_payment_config_by_id(&conn, &path.config_id)?
@@ -200,6 +202,7 @@ pub async fn delete_payment_config_handler(
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(product.name.clone()))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(serde_json::json!({ "success": true })))

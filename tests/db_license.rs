@@ -27,7 +27,64 @@ fn test_create_license() {
     assert_eq!(license.project_id, project.id);
     assert_eq!(license.activation_count, 0);
     assert!(!license.revoked);
-    assert!(license.revoked_jtis.is_empty());
+}
+
+#[test]
+fn test_create_license_without_identifier_fails() {
+    let conn = setup_test_db();
+    let master_key = test_master_key();
+    let org = create_test_org(&conn, "Test Org");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
+    let product = create_test_product(&conn, &project.id, "Pro", "pro");
+
+    // Try to create a license with no identifier
+    let input = CreateLicense {
+        email_hash: None,
+        customer_id: None,
+        expires_at: None,
+        updates_expires_at: None,
+        payment_provider: None,
+        payment_provider_customer_id: None,
+        payment_provider_subscription_id: None,
+        payment_provider_order_id: None,
+    };
+
+    let result = queries::create_license(&conn, &project.id, &product.id, &input);
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("at least one identifier"),
+        "Expected 'at least one identifier' error, got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_create_license_with_only_order_id_succeeds() {
+    let conn = setup_test_db();
+    let master_key = test_master_key();
+    let org = create_test_org(&conn, "Test Org");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
+    let product = create_test_product(&conn, &project.id, "Pro", "pro");
+
+    // Create a license with only payment_provider_order_id (simulates webhook without email)
+    let input = CreateLicense {
+        email_hash: None,
+        customer_id: None,
+        expires_at: None,
+        updates_expires_at: None,
+        payment_provider: Some("stripe".to_string()),
+        payment_provider_customer_id: None,
+        payment_provider_subscription_id: None,
+        payment_provider_order_id: Some("cs_test_123".to_string()),
+    };
+
+    let license = queries::create_license(&conn, &project.id, &product.id, &input)
+        .expect("Should succeed with order_id as identifier");
+
+    assert!(license.email_hash.is_none());
+    assert_eq!(license.payment_provider_order_id, Some("cs_test_123".to_string()));
 }
 
 #[test]
@@ -278,18 +335,19 @@ fn test_add_revoked_jti() {
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, None);
 
-    assert!(license.revoked_jtis.is_empty());
+    // Initially no JTIs are revoked
+    assert!(!queries::is_jti_revoked(&conn, &license.id, "jti_1").unwrap());
+    assert!(!queries::is_jti_revoked(&conn, &license.id, "jti_2").unwrap());
 
-    queries::add_revoked_jti(&conn, &license.id, "jti_1").expect("Add JTI failed");
-    queries::add_revoked_jti(&conn, &license.id, "jti_2").expect("Add JTI failed");
+    queries::add_revoked_jti(&conn, &license.id, "jti_1", Some("test revocation")).expect("Add JTI failed");
+    queries::add_revoked_jti(&conn, &license.id, "jti_2", None).expect("Add JTI failed");
 
-    let updated = queries::get_license_by_id(&conn, &license.id)
-        .expect("Query failed")
-        .expect("License not found");
+    // Now both should be revoked
+    assert!(queries::is_jti_revoked(&conn, &license.id, "jti_1").unwrap());
+    assert!(queries::is_jti_revoked(&conn, &license.id, "jti_2").unwrap());
 
-    assert_eq!(updated.revoked_jtis.len(), 2);
-    assert!(updated.revoked_jtis.contains(&"jti_1".to_string()));
-    assert!(updated.revoked_jtis.contains(&"jti_2".to_string()));
+    // Adding same JTI again should be idempotent (INSERT OR IGNORE)
+    queries::add_revoked_jti(&conn, &license.id, "jti_1", None).expect("Add duplicate JTI should not fail");
 }
 
 #[test]

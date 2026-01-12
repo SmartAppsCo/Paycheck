@@ -1,0 +1,32 @@
+meta {
+  name: Restore Member
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base_url}}/orgs/{{org_id}}/members/{{member_id}}/restore
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_member_api_key}}
+}
+
+body:json {
+  {
+    "force": false
+  }
+}
+
+docs {
+  Restore a soft-deleted org member (requires owner role).
+
+  Body params:
+  - force (optional, default false): If true, restore even if the member
+    was cascade-deleted (e.g., deleted when the organization was deleted).
+    Without force, cascade-deleted items return an error.
+
+  Returns the restored OrgMemberWithUser object.
+}

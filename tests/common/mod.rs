@@ -17,7 +17,7 @@ pub use paycheck::handlers::public::{
     deactivate_device, get_license_info, initiate_buy, payment_callback,
     redeem_with_code, request_activation_code, validate_license,
 };
-pub use paycheck::jwt;
+pub use paycheck::jwt::{self, JwksCache};
 pub use paycheck::models::*;
 pub use paycheck::rate_limit::ActivationRateLimiter;
 
@@ -245,6 +245,8 @@ pub fn create_test_app_state() -> AppState {
         success_page_url: "http://localhost:3000/success".to_string(),
         activation_rate_limiter: Arc::new(ActivationRateLimiter::default()),
         email_service: Arc::new(EmailService::new(None, "test@example.com".to_string())),
+        jwks_cache: Arc::new(JwksCache::new()),
+        trusted_issuers: vec![],
     }
 }
 

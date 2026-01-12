@@ -56,6 +56,8 @@ fn operator_app() -> (Router, AppState) {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(None, "test@example.com".to_string())),
+        jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
+        trusted_issuers: vec![],
     };
 
     let app = handlers::operators::router(state.clone()).with_state(state.clone());
@@ -92,6 +94,8 @@ fn org_app() -> (Router, AppState) {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(None, "test@example.com".to_string())),
+        jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
+        trusted_issuers: vec![],
     };
 
     let app = handlers::orgs::router(state.clone(), paycheck::config::RateLimitConfig::disabled()).with_state(state.clone());
@@ -1811,6 +1815,8 @@ mod org_audit_log_isolation {
                 paycheck::rate_limit::ActivationRateLimiter::default(),
             ),
             email_service: std::sync::Arc::new(paycheck::email::EmailService::new(None, "test@example.com".to_string())),
+            jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
+            trusted_issuers: vec![],
         };
 
         let app = handlers::orgs::router(state.clone(), paycheck::config::RateLimitConfig::disabled()).with_state(state.clone());
@@ -1903,6 +1909,8 @@ mod org_audit_log_isolation {
             None,
             None,
             &AuditLogNames::default(),
+            None, // auth_type
+            None, // auth_credential
         )
         .unwrap();
 
@@ -1920,6 +1928,8 @@ mod org_audit_log_isolation {
             None,
             None,
             &AuditLogNames::default(),
+            None, // auth_type
+            None, // auth_credential
         )
         .unwrap();
 
@@ -1978,6 +1988,8 @@ mod org_audit_log_isolation {
             None,
             None,
             &AuditLogNames::default(),
+            None, // auth_type
+            None, // auth_credential
         )
         .unwrap();
 
@@ -1995,6 +2007,8 @@ mod org_audit_log_isolation {
             None,
             None,
             &AuditLogNames::default(),
+            None, // auth_type
+            None, // auth_credential
         )
         .unwrap();
 

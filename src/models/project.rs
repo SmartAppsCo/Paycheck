@@ -38,6 +38,12 @@ pub struct Project {
     pub email_webhook_url: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Soft delete timestamp (None = active, Some = deleted at this time)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<i64>,
+    /// Cascade depth (0 = directly deleted, >0 = cascaded from parent)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_cascade_depth: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -53,6 +59,12 @@ pub struct ProjectPublic {
     pub email_webhook_url: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Soft delete timestamp (None = active, Some = deleted at this time)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<i64>,
+    /// Cascade depth (0 = directly deleted, >0 = cascaded from parent)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_cascade_depth: Option<i32>,
 }
 
 impl From<Project> for ProjectPublic {
@@ -69,6 +81,8 @@ impl From<Project> for ProjectPublic {
             email_webhook_url: p.email_webhook_url,
             created_at: p.created_at,
             updated_at: p.updated_at,
+            deleted_at: p.deleted_at,
+            deleted_cascade_depth: p.deleted_cascade_depth,
         }
     }
 }

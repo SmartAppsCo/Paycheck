@@ -12,7 +12,6 @@ pub struct License {
     pub customer_id: Option<String>,
     pub activation_count: i32,
     pub revoked: bool,
-    pub revoked_jtis: Vec<String>,
     pub created_at: i64,
     pub expires_at: Option<i64>,
     pub updates_expires_at: Option<i64>,
@@ -20,6 +19,12 @@ pub struct License {
     pub payment_provider_customer_id: Option<String>,
     pub payment_provider_subscription_id: Option<String>,
     pub payment_provider_order_id: Option<String>,
+    /// Soft delete timestamp (None = active, Some = deleted at this time)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<i64>,
+    /// Cascade depth (0 = directly deleted, >0 = cascaded from parent)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_cascade_depth: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,4 +62,13 @@ pub struct ActivationCode {
     pub expires_at: i64,
     pub used: bool,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RevokedJti {
+    pub id: String,
+    pub license_id: String,
+    pub jti: String,
+    pub revoked_at: i64,
+    pub details: Option<String>,
 }

@@ -38,7 +38,8 @@ pub async fn create_operator(
             "email": user.email,
             "role": input.role
         }))
-        .names(&ctx.audit_names().resource(user.name.clone()))
+        .names(&ctx.audit_names().resource_user(&user.name, &user.email))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(operator))
@@ -92,7 +93,8 @@ pub async fn update_operator(
         .action(AuditAction::UpdateOperator)
         .resource("operator", &id)
         .details(&serde_json::json!({ "role": input.role }))
-        .names(&ctx.audit_names().resource(existing.name.clone()))
+        .names(&ctx.audit_names().resource_user(&existing.name, &existing.email))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     let operator = queries::get_operator_with_user_by_id(&conn, &id)?
@@ -118,7 +120,7 @@ pub async fn delete_operator(
     let existing = queries::get_operator_with_user_by_id(&conn, &id)?
         .ok_or_else(|| AppError::NotFound("Operator not found".into()))?;
 
-    queries::delete_operator(&conn, &id)?;
+    queries::soft_delete_operator(&conn, &id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.user.id))
@@ -128,7 +130,8 @@ pub async fn delete_operator(
             "user_id": existing.user_id,
             "email": existing.email
         }))
-        .names(&ctx.audit_names().resource(existing.name.clone()))
+        .names(&ctx.audit_names().resource_user(&existing.name, &existing.email))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(serde_json::json!({ "success": true })))

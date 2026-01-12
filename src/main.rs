@@ -11,7 +11,7 @@ use paycheck::crypto::MasterKey;
 use paycheck::db::{AppState, create_pool, init_audit_db, init_db, queries};
 use paycheck::email::EmailService;
 use paycheck::handlers;
-use paycheck::jwt;
+use paycheck::jwt::{self, JwksCache};
 use paycheck::models::{
     self, ActorType, AuditAction, AuditLogNames, CreateOperator, CreateOrgMember, CreatePaymentConfig, CreateProduct,
     CreateProject, CreateUser, OperatorRole, OrgMemberRole,
@@ -101,6 +101,8 @@ fn bootstrap_first_operator(state: &AppState, email: &str) {
         None,
         None,
         &AuditLogNames::default().resource(user.name.clone()),
+        None, // auth_type (system action)
+        None, // auth_credential
     )
     .expect("Failed to create audit log for bootstrap");
 
@@ -170,7 +172,9 @@ fn seed_dev_data(state: &AppState) {
         None,
         None,
         None,
-        &AuditLogNames::default().resource(operator_user.name.clone()),
+        &AuditLogNames::default().resource_user(&operator_user.name, &operator_user.email),
+        None, // auth_type (system action)
+        None, // auth_credential
     )
     .expect("Failed to create audit log");
 
@@ -189,8 +193,8 @@ fn seed_dev_data(state: &AppState) {
         state.audit_log_enabled,
         ActorType::System,
         None, // user_id
-        AuditAction::SeedOrganization.as_ref(),
-        "organization",
+        AuditAction::SeedOrg.as_ref(),
+        "org",
         &org.id,
         None,
         None,
@@ -198,6 +202,8 @@ fn seed_dev_data(state: &AppState) {
         None,
         None,
         &AuditLogNames::default().resource(org.name.clone()),
+        None, // auth_type (system action)
+        None, // auth_credential
     )
     .expect("Failed to create audit log");
 
@@ -240,8 +246,10 @@ fn seed_dev_data(state: &AppState) {
         None,
         None,
         &AuditLogNames::default()
-            .resource(member_user.name.clone())
+            .resource_user(&member_user.name, &member_user.email)
             .org(org.name.clone()),
+        None, // auth_type (system action)
+        None, // auth_credential
     )
     .expect("Failed to create audit log");
 
@@ -282,6 +290,8 @@ fn seed_dev_data(state: &AppState) {
             .resource(project.name.clone())
             .org(org.name.clone())
             .project(project.name.clone()),
+        None, // auth_type (system action)
+        None, // auth_credential
     )
     .expect("Failed to create audit log");
 
@@ -319,6 +329,8 @@ fn seed_dev_data(state: &AppState) {
             .resource(product.name.clone())
             .org(org.name.clone())
             .project(project.name.clone()),
+        None, // auth_type (system action)
+        None, // auth_credential
     )
     .expect("Failed to create audit log");
 
@@ -678,6 +690,17 @@ async fn main() {
         config.default_from_email.clone(),
     );
 
+    // Initialize JWKS cache for first-party JWT authentication
+    let jwks_cache = Arc::new(JwksCache::new());
+
+    // Log trusted issuers if any are configured
+    if !config.trusted_issuers.is_empty() {
+        tracing::info!(
+            "Trusted JWT issuers configured: {:?}",
+            config.trusted_issuers.iter().map(|i| &i.issuer).collect::<Vec<_>>()
+        );
+    }
+
     let state = AppState {
         db: db_pool,
         audit: audit_pool,
@@ -687,6 +710,8 @@ async fn main() {
         success_page_url: config.success_page_url.clone(),
         activation_rate_limiter: Arc::new(ActivationRateLimiter::default()),
         email_service: Arc::new(email_service),
+        jwks_cache,
+        trusted_issuers: config.trusted_issuers.clone(),
     };
 
     // Purge old public audit logs on startup (0 = never purge)
@@ -707,6 +732,35 @@ async fn main() {
             Ok(_) => {}
             Err(e) => {
                 tracing::warn!("Failed to purge old public audit logs: {}", e);
+            }
+        }
+    }
+
+    // Purge soft-deleted records on startup (0 = never auto-purge)
+    // Records can still be manually hard-deleted via operator API.
+    if config.soft_delete_retention_days > 0 {
+        let conn = state
+            .db
+            .get()
+            .expect("Failed to get db connection for soft delete purge");
+        match queries::purge_soft_deleted_records(&conn, config.soft_delete_retention_days) {
+            Ok(result) if result.total() > 0 => {
+                tracing::info!(
+                    "Purged {} soft-deleted records older than {} days (users: {}, operators: {}, orgs: {}, members: {}, projects: {}, products: {}, licenses: {})",
+                    result.total(),
+                    config.soft_delete_retention_days,
+                    result.users,
+                    result.operators,
+                    result.organizations,
+                    result.org_members,
+                    result.projects,
+                    result.products,
+                    result.licenses
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("Failed to purge soft-deleted records: {}", e);
             }
         }
     }

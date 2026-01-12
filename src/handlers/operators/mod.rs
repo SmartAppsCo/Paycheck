@@ -40,12 +40,28 @@ pub fn router(state: AppState) -> Router<AppState> {
                 .route("/operators/users/{user_id}", get(users::get_user))
                 .route("/operators/users/{user_id}", put(users::update_user))
                 .route("/operators/users/{user_id}", delete(users::delete_user))
+                .route(
+                    "/operators/users/{user_id}/restore",
+                    post(users::restore_user),
+                )
+                .route(
+                    "/operators/users/{user_id}/hard-delete",
+                    post(users::hard_delete_user),
+                )
                 // Organization management (admin+)
                 .route("/operators/organizations", post(create_organization))
                 .route("/operators/organizations", get(list_organizations))
                 .route("/operators/organizations/{org_id}", get(get_organization))
                 .route("/operators/organizations/{org_id}", put(update_organization))
                 .route("/operators/organizations/{org_id}", delete(delete_organization))
+                .route(
+                    "/operators/organizations/{org_id}/restore",
+                    post(restore_organization),
+                )
+                .route(
+                    "/operators/organizations/{org_id}/hard-delete",
+                    post(hard_delete_organization),
+                )
                 // Support endpoints (admin+)
                 .route(
                     "/operators/organizations/{org_id}/payment-config",

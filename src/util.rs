@@ -83,8 +83,8 @@ pub fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
 /// ```ignore
 /// AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
 ///     .actor(ActorType::User, Some(&user_id))
-///     .action(AuditAction::CreateOrganization)
-///     .resource("organization", &org.id)
+///     .action(AuditAction::CreateOrg)
+///     .resource("org", &org.id)
 ///     .details(&serde_json::json!({ "name": org.name }))
 ///     .names(&ctx.audit_names().resource(org.name.clone()))
 ///     .save()?;
@@ -102,6 +102,8 @@ pub struct AuditLogBuilder<'a> {
     org_id: Option<&'a str>,
     project_id: Option<&'a str>,
     names: AuditLogNames,
+    auth_type: Option<&'a str>,
+    auth_credential: Option<&'a str>,
 }
 
 impl<'a> AuditLogBuilder<'a> {
@@ -120,6 +122,8 @@ impl<'a> AuditLogBuilder<'a> {
             org_id: None,
             project_id: None,
             names: AuditLogNames::default(),
+            auth_type: None,
+            auth_credential: None,
         }
     }
 
@@ -167,6 +171,19 @@ impl<'a> AuditLogBuilder<'a> {
         self
     }
 
+    /// Set the authentication method used for this request.
+    pub fn auth(mut self, auth_type: &'a str, auth_credential: &'a str) -> Self {
+        self.auth_type = Some(auth_type);
+        self.auth_credential = Some(auth_credential);
+        self
+    }
+
+    /// Set authentication from an AuthMethod enum.
+    /// Stores auth_type ("api_key" or "jwt") and auth_credential (key prefix or issuer).
+    pub fn auth_method(self, method: &'a crate::middleware::AuthMethod) -> Self {
+        self.auth(method.auth_type(), method.auth_credential())
+    }
+
     /// Save the audit log entry to the database.
     pub fn save(self) -> Result<AuditLog> {
         let (ip, ua) = extract_request_info(self.headers);
@@ -184,6 +201,8 @@ impl<'a> AuditLogBuilder<'a> {
             ip.as_deref(),
             ua.as_deref(),
             &self.names,
+            self.auth_type,
+            self.auth_credential,
         )
     }
 }

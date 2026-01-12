@@ -15,15 +15,22 @@ auth:bearer {
 }
 
 docs {
-  Delete a user (requires admin+ operator role).
+  Soft-delete a user (requires admin+ operator role).
 
-  This will cascade delete:
+  This performs a soft delete - the user can be restored later using
+  POST /operators/users/{user_id}/restore.
+
+  This will cascade soft-delete:
   - Their operator record (if any)
   - All org memberships
-  - All API keys
+
+  API keys are NOT soft-deleted (they remain valid until explicitly revoked
+  or the user is hard-deleted).
 
   You cannot delete yourself.
 
+  For permanent deletion (GDPR), use POST /operators/users/{user_id}/hard-delete.
+
   Returns:
-  { "deleted": true }
+  { "success": true }
 }

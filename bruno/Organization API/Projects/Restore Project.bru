@@ -1,0 +1,38 @@
+meta {
+  name: Restore Project
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/restore
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_member_api_key}}
+}
+
+body:json {
+  {
+    "force": false
+  }
+}
+
+docs {
+  Restore a soft-deleted project (requires admin role).
+
+  This will restore the project and all cascade-deleted children:
+  - Products
+  - Licenses
+
+  Only items deleted at the same time as the project will be restored.
+
+  Body params:
+  - force (optional, default false): If true, restore even if the project
+    was cascade-deleted (e.g., deleted when the organization was deleted).
+    Without force, cascade-deleted items return an error.
+
+  Returns the restored Project object.
+}

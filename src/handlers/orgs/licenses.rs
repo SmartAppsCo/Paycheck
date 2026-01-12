@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::{AppState, queries};
 use crate::error::{AppError, Result};
-use crate::extractors::{Json, Path};
+use crate::extractors::{Json, Path, RestoreRequest};
 use crate::middleware::OrgMemberContext;
 use crate::models::{ActorType, AuditAction, CreateLicense, Device, LicenseWithProduct};
 use crate::pagination::Paginated;
@@ -234,6 +234,7 @@ pub async fn create_license(
             .org(&path.org_id)
             .project(&path.project_id)
             .names(&ctx.audit_names().project(project.name.clone()))
+            .auth_method(&ctx.auth_method)
             .save()?;
     }
 
@@ -313,6 +314,7 @@ pub async fn update_license(
             .org(&path.org_id)
             .project(&path.project_id)
             .names(&ctx.audit_names().project(project.name.clone()))
+            .auth_method(&ctx.auth_method)
             .save()?;
 
         tracing::info!(
@@ -509,7 +511,8 @@ pub async fn deactivate_device_admin(
         .ok_or_else(|| AppError::NotFound("Device not found".into()))?;
 
     // Add the device's JTI to revoked list so the token can't be used anymore
-    queries::add_revoked_jti(&conn, &license.id, &device.jti)?;
+    let details = format!("admin remote deactivation by user {}", ctx.member.user_id);
+    queries::add_revoked_jti(&conn, &license.id, &device.jti, Some(&details))?;
 
     // Delete the device record
     queries::delete_device(&conn, &device.id)?;
@@ -526,6 +529,7 @@ pub async fn deactivate_device_admin(
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(device.name.clone()))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     tracing::info!(
@@ -539,5 +543,60 @@ pub async fn deactivate_device_admin(
         deactivated: true,
         device_id: path.device_id,
         remaining_devices: remaining,
+    }))
+}
+
+/// Restore a soft-deleted license
+pub async fn restore_license(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<OrgMemberContext>,
+    Path(path): Path<LicensePath>,
+    headers: HeaderMap,
+    Json(input): Json<RestoreRequest>,
+) -> Result<Json<LicenseWithDevices>> {
+    if !ctx.can_write_project() {
+        return Err(AppError::Forbidden("Insufficient permissions".into()));
+    }
+
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
+
+    let existing = queries::get_deleted_license_by_id(&conn, &path.license_id)?
+        .ok_or_else(|| AppError::NotFound("Deleted license not found".into()))?;
+
+    // Verify it belongs to a product in this project
+    let product = queries::get_product_by_id(&conn, &existing.product_id)?
+        .ok_or_else(|| AppError::NotFound("Deleted license not found (product not found)".into()))?;
+
+    if product.project_id != path.project_id {
+        return Err(AppError::NotFound("Deleted license not found".into()));
+    }
+
+    queries::restore_license(&conn, &path.license_id, input.force)?;
+
+    // Build LicenseWithDevices response
+    let license = queries::get_license_by_id(&conn, &path.license_id)?
+        .ok_or_else(|| AppError::Internal("License not found after restore".into()))?;
+    let devices = queries::list_devices_for_license(&conn, &license.id)?;
+
+    AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
+        .actor(ActorType::User, Some(&ctx.member.user_id))
+        .action(AuditAction::RestoreLicense)
+        .resource("license", &path.license_id)
+        .details(&serde_json::json!({
+            "product_id": existing.product_id,
+            "force": input.force
+        }))
+        .org(&path.org_id)
+        .project(&path.project_id)
+        .auth_method(&ctx.auth_method)
+        .save()?;
+
+    Ok(Json(LicenseWithDevices {
+        license: LicenseWithProduct {
+            license,
+            product_name: product.name,
+        },
+        devices,
     }))
 }

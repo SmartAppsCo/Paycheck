@@ -5,23 +5,31 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         r#"
         -- Users (identity - source of truth for name/email)
+        -- Soft delete: deleted_at = timestamp when deleted, NULL = active
+        -- deleted_cascade_depth: 0 = directly deleted, >0 = cascaded from parent
         CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,
             email TEXT NOT NULL UNIQUE,
             name TEXT NOT NULL,
             created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
+            updated_at INTEGER NOT NULL,
+            deleted_at INTEGER,
+            deleted_cascade_depth INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+        CREATE INDEX IF NOT EXISTS idx_users_active ON users(id) WHERE deleted_at IS NULL;
 
         -- Operators (Paycheck ops team - references users for identity)
         CREATE TABLE IF NOT EXISTS operators (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
             role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'view')),
-            created_at INTEGER NOT NULL
+            created_at INTEGER NOT NULL,
+            deleted_at INTEGER,
+            deleted_cascade_depth INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_operators_user ON operators(user_id);
+        CREATE INDEX IF NOT EXISTS idx_operators_active ON operators(id) WHERE deleted_at IS NULL;
 
         -- API keys (unified, tied to user identity)
         CREATE TABLE IF NOT EXISTS api_keys (
@@ -64,8 +72,11 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             resend_api_key BLOB,
             payment_provider TEXT CHECK (payment_provider IS NULL OR payment_provider IN ('stripe', 'lemonsqueezy')),
             created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
+            updated_at INTEGER NOT NULL,
+            deleted_at INTEGER,
+            deleted_cascade_depth INTEGER
         );
+        CREATE INDEX IF NOT EXISTS idx_organizations_active ON organizations(id) WHERE deleted_at IS NULL;
 
         -- Organization members (references users for identity)
         CREATE TABLE IF NOT EXISTS org_members (
@@ -74,10 +85,13 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
             role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'member')),
             created_at INTEGER NOT NULL,
+            deleted_at INTEGER,
+            deleted_cascade_depth INTEGER,
             UNIQUE(user_id, org_id)
         );
         CREATE INDEX IF NOT EXISTS idx_org_members_org ON org_members(org_id);
         CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id);
+        CREATE INDEX IF NOT EXISTS idx_org_members_active ON org_members(id) WHERE deleted_at IS NULL;
 
         -- Projects (software products being licensed)
         CREATE TABLE IF NOT EXISTS projects (
@@ -92,10 +106,13 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             email_enabled INTEGER NOT NULL DEFAULT 1,
             email_webhook_url TEXT,
             created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
+            updated_at INTEGER NOT NULL,
+            deleted_at INTEGER,
+            deleted_cascade_depth INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_public_key ON projects(public_key);
+        CREATE INDEX IF NOT EXISTS idx_projects_active ON projects(id) WHERE deleted_at IS NULL;
 
         -- Project members (for 'member' role org members who need explicit access)
         CREATE TABLE IF NOT EXISTS project_members (
@@ -120,9 +137,13 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             activation_limit INTEGER NOT NULL DEFAULT 0,
             device_limit INTEGER NOT NULL DEFAULT 0,
             features TEXT NOT NULL DEFAULT '[]',
-            created_at INTEGER NOT NULL
+            created_at INTEGER NOT NULL,
+            deleted_at INTEGER,
+            deleted_cascade_depth INTEGER,
+            UNIQUE(project_id, name)
         );
         CREATE INDEX IF NOT EXISTS idx_products_project ON products(project_id);
+        CREATE INDEX IF NOT EXISTS idx_products_active ON products(id) WHERE deleted_at IS NULL;
 
         -- Product payment config (payment provider settings per product)
         CREATE TABLE IF NOT EXISTS product_payment_config (
@@ -156,22 +177,25 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             customer_id TEXT,
             activation_count INTEGER NOT NULL DEFAULT 0,
             revoked INTEGER NOT NULL DEFAULT 0,
-            revoked_jtis TEXT NOT NULL DEFAULT '[]',
             created_at INTEGER NOT NULL,
             expires_at INTEGER,
             updates_expires_at INTEGER,
             payment_provider TEXT,
             payment_provider_customer_id TEXT,
             payment_provider_subscription_id TEXT,
-            payment_provider_order_id TEXT
+            payment_provider_order_id TEXT,
+            deleted_at INTEGER,
+            deleted_cascade_depth INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_licenses_product ON licenses(product_id);
         CREATE INDEX IF NOT EXISTS idx_licenses_project ON licenses(project_id);
-        CREATE INDEX IF NOT EXISTS idx_licenses_email_hash ON licenses(email_hash, project_id);
+        CREATE INDEX IF NOT EXISTS idx_licenses_project_email ON licenses(project_id, email_hash);
+        CREATE INDEX IF NOT EXISTS idx_licenses_project_order ON licenses(project_id, payment_provider_order_id);
         CREATE INDEX IF NOT EXISTS idx_licenses_customer ON licenses(customer_id);
         CREATE INDEX IF NOT EXISTS idx_licenses_provider_customer ON licenses(payment_provider, payment_provider_customer_id);
         CREATE INDEX IF NOT EXISTS idx_licenses_provider_subscription ON licenses(payment_provider, payment_provider_subscription_id);
         CREATE INDEX IF NOT EXISTS idx_licenses_provider_order ON licenses(payment_provider, payment_provider_order_id);
+        CREATE INDEX IF NOT EXISTS idx_licenses_active ON licenses(id) WHERE deleted_at IS NULL;
 
         -- Activation codes (short-lived codes in PREFIX-XXXX-XXXX-XXXX-XXXX format)
         CREATE TABLE IF NOT EXISTS activation_codes (
@@ -186,6 +210,18 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_activation_codes_license ON activation_codes(license_id);
         CREATE INDEX IF NOT EXISTS idx_activation_codes_expires ON activation_codes(expires_at);
 
+        -- Revoked JTIs (individual token revocations per license)
+        CREATE TABLE IF NOT EXISTS revoked_jtis (
+            id TEXT PRIMARY KEY,
+            license_id TEXT NOT NULL REFERENCES licenses(id) ON DELETE CASCADE,
+            jti TEXT NOT NULL,
+            revoked_at INTEGER NOT NULL,
+            details TEXT,
+            UNIQUE(license_id, jti)
+        );
+        CREATE INDEX IF NOT EXISTS idx_revoked_jtis_license ON revoked_jtis(license_id);
+        CREATE INDEX IF NOT EXISTS idx_revoked_jtis_jti ON revoked_jtis(jti);
+
         -- Devices (activated devices for a license)
         CREATE TABLE IF NOT EXISTS devices (
             id TEXT PRIMARY KEY,
@@ -198,7 +234,8 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             last_seen_at INTEGER NOT NULL,
             UNIQUE(license_id, device_id)
         );
-        CREATE INDEX IF NOT EXISTS idx_devices_license ON devices(license_id);
+        -- Note: UNIQUE(license_id, device_id) creates implicit index for device lookups
+        CREATE INDEX IF NOT EXISTS idx_devices_license_time ON devices(license_id, activated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_devices_jti ON devices(jti);
 
         -- Payment sessions (temporary, for tracking buy flow)
@@ -252,19 +289,23 @@ pub fn init_audit_db(conn: &Connection) -> rusqlite::Result<()> {
             resource_type TEXT NOT NULL,
             resource_id TEXT NOT NULL,
             resource_name TEXT,
+            resource_email TEXT,                  -- for user-related resources (operator, org_member, etc.)
             details TEXT,
             org_id TEXT,
             org_name TEXT,
             project_id TEXT,
             project_name TEXT,
             ip_address TEXT,
-            user_agent TEXT
+            user_agent TEXT,
+            auth_type TEXT,                       -- 'api_key' or 'jwt' (for filtering)
+            auth_credential TEXT                  -- key prefix (e.g., 'pc_a1b2...') or issuer URL
         );
         CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
         CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
         CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
-        CREATE INDEX IF NOT EXISTS idx_audit_logs_org ON audit_logs(org_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_org_time ON audit_logs(org_id, timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_audit_logs_project ON audit_logs(project_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_purge ON audit_logs(actor_type, timestamp);
         "#,
     )?;
     Ok(())

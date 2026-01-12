@@ -49,6 +49,8 @@ fn org_app() -> (Router, AppState) {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(None, "test@example.com".to_string())),
+        jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
+        trusted_issuers: vec![],
     };
 
     let app = handlers::orgs::router(state.clone(), paycheck::config::RateLimitConfig::disabled()).with_state(state.clone());
@@ -474,7 +476,8 @@ mod license_tests {
 
         let body = json!({
             "product_id": product_id,
-            "count": 5
+            "count": 5,
+            "email": "customer@example.com"
         });
 
         let response = app
@@ -582,7 +585,8 @@ mod license_tests {
         let body = json!({
             "product_id": product_id,
             "license_exp_days": 30,
-            "updates_exp_days": 60
+            "updates_exp_days": 60,
+            "email": "customer@example.com"
         });
 
         let before = now();
@@ -657,7 +661,8 @@ mod license_tests {
 
         // Don't specify any expiration override - use product defaults (which are perpetual)
         let body = json!({
-            "product_id": product_id
+            "product_id": product_id,
+            "email": "customer@example.com"
         });
 
         let response = app

@@ -6,7 +6,7 @@ use axum::{
 use crate::db::{queries, AppState};
 use crate::db::queries::ProductWithPaymentConfig;
 use crate::error::{AppError, Result};
-use crate::extractors::{Json, Path};
+use crate::extractors::{Json, Path, RestoreRequest};
 use crate::middleware::OrgMemberContext;
 use crate::models::{ActorType, AuditAction, CreateProduct, UpdateProduct};
 use crate::pagination::{Paginated, PaginationQuery};
@@ -43,6 +43,7 @@ pub async fn create_product(
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(product.name.clone()))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     // Return with empty payment config (none configured yet)
@@ -112,6 +113,7 @@ pub async fn update_product(
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(existing.name.clone()))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     let product = queries::get_product_with_config(&conn, &path.product_id)?
@@ -140,7 +142,7 @@ pub async fn delete_product(
         return Err(AppError::NotFound("Product not found".into()));
     }
 
-    queries::delete_product(&conn, &path.product_id)?;
+    queries::soft_delete_product(&conn, &path.product_id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))
@@ -150,7 +152,52 @@ pub async fn delete_product(
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(existing.name.clone()))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(serde_json::json!({ "success": true })))
+}
+
+/// Restore a soft-deleted product and its cascade-deleted licenses
+pub async fn restore_product(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<OrgMemberContext>,
+    Path(path): Path<ProductPath>,
+    headers: HeaderMap,
+    Json(input): Json<RestoreRequest>,
+) -> Result<Json<ProductWithPaymentConfig>> {
+    if !ctx.can_write_project() {
+        return Err(AppError::Forbidden("Insufficient permissions".into()));
+    }
+
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
+
+    let existing = queries::get_deleted_product_by_id(&conn, &path.product_id)?
+        .ok_or_else(|| AppError::NotFound("Deleted product not found".into()))?;
+
+    if existing.project_id != path.project_id {
+        return Err(AppError::NotFound("Deleted product not found".into()));
+    }
+
+    queries::restore_product(&conn, &path.product_id, input.force)?;
+
+    let product = queries::get_product_with_config(&conn, &path.product_id)?
+        .ok_or_else(|| AppError::Internal("Product not found after restore".into()))?;
+
+    AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
+        .actor(ActorType::User, Some(&ctx.member.user_id))
+        .action(AuditAction::RestoreProduct)
+        .resource("product", &path.product_id)
+        .details(&serde_json::json!({
+            "name": existing.name,
+            "force": input.force
+        }))
+        .org(&path.org_id)
+        .project(&path.project_id)
+        .names(&ctx.audit_names().resource(product.product.name.clone()))
+        .auth_method(&ctx.auth_method)
+        .save()?;
+
+    Ok(Json(product))
 }

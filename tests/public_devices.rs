@@ -145,11 +145,8 @@ async fn test_deactivate_adds_jti_to_revoked_list() {
 
     // Verify JTI was added to revoked list
     let conn = state.db.get().unwrap();
-    let license = queries::get_license_by_id(&conn, &license_id)
-        .unwrap()
-        .unwrap();
     assert!(
-        license.revoked_jtis.contains(&jti),
+        queries::is_jti_revoked(&conn, &license_id, &jti).unwrap(),
         "JTI should be in revoked list"
     );
 }
@@ -364,7 +361,7 @@ async fn test_deactivate_already_revoked_jti_returns_forbidden() {
         token = create_test_jwt(&state, &project, &product, &license.id, &device);
 
         // Pre-revoke the JTI (but keep the device record)
-        queries::add_revoked_jti(&conn, &license.id, &device.jti).unwrap();
+        queries::add_revoked_jti(&conn, &license.id, &device.jti, Some("test pre-revocation")).unwrap();
     }
 
     let app = public_app(state);

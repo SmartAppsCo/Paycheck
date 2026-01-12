@@ -6,9 +6,9 @@ use serde::Deserialize;
 
 use crate::db::{queries, AppState};
 use crate::error::{AppError, Result};
-use crate::extractors::{Json, Path};
+use crate::extractors::{Json, Path, RestoreRequest};
 use crate::middleware::OperatorContext;
-use crate::models::{ActorType, AuditAction, CreateUser, UpdateUser, UserWithRoles};
+use crate::models::{ActorType, AuditAction, CreateUser, UpdateUser, User, UserWithRoles};
 use crate::pagination::{Paginated, PaginationQuery};
 use crate::util::AuditLogBuilder;
 
@@ -18,6 +18,9 @@ pub struct UserQuery {
     pub pagination: PaginationQuery,
     /// Filter by email (exact match)
     pub email: Option<String>,
+    /// Include soft-deleted users (default: false)
+    #[serde(default)]
+    pub include_deleted: bool,
 }
 
 /// Create a new user.
@@ -47,7 +50,8 @@ pub async fn create_user(
             "email": input.email,
             "name": input.name
         }))
-        .names(&ctx.audit_names().resource(user.name.clone()))
+        .names(&ctx.audit_names().resource_user(&user.name, &user.email))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     // Return user with roles (will be empty for new user)
@@ -78,7 +82,7 @@ pub async fn list_users(
 
     let limit = query.pagination.limit();
     let offset = query.pagination.offset();
-    let (users, total) = queries::list_users_with_roles_paginated(&conn, limit, offset)?;
+    let (users, total) = queries::list_users_with_roles_paginated(&conn, limit, offset, query.include_deleted)?;
 
     Ok(Json(Paginated::new(users, total, limit, offset)))
 }
@@ -129,7 +133,8 @@ pub async fn update_user(
             "email": input.email,
             "name": input.name
         }))
-        .names(&ctx.audit_names().resource(existing.name.clone()))
+        .names(&ctx.audit_names().resource_user(&existing.name, &existing.email))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     let user = queries::get_user_with_roles(&conn, &id)?
@@ -157,7 +162,7 @@ pub async fn delete_user(
     let existing = queries::get_user_by_id(&conn, &id)?
         .ok_or_else(|| AppError::NotFound("User not found".into()))?;
 
-    queries::delete_user(&conn, &id)?;
+    queries::soft_delete_user(&conn, &id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.user.id))
@@ -167,8 +172,97 @@ pub async fn delete_user(
             "email": existing.email,
             "name": existing.name
         }))
-        .names(&ctx.audit_names().resource(existing.name.clone()))
+        .names(&ctx.audit_names().resource_user(&existing.name, &existing.email))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(serde_json::json!({ "success": true })))
+}
+
+/// Restore a soft-deleted user and their cascade-deleted operator/org memberships
+pub async fn restore_user(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<OperatorContext>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<RestoreRequest>,
+) -> Result<Json<User>> {
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
+
+    // Get the deleted user
+    let existing = queries::get_deleted_user_by_id(&conn, &id)?
+        .ok_or_else(|| AppError::NotFound("Deleted user not found".into()))?;
+
+    // Restore the user and cascade-deleted children
+    queries::restore_user(&conn, &id, input.force)?;
+
+    // Get the restored user
+    let user = queries::get_user_by_id(&conn, &id)?
+        .ok_or_else(|| AppError::Internal("User not found after restore".into()))?;
+
+    AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
+        .actor(ActorType::User, Some(&ctx.user.id))
+        .action(AuditAction::RestoreUser)
+        .resource("user", &id)
+        .details(&serde_json::json!({
+            "email": existing.email,
+            "name": existing.name,
+            "force": input.force
+        }))
+        .names(&ctx.audit_names().resource_user(&user.name, &user.email))
+        .auth_method(&ctx.auth_method)
+        .save()?;
+
+    Ok(Json(user))
+}
+
+/// Hard delete a user (GDPR compliance - permanently removes all data).
+/// This is irreversible and removes all associated data including:
+/// - Operator record (if any)
+/// - Org memberships
+/// - API keys
+pub async fn hard_delete_user(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<OperatorContext>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>> {
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
+
+    // Don't allow deleting yourself
+    if id == ctx.user.id {
+        return Err(AppError::BadRequest("Cannot hard delete yourself".into()));
+    }
+
+    // Get user info for audit log (may be soft-deleted already)
+    let existing = queries::get_user_by_id(&conn, &id)?
+        .or_else(|| queries::get_deleted_user_by_id(&conn, &id).ok().flatten())
+        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+
+    // Perform hard delete (CASCADE removes all related data)
+    queries::delete_user(&conn, &id)?;
+
+    AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
+        .actor(ActorType::User, Some(&ctx.user.id))
+        .action(AuditAction::HardDeleteUser)
+        .resource("user", &id)
+        .details(&serde_json::json!({
+            "email": existing.email,
+            "name": existing.name,
+            "reason": "gdpr_request"
+        }))
+        .names(&ctx.audit_names().resource_user(&existing.name, &existing.email))
+        .auth_method(&ctx.auth_method)
+        .save()?;
+
+    tracing::warn!(
+        "GDPR hard delete: User {} ({}) permanently deleted by operator {}",
+        id,
+        existing.email,
+        ctx.user.id
+    );
+
+    Ok(Json(serde_json::json!({ "success": true, "permanently_deleted": true })))
 }

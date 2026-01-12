@@ -65,7 +65,7 @@ pub async fn validate_license(
     }
 
     // Check if this specific JTI is revoked
-    if license.revoked_jtis.contains(&req.jti) {
+    if queries::is_jti_revoked(&conn, &license.id, &req.jti)? {
         return Ok(invalid_response());
     }
 

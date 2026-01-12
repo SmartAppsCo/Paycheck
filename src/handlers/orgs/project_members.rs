@@ -60,7 +60,8 @@ pub async fn create_project_member(
         .details(&serde_json::json!({ "org_member_id": input.org_member_id, "project_id": path.project_id, "role": input.role }))
         .org(&path.org_id)
         .project(&path.project_id)
-        .names(&ctx.audit_names().resource(target_member.name.clone()))
+        .names(&ctx.audit_names().resource_user(&target_member.name, &target_member.email))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(ProjectMemberWithDetails {
@@ -138,7 +139,8 @@ pub async fn update_project_member(
         .details(&serde_json::json!({ "role": input.role }))
         .org(&path.org_id)
         .project(&path.project_id)
-        .names(&ctx.audit_names().resource(existing.name))
+        .names(&ctx.audit_names().resource_user(&existing.name, &existing.email))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(serde_json::json!({ "updated": true })))
@@ -176,7 +178,8 @@ pub async fn delete_project_member(
         .resource("project_member", &path.member_id)
         .org(&path.org_id)
         .project(&path.project_id)
-        .names(&ctx.audit_names().resource(existing.name))
+        .names(&ctx.audit_names().resource_user(&existing.name, &existing.email))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(serde_json::json!({ "success": true })))

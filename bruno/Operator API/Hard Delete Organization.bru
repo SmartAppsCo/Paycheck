@@ -1,0 +1,32 @@
+meta {
+  name: Hard Delete Organization
+  type: http
+  seq: 28
+}
+
+post {
+  url: {{base_url}}/operators/organizations/{{org_id}}/hard-delete
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+docs {
+  Permanently delete an organization for GDPR compliance (requires admin+ operator role).
+
+  WARNING: This is IRREVERSIBLE. The organization and all associated data will be
+  permanently removed from the database, including:
+  - All org members
+  - All projects
+  - All products
+  - All licenses
+
+  Use this only for GDPR data deletion requests.
+  For normal deletion, use DELETE /operators/organizations/{org_id} which soft-deletes.
+
+  Returns:
+  { "success": true, "permanently_deleted": true }
+}

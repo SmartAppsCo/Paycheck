@@ -43,33 +43,33 @@ pub fn query_all<T: FromRow>(
 
 // ============ SQL SELECT Constants ============
 
-pub const USER_COLS: &str = "id, email, name, created_at, updated_at";
+pub const USER_COLS: &str = "id, email, name, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
-pub const OPERATOR_COLS: &str = "id, user_id, role, created_at";
+pub const OPERATOR_COLS: &str = "id, user_id, role, created_at, deleted_at, deleted_cascade_depth";
 
-pub const OPERATOR_WITH_USER_COLS: &str = "o.id, o.user_id, u.email, u.name, o.role, o.created_at";
+pub const OPERATOR_WITH_USER_COLS: &str = "o.id, o.user_id, u.email, u.name, o.role, o.created_at, o.deleted_at, o.deleted_cascade_depth";
 
 pub const ORGANIZATION_COLS: &str =
-    "id, name, stripe_config, ls_config, resend_api_key, payment_provider, created_at, updated_at";
+    "id, name, stripe_config, ls_config, resend_api_key, payment_provider, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
-pub const ORG_MEMBER_COLS: &str = "id, user_id, org_id, role, created_at";
+pub const ORG_MEMBER_COLS: &str = "id, user_id, org_id, role, created_at, deleted_at, deleted_cascade_depth";
 
-pub const ORG_MEMBER_WITH_USER_COLS: &str = "m.id, m.user_id, u.email, u.name, m.org_id, m.role, m.created_at";
+pub const ORG_MEMBER_WITH_USER_COLS: &str = "m.id, m.user_id, u.email, u.name, m.org_id, m.role, m.created_at, m.deleted_at, m.deleted_cascade_depth";
 
 pub const API_KEY_COLS: &str = "id, user_id, name, key_prefix, key_hash, user_manageable, created_at, last_used_at, expires_at, revoked_at";
 
 pub const API_KEY_SCOPE_COLS: &str = "api_key_id, org_id, project_id, access";
 
-pub const PROJECT_COLS: &str = "id, org_id, name, license_key_prefix, private_key, public_key, redirect_url, email_from, email_enabled, email_webhook_url, created_at, updated_at";
+pub const PROJECT_COLS: &str = "id, org_id, name, license_key_prefix, private_key, public_key, redirect_url, email_from, email_enabled, email_webhook_url, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
 pub const PROJECT_MEMBER_COLS: &str = "id, org_member_id, project_id, role, created_at";
 
-pub const PRODUCT_COLS: &str = "id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, features, created_at";
+pub const PRODUCT_COLS: &str = "id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, features, created_at, deleted_at, deleted_cascade_depth";
 
 pub const PAYMENT_CONFIG_COLS: &str = "id, product_id, provider, stripe_price_id, price_cents, currency, ls_variant_id, created_at, updated_at";
 
 /// Columns for licenses table (no encryption - email_hash instead of key)
-pub const LICENSE_COLS: &str = "id, email_hash, project_id, product_id, customer_id, activation_count, revoked, revoked_jtis, created_at, expires_at, updates_expires_at, payment_provider, payment_provider_customer_id, payment_provider_subscription_id, payment_provider_order_id";
+pub const LICENSE_COLS: &str = "id, email_hash, project_id, product_id, customer_id, activation_count, revoked, created_at, expires_at, updates_expires_at, payment_provider, payment_provider_customer_id, payment_provider_subscription_id, payment_provider_order_id, deleted_at, deleted_cascade_depth";
 
 pub const DEVICE_COLS: &str =
     "id, license_id, device_id, device_type, name, jti, activated_at, last_seen_at";
@@ -89,6 +89,8 @@ impl FromRow for User {
             name: row.get(2)?,
             created_at: row.get(3)?,
             updated_at: row.get(4)?,
+            deleted_at: row.get(5)?,
+            deleted_cascade_depth: row.get(6)?,
         })
     }
 }
@@ -100,6 +102,8 @@ impl FromRow for Operator {
             user_id: row.get(1)?,
             role: row.get::<_, String>(2)?.parse::<OperatorRole>().unwrap(),
             created_at: row.get(3)?,
+            deleted_at: row.get(4)?,
+            deleted_cascade_depth: row.get(5)?,
         })
     }
 }
@@ -113,6 +117,8 @@ impl FromRow for OperatorWithUser {
             name: row.get(3)?,
             role: row.get::<_, String>(4)?.parse::<OperatorRole>().unwrap(),
             created_at: row.get(5)?,
+            deleted_at: row.get(6)?,
+            deleted_cascade_depth: row.get(7)?,
         })
     }
 }
@@ -132,6 +138,8 @@ impl FromRow for Organization {
             payment_provider: row.get(5)?,
             created_at: row.get(6)?,
             updated_at: row.get(7)?,
+            deleted_at: row.get(8)?,
+            deleted_cascade_depth: row.get(9)?,
         })
     }
 }
@@ -144,6 +152,8 @@ impl FromRow for OrgMember {
             org_id: row.get(2)?,
             role: row.get::<_, String>(3)?.parse::<OrgMemberRole>().unwrap(),
             created_at: row.get(4)?,
+            deleted_at: row.get(5)?,
+            deleted_cascade_depth: row.get(6)?,
         })
     }
 }
@@ -158,6 +168,8 @@ impl FromRow for OrgMemberWithUser {
             org_id: row.get(4)?,
             role: row.get::<_, String>(5)?.parse::<OrgMemberRole>().unwrap(),
             created_at: row.get(6)?,
+            deleted_at: row.get(7)?,
+            deleted_cascade_depth: row.get(8)?,
         })
     }
 }
@@ -205,6 +217,8 @@ impl FromRow for Project {
             email_webhook_url: row.get(9)?,
             created_at: row.get(10)?,
             updated_at: row.get(11)?,
+            deleted_at: row.get(12)?,
+            deleted_cascade_depth: row.get(13)?,
         })
     }
 }
@@ -255,6 +269,8 @@ impl FromRow for Product {
             device_limit: row.get(7)?,
             features: serde_json::from_str(&features_str).unwrap_or_default(),
             created_at: row.get(9)?,
+            deleted_at: row.get(10)?,
+            deleted_cascade_depth: row.get(11)?,
         })
     }
 }
@@ -277,7 +293,6 @@ impl FromRow for ProductPaymentConfig {
 
 impl FromRow for License {
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        let jtis_str: String = row.get(7)?;
         Ok(License {
             id: row.get(0)?,
             email_hash: row.get(1)?,
@@ -286,14 +301,15 @@ impl FromRow for License {
             customer_id: row.get(4)?,
             activation_count: row.get(5)?,
             revoked: row.get::<_, i32>(6)? != 0,
-            revoked_jtis: serde_json::from_str(&jtis_str).unwrap_or_default(),
-            created_at: row.get(8)?,
-            expires_at: row.get(9)?,
-            updates_expires_at: row.get(10)?,
-            payment_provider: row.get(11)?,
-            payment_provider_customer_id: row.get(12)?,
-            payment_provider_subscription_id: row.get(13)?,
-            payment_provider_order_id: row.get(14)?,
+            created_at: row.get(7)?,
+            expires_at: row.get(8)?,
+            updates_expires_at: row.get(9)?,
+            payment_provider: row.get(10)?,
+            payment_provider_customer_id: row.get(11)?,
+            payment_provider_subscription_id: row.get(12)?,
+            payment_provider_order_id: row.get(13)?,
+            deleted_at: row.get(14)?,
+            deleted_cascade_depth: row.get(15)?,
         })
     }
 }

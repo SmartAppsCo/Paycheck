@@ -56,14 +56,14 @@ pub async fn deactivate_device(
         .ok_or_else(|| AppError::Internal("License not found".into()))?;
 
     // Check if this JTI is already revoked
-    if license.revoked_jtis.contains(&jti) {
+    if queries::is_jti_revoked(&conn, &license.id, &jti)? {
         return Err(AppError::Forbidden(
             "This device has already been deactivated".into(),
         ));
     }
 
     // Add the device's JTI to revoked list so the token can't be used anymore
-    queries::add_revoked_jti(&conn, &license.id, &jti)?;
+    queries::add_revoked_jti(&conn, &license.id, &jti, Some("self-deactivated via API"))?;
 
     // Delete the device record
     queries::delete_device(&conn, &device.id)?;

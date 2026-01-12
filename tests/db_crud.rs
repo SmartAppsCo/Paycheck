@@ -718,3 +718,139 @@ fn test_purge_old_public_audit_logs_respects_retention_period() {
         .unwrap();
     assert!(recent_exists);
 }
+
+// ============ API Key Scope Validation Tests ============
+
+#[test]
+fn test_api_key_scope_rejects_project_from_different_org() {
+    let conn = setup_test_db();
+    let master_key = test_master_key();
+
+    // Create two different orgs
+    let org_a = create_test_org(&conn, "Org A");
+    let org_b = create_test_org(&conn, "Org B");
+
+    // Create a project in Org B
+    let project_b = create_test_project(&conn, &org_b.id, "Project B", &master_key);
+
+    // Create a user
+    let user = queries::create_user(
+        &conn,
+        &paycheck::models::CreateUser {
+            email: "test@example.com".to_string(),
+            name: "Test User".to_string(),
+        },
+    )
+    .expect("Create user failed");
+
+    // Try to create an API key with a scope that references org_a but project from org_b
+    let invalid_scope = paycheck::models::CreateApiKeyScope {
+        org_id: org_a.id.clone(),
+        project_id: Some(project_b.id.clone()),
+        access: paycheck::models::AccessLevel::Admin,
+    };
+
+    let result = queries::create_api_key(
+        &conn,
+        &user.id,
+        "test-key",
+        None,
+        true,
+        Some(&[invalid_scope]),
+    );
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("does not belong to org"),
+        "Expected 'does not belong to org' error, got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_api_key_scope_rejects_nonexistent_project() {
+    let conn = setup_test_db();
+
+    // Create an org
+    let org = create_test_org(&conn, "Test Org");
+
+    // Create a user
+    let user = queries::create_user(
+        &conn,
+        &paycheck::models::CreateUser {
+            email: "test@example.com".to_string(),
+            name: "Test User".to_string(),
+        },
+    )
+    .expect("Create user failed");
+
+    // Try to create an API key with a scope that references a non-existent project
+    let invalid_scope = paycheck::models::CreateApiKeyScope {
+        org_id: org.id.clone(),
+        project_id: Some("nonexistent_project_id".to_string()),
+        access: paycheck::models::AccessLevel::View,
+    };
+
+    let result = queries::create_api_key(
+        &conn,
+        &user.id,
+        "test-key",
+        None,
+        true,
+        Some(&[invalid_scope]),
+    );
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("not found"),
+        "Expected 'not found' error, got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_api_key_scope_accepts_valid_project() {
+    let conn = setup_test_db();
+    let master_key = test_master_key();
+
+    // Create an org and project
+    let org = create_test_org(&conn, "Test Org");
+    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+
+    // Create a user
+    let user = queries::create_user(
+        &conn,
+        &paycheck::models::CreateUser {
+            email: "test@example.com".to_string(),
+            name: "Test User".to_string(),
+        },
+    )
+    .expect("Create user failed");
+
+    // Create an API key with a valid scope (project belongs to org)
+    let valid_scope = paycheck::models::CreateApiKeyScope {
+        org_id: org.id.clone(),
+        project_id: Some(project.id.clone()),
+        access: paycheck::models::AccessLevel::Admin,
+    };
+
+    let result = queries::create_api_key(
+        &conn,
+        &user.id,
+        "test-key",
+        None,
+        true,
+        Some(&[valid_scope]),
+    );
+
+    assert!(result.is_ok(), "Expected success, got: {:?}", result.err());
+
+    // Verify the scope was created
+    let (api_key, _full_key) = result.unwrap();
+    let scopes = queries::get_api_key_scopes(&conn, &api_key.id).expect("Get scopes failed");
+    assert_eq!(scopes.len(), 1);
+    assert_eq!(scopes[0].org_id, org.id);
+    assert_eq!(scopes[0].project_id, Some(project.id));
+}

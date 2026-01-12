@@ -28,9 +28,9 @@ pub enum AuditAction {
     BootstrapOperator,
 
     // Organization management
-    CreateOrganization,
-    UpdateOrganization,
-    DeleteOrganization,
+    CreateOrg,
+    UpdateOrg,
+    DeleteOrg,
 
     // Org member management
     CreateOrgMember,
@@ -77,10 +77,23 @@ pub enum AuditAction {
 
     // Seeding (dev/bootstrap)
     SeedOperator,
-    SeedOrganization,
+    SeedOrg,
     SeedOrgMember,
     SeedProject,
     SeedProduct,
+
+    // Restore operations (soft delete recovery)
+    RestoreUser,
+    RestoreOperator,
+    RestoreOrg,
+    RestoreOrgMember,
+    RestoreProject,
+    RestoreProduct,
+    RestoreLicense,
+
+    // Hard delete (GDPR)
+    HardDeleteUser,
+    HardDeleteOrg,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +116,9 @@ pub struct AuditLog {
     /// Name of the resource being acted upon (e.g., organization name, product name).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resource_name: Option<String>,
+    /// Email of the resource (for user-related resources: operator, org_member, user, api_key).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_email: Option<String>,
     pub details: Option<serde_json::Value>,
     pub org_id: Option<String>,
     /// Name of the organization at the time of the action.
@@ -114,6 +130,12 @@ pub struct AuditLog {
     pub project_name: Option<String>,
     pub ip_address: Option<String>,
     pub user_agent: Option<String>,
+    /// Auth type used for this action ('api_key' or 'jwt')
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_type: Option<String>,
+    /// Auth credential (API key prefix or JWT issuer URL)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_credential: Option<String>,
 }
 
 /// Names to include in an audit log entry for human-readable display.
@@ -126,6 +148,8 @@ pub struct AuditLogNames {
     pub user_email: Option<String>,
     /// Name of the resource being acted upon
     pub resource_name: Option<String>,
+    /// Email of the resource (for user-related resources)
+    pub resource_email: Option<String>,
     /// Name of the organization context
     pub org_name: Option<String>,
     /// Name of the project context
@@ -133,9 +157,16 @@ pub struct AuditLogNames {
 }
 
 impl AuditLogNames {
-    /// Set the resource name.
+    /// Set the resource name (for non-user resources like org, project, product).
     pub fn resource(mut self, name: impl Into<Option<String>>) -> Self {
         self.resource_name = name.into();
+        self
+    }
+
+    /// Set the resource as a user with name and email (for operator, org_member, user, api_key).
+    pub fn resource_user(mut self, name: impl Into<String>, email: impl Into<String>) -> Self {
+        self.resource_name = Some(name.into());
+        self.resource_email = Some(email.into());
         self
     }
 
@@ -163,6 +194,10 @@ pub struct AuditLogQuery {
     pub project_id: Option<String>,
     pub from_timestamp: Option<i64>,
     pub to_timestamp: Option<i64>,
+    /// Filter by auth type ('api_key' or 'jwt')
+    pub auth_type: Option<String>,
+    /// Filter by auth credential (API key prefix or JWT issuer)
+    pub auth_credential: Option<String>,
     /// Maximum number of items to return (default: 50, max: 100)
     pub limit: Option<i64>,
     /// Number of items to skip (default: 0)
@@ -182,13 +217,23 @@ impl AuditLogQuery {
 }
 
 impl AuditLog {
-    /// Format as a human-readable string for display.
+    /// Truncate an ID to first 8 characters for display, with ellipsis if truncated.
+    fn truncate_id(id: &str) -> String {
+        if id.len() > 8 {
+            format!("{}...", &id[..8])
+        } else {
+            id.to_string()
+        }
+    }
+
+    /// Format as a human-readable string for display (markdown-friendly).
     ///
-    /// Format: `[TIMESTAMP] [ActorType] "User" VERB RESOURCE in "Org" [project "Project"]`
+    /// Uses backticks around dynamic values for clean markdown rendering.
+    /// IDs are truncated to 8 characters (like git short hashes).
     ///
     /// Examples:
-    /// - `[2024-01-15 14:32:05] [User] "John Smith" created organization "Acme Corp"`
-    /// - `[2024-01-15 14:32:05] [System] seeded operator "Dev Operator"`
+    /// - `[2024-01-15 14:32:05] [User] `John Smith <john@example.com>` created organization `Acme Corp``
+    /// - `[2024-01-15 14:32:05] [System] seeded operator `Dev Operator``
     pub fn formatted(&self) -> String {
         use chrono::{TimeZone, Utc};
 
@@ -206,30 +251,37 @@ impl AuditLog {
             ActorType::System => "[System]",
         };
 
-        // User display: prefer name, then email, then ID
-        let user_display = self
-            .user_name
-            .as_ref()
-            .map(|n| format!("\"{}\"", n))
-            .or_else(|| self.user_email.as_ref().map(|e| format!("<{}>", e)))
-            .or_else(|| self.user_id.as_ref().map(|id| format!("({})", id)))
-            .unwrap_or_default();
+        // User display: Name <email> format for disambiguation
+        let user_display = match (&self.user_name, &self.user_email) {
+            (Some(name), Some(email)) => format!("`{} <{}>`", name, email),
+            (Some(name), None) => format!("`{}`", name),
+            (None, Some(email)) => format!("`{}`", email),
+            (None, None) => self
+                .user_id
+                .as_ref()
+                .map(|id| format!("`(user:{})`", &Self::truncate_id(id)))
+                .unwrap_or_default(),
+        };
 
         // Convert action to past-tense verb + object
         let verb_phrase = Self::action_to_verb_phrase(&self.action, &self.resource_type);
 
-        // Resource: prefer name (quoted), fall back to ID
-        let resource_display = self
-            .resource_name
-            .as_ref()
-            .map(|n| format!("\"{}\"", n))
-            .unwrap_or_else(|| self.resource_id.clone());
+        // Resource: Name <email> for user-related resources, just name otherwise, ID fallback
+        let resource_display = match (&self.resource_name, &self.resource_email) {
+            (Some(name), Some(email)) => format!("`{} <{}>`", name, email),
+            (Some(name), None) => format!("`{}`", name),
+            (None, _) => format!(
+                "`({}:{})`",
+                self.resource_type,
+                Self::truncate_id(&self.resource_id)
+            ),
+        };
 
-        // Org context: "in "Org Name"" or "in (org_id)"
+        // Org context: "in `Org Name`" or "in `(org:id)`"
         let org_context = if let Some(ref name) = self.org_name {
-            format!(" in \"{}\"", name)
+            format!(" in `{}`", name)
         } else if let Some(ref id) = self.org_id {
-            format!(" in ({})", id)
+            format!(" in `(org:{})`", Self::truncate_id(id))
         } else {
             String::new()
         };
@@ -240,20 +292,27 @@ impl AuditLog {
                 // Skip if project name equals resource name (e.g., when creating a project)
                 String::new()
             }
-            (Some(name), _) => format!(" project \"{}\"", name),
+            (Some(name), _) => format!(" project `{}`", name),
             // Don't show project ID fallback - UUIDs aren't useful for humans
             _ => String::new(),
         };
 
+        // Auth method context: show how the action was authenticated
+        let auth_context = match (&self.auth_type, &self.auth_credential) {
+            (Some(auth_type), Some(credential)) => format!(" via `{}:{}`", auth_type, credential),
+            _ => String::new(),
+        };
+
         format!(
-            "{} {} {} {} {}{}{}",
+            "{} {} {} {} {}{}{}{}",
             timestamp,
             actor_type,
             user_display,
             verb_phrase,
             resource_display,
             org_context,
-            project_context
+            project_context,
+            auth_context
         )
     }
 
@@ -301,6 +360,8 @@ impl AuditLog {
             "mark" => "marked",
             "increment" => "incremented",
             "purge" => "purged",
+            "restore" => "restored",
+            "hard" => "hard", // hard_delete -> hard deleted
             other => other, // Unknown verbs pass through unchanged
         }
     }
@@ -338,9 +399,10 @@ mod tests {
             user_email: Some("john@example.com".to_string()),
             user_name: Some("John Smith".to_string()),
             action: "create_organization".to_string(),
-            resource_type: "organization".to_string(),
+            resource_type: "org".to_string(),
             resource_id: "org456".to_string(),
             resource_name: Some("Acme Corp".to_string()),
+            resource_email: None,
             details: None,
             org_id: None, // Org creation doesn't have org context
             org_name: None,
@@ -348,15 +410,17 @@ mod tests {
             project_name: None,
             ip_address: Some("192.168.1.1".to_string()),
             user_agent: Some("test-agent".to_string()),
+            auth_type: None,
+            auth_credential: None,
         };
 
         let formatted = log.formatted();
-        // Expected: [2024-01-01 00:00:00] [User]   "John Smith" created organization "Acme Corp"
+        // Expected: [2024-01-01 00:00:00] [User]   `John Smith <john@example.com>` created organization `Acme Corp`
         assert!(formatted.contains("[2024-01-01 00:00:00]"));
         assert!(formatted.contains("[User]"));
-        assert!(formatted.contains("\"John Smith\""));
+        assert!(formatted.contains("`John Smith <john@example.com>`"));
         assert!(formatted.contains("created organization"));
-        assert!(formatted.contains("\"Acme Corp\""));
+        assert!(formatted.contains("`Acme Corp`"));
     }
 
     #[test]
@@ -372,6 +436,7 @@ mod tests {
             resource_type: "operator".to_string(),
             resource_id: "op123".to_string(),
             resource_name: Some("Dev Operator".to_string()),
+            resource_email: None,
             details: None,
             org_id: None,
             org_name: None,
@@ -379,13 +444,15 @@ mod tests {
             project_name: None,
             ip_address: None,
             user_agent: None,
+            auth_type: None,
+            auth_credential: None,
         };
 
         let formatted = log.formatted();
-        // Expected: [2024-01-01 00:00:00] [System] seeded operator "Dev Operator"
+        // Expected: [2024-01-01 00:00:00] [System] seeded operator `Dev Operator`
         assert!(formatted.contains("[System]"));
         assert!(formatted.contains("seeded operator"));
-        assert!(formatted.contains("\"Dev Operator\""));
+        assert!(formatted.contains("`Dev Operator`"));
     }
 
     #[test]
@@ -402,6 +469,7 @@ mod tests {
             resource_type: "project".to_string(),
             resource_id: "proj123".to_string(),
             resource_name: Some("My Project".to_string()),
+            resource_email: None,
             details: None,
             org_id: Some("org456".to_string()),
             org_name: Some("Acme Corp".to_string()),
@@ -409,42 +477,49 @@ mod tests {
             project_name: Some("My Project".to_string()), // Same as resource_name
             ip_address: None,
             user_agent: None,
+            auth_type: None,
+            auth_credential: None,
         };
 
         let formatted = log.formatted();
         // Project context should be skipped since it equals resource name
-        assert!(formatted.contains("created project \"My Project\""));
-        assert!(formatted.contains("in \"Acme Corp\""));
+        assert!(formatted.contains("created project `My Project`"));
+        assert!(formatted.contains("in `Acme Corp`"));
         // Count occurrences of "My Project" - should only appear once (in the resource, not in project context)
-        assert_eq!(formatted.matches("\"My Project\"").count(), 1);
+        assert_eq!(formatted.matches("`My Project`").count(), 1);
     }
 
     #[test]
     fn test_formatted_fallback_to_ids() {
+        // Use UUID-length IDs to test truncation
         let log = AuditLog {
             id: "log12345678".to_string(),
             timestamp: 1704067200,
             actor_type: ActorType::User,
-            user_id: Some("user123".to_string()),
+            user_id: Some("550e8400-e29b-41d4-a716-446655440000".to_string()),
             user_email: None,
-            user_name: None, // No name, should fall back to ID
+            user_name: None, // No name, should fall back to truncated ID
             action: "create_organization".to_string(),
-            resource_type: "organization".to_string(),
-            resource_id: "org456".to_string(),
-            resource_name: None, // No name, should fall back to ID
+            resource_type: "org".to_string(),
+            resource_id: "660f9500-f39c-52e5-b827-557766550111".to_string(),
+            resource_name: None, // No name, should fall back to truncated ID
+            resource_email: None,
             details: None,
-            org_id: Some("org789".to_string()),
-            org_name: None, // No name, should fall back to ID
+            org_id: Some("770a0600-a40d-63f6-c938-668877660222".to_string()),
+            org_name: None, // No name, should fall back to truncated ID
             project_id: None,
             project_name: None,
             ip_address: None,
             user_agent: None,
+            auth_type: None,
+            auth_credential: None,
         };
 
         let formatted = log.formatted();
-        assert!(formatted.contains("(user123)")); // User ID in parens
-        assert!(formatted.contains("org456")); // Resource ID without parens
-        assert!(formatted.contains("in (org789)")); // Org ID in parens
+        // IDs should be truncated to first 8 characters with ellipsis
+        assert!(formatted.contains("`(user:550e8400...)`"));
+        assert!(formatted.contains("`(org:660f9500...)`"));
+        assert!(formatted.contains("in `(org:770a0600...)`"));
     }
 
     #[test]
@@ -477,9 +552,10 @@ mod tests {
             user_email: Some("john@example.com".to_string()),
             user_name: Some("John Smith".to_string()),
             action: "create_organization".to_string(),
-            resource_type: "organization".to_string(),
+            resource_type: "org".to_string(),
             resource_id: "org456".to_string(),
             resource_name: Some("Acme Corp".to_string()),
+            resource_email: None,
             details: None,
             org_id: None,
             org_name: None,
@@ -487,11 +563,13 @@ mod tests {
             project_name: None,
             ip_address: None,
             user_agent: None,
+            auth_type: None,
+            auth_credential: None,
         };
 
         let response: AuditLogResponse = log.into();
         assert!(response.formatted.contains("[User]"));
-        assert!(response.formatted.contains("\"John Smith\""));
+        assert!(response.formatted.contains("`John Smith <john@example.com>`"));
         assert!(response.formatted.contains("created organization"));
         assert_eq!(response.log.id, "log12345678");
     }

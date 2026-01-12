@@ -78,7 +78,7 @@ pub async fn get_license_info(
         .ok_or_else(|| AppError::NotFound("License not found".into()))?;
 
     // Check if this JTI is revoked
-    if license.revoked_jtis.contains(&jti) {
+    if queries::is_jti_revoked(&conn, &license.id, &jti)? {
         return Err(AppError::Forbidden("Device has been deactivated".into()));
     }
 

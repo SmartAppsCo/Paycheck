@@ -14,6 +14,12 @@ pub struct Product {
     pub device_limit: i32,
     pub features: Vec<String>,
     pub created_at: i64,
+    /// Soft delete timestamp (None = active, Some = deleted at this time)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<i64>,
+    /// Cascade depth (0 = directly deleted, >0 = cascaded from parent)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_cascade_depth: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]

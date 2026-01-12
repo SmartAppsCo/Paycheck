@@ -187,7 +187,7 @@ async fn test_validate_with_revoked_jti_returns_invalid() {
         public_key = project.public_key.clone();
 
         // Revoke this specific JTI (not the whole license)
-        queries::add_revoked_jti(&conn, &license.id, &jti).unwrap();
+        queries::add_revoked_jti(&conn, &license.id, &jti, Some("test revocation")).unwrap();
     }
 
     let app = public_app(state);

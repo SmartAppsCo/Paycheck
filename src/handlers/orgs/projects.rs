@@ -5,12 +5,12 @@ use axum::{
 
 use crate::db::{AppState, queries};
 use crate::error::{AppError, Result};
-use crate::extractors::{Json, Path};
+use crate::extractors::{Json, Path, RestoreRequest};
 use crate::jwt;
 use crate::middleware::OrgMemberContext;
 use crate::models::{
-    ActorType, AuditAction, CreateProject, LemonSqueezyConfigMasked, ProjectPublic, StripeConfigMasked,
-    UpdateProject,
+    ActorType, AuditAction, CreateProject, LemonSqueezyConfigMasked, Project, ProjectPublic,
+    StripeConfigMasked, UpdateProject,
 };
 use crate::pagination::{Paginated, PaginationQuery};
 use crate::util::AuditLogBuilder;
@@ -52,6 +52,7 @@ pub async fn create_project(
         .org(&org_id)
         .project(&project.id)
         .names(&ctx.audit_names().resource(project.name.clone()).org(org.name))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(project.into()))
@@ -131,6 +132,7 @@ pub async fn update_project(
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(existing.name).org(org.name))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     let project = queries::get_project_by_id(&conn, &path.project_id)?
@@ -156,7 +158,7 @@ pub async fn delete_project(
     let existing = queries::get_project_by_id(&conn, &path.project_id)?
         .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
 
-    queries::delete_project(&conn, &path.project_id)?;
+    queries::soft_delete_project(&conn, &path.project_id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))
@@ -166,6 +168,7 @@ pub async fn delete_project(
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(existing.name).org(org.name))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(serde_json::json!({ "success": true })))
@@ -208,4 +211,50 @@ pub async fn get_payment_config(
         ls_config,
         payment_provider: org.payment_provider,
     }))
+}
+
+/// Restore a soft-deleted project and its cascade-deleted children
+pub async fn restore_project(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<OrgMemberContext>,
+    Path(path): Path<crate::middleware::OrgProjectPath>,
+    headers: HeaderMap,
+    Json(input): Json<RestoreRequest>,
+) -> Result<Json<Project>> {
+    ctx.require_admin()?;
+
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
+
+    // Look up org for audit log
+    let org = queries::get_organization_by_id(&conn, &path.org_id)?
+        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+
+    let existing = queries::get_deleted_project_by_id(&conn, &path.project_id)?
+        .ok_or_else(|| AppError::NotFound("Deleted project not found".into()))?;
+
+    if existing.org_id != path.org_id {
+        return Err(AppError::NotFound("Deleted project not found".into()));
+    }
+
+    queries::restore_project(&conn, &path.project_id, input.force)?;
+
+    let project = queries::get_project_by_id(&conn, &path.project_id)?
+        .ok_or_else(|| AppError::Internal("Project not found after restore".into()))?;
+
+    AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
+        .actor(ActorType::User, Some(&ctx.member.user_id))
+        .action(AuditAction::RestoreProject)
+        .resource("project", &path.project_id)
+        .details(&serde_json::json!({
+            "name": existing.name,
+            "force": input.force
+        }))
+        .org(&path.org_id)
+        .project(&path.project_id)
+        .names(&ctx.audit_names().resource(project.name.clone()).org(org.name))
+        .auth_method(&ctx.auth_method)
+        .save()?;
+
+    Ok(Json(project))
 }

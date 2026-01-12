@@ -15,5 +15,19 @@ auth:bearer {
 }
 
 docs {
-  Delete an organization and all its data.
+  Soft-delete an organization (requires admin+ operator role).
+
+  This performs a soft delete - the organization can be restored later using
+  POST /operators/organizations/{org_id}/restore.
+
+  This will cascade soft-delete:
+  - All org members
+  - All projects
+  - All products
+  - All licenses
+
+  For permanent deletion (GDPR), use POST /operators/organizations/{org_id}/hard-delete.
+
+  Returns:
+  { "success": true }
 }
