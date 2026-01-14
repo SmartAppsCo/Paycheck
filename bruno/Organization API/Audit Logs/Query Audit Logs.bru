@@ -1,0 +1,36 @@
+meta {
+  name: Query Audit Logs
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/orgs/{{org_id}}/audit-logs
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_member_api_key}}
+}
+
+docs {
+  Query audit logs scoped to the authenticated organization.
+
+  The org_id from the path is always enforced - query params cannot override it.
+  Any org member can view their org's audit logs.
+
+  Optional query params (filters):
+  - actor_type: system, operator, org_member, public
+  - user_id: User ID who performed the action
+  - action: Action name (create_license, revoke_license, etc.)
+  - resource_type: Resource type being acted on (license, device, project, etc.)
+  - resource_id: Specific resource ID
+  - project_id: Filter by project within the org
+  - from_timestamp: Unix timestamp lower bound
+  - to_timestamp: Unix timestamp upper bound
+  - limit: Max results (default 50, max 100)
+  - offset: Pagination offset
+
+  Returns paginated audit log entries for the organization.
+}
