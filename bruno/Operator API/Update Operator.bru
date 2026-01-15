@@ -5,7 +5,7 @@ meta {
 }
 
 put {
-  url: {{base_url}}/operators/{{operator_id}}
+  url: {{base_url}}/operators/{{user_id}}
   body: json
   auth: bearer
 }
@@ -21,7 +21,7 @@ body:json {
 }
 
 docs {
-  Update an operator (requires owner role).
+  Update an operator's role (requires owner role).
   Cannot change your own role.
 
   Request body:

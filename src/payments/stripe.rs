@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Result, msg};
 use crate::models::StripeConfig;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -158,15 +158,15 @@ impl StripeClient {
         }
 
         let timestamp_str =
-            timestamp.ok_or_else(|| AppError::BadRequest("Invalid signature format".into()))?;
+            timestamp.ok_or_else(|| AppError::BadRequest(msg::INVALID_SIGNATURE_FORMAT.into()))?;
         let sig_v1 =
-            sig_v1.ok_or_else(|| AppError::BadRequest("Invalid signature format".into()))?;
+            sig_v1.ok_or_else(|| AppError::BadRequest(msg::INVALID_SIGNATURE_FORMAT.into()))?;
 
         // Parse and validate timestamp to prevent replay attacks.
         // Reject webhooks older than WEBHOOK_TIMESTAMP_TOLERANCE_SECS.
         let timestamp: i64 = timestamp_str
             .parse()
-            .map_err(|_| AppError::BadRequest("Invalid timestamp in signature".into()))?;
+            .map_err(|_| AppError::BadRequest(msg::INVALID_TIMESTAMP_IN_SIGNATURE.into()))?;
 
         let now = chrono::Utc::now().timestamp();
         let age = now - timestamp;
@@ -194,7 +194,7 @@ impl StripeClient {
 
         // Compute expected signature
         let mut mac = HmacSha256::new_from_slice(self.webhook_secret.as_bytes())
-            .map_err(|_| AppError::Internal("Invalid webhook secret".into()))?;
+            .map_err(|_| AppError::Internal(msg::INVALID_WEBHOOK_SECRET.into()))?;
         mac.update(signed_payload.as_bytes());
         let expected = hex::encode(mac.finalize().into_bytes());
 

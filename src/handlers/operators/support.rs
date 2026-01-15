@@ -4,7 +4,7 @@ use axum::extract::{Query, State};
 use serde::{Deserialize, Serialize};
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path};
 use crate::models::{LemonSqueezyConfig, LicenseWithProduct, StripeConfig};
 
@@ -24,8 +24,7 @@ pub async fn get_org_payment_config(
 ) -> Result<Json<FullPaymentConfigResponse>> {
     let conn = state.db.get()?;
 
-    let org = queries::get_organization_by_id(&conn, &org_id)?
-        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+    let org = queries::get_organization_by_id(&conn, &org_id)?.or_not_found(msg::ORG_NOT_FOUND)?;
 
     let stripe_config = org.decrypt_stripe_config(&state.master_key)?;
     let ls_config = org.decrypt_ls_config(&state.master_key)?;
@@ -76,12 +75,12 @@ pub async fn lookup_licenses_by_email(
     let conn = state.db.get()?;
 
     // Verify org exists
-    let org = queries::get_organization_by_id(&conn, &path.org_id)?
-        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+    let org =
+        queries::get_organization_by_id(&conn, &path.org_id)?.or_not_found(msg::ORG_NOT_FOUND)?;
 
     // Verify project exists and belongs to org
     let project = queries::get_project_by_id(&conn, &path.project_id)?
-        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+        .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
     if project.org_id != path.org_id {
         return Err(AppError::NotFound(

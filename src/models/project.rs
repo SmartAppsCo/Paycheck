@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Result, msg};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StripeConfig {
@@ -109,7 +109,7 @@ pub struct CreateProject {
 impl CreateProject {
     pub fn validate(&self) -> Result<()> {
         if self.name.trim().is_empty() {
-            return Err(AppError::BadRequest("name cannot be empty".into()));
+            return Err(AppError::BadRequest(msg::NAME_EMPTY.into()));
         }
         if self.license_key_prefix.trim().is_empty() {
             return Err(AppError::BadRequest(
@@ -196,7 +196,7 @@ impl UpdateProject {
         if let Some(ref name) = self.name
             && name.trim().is_empty()
         {
-            return Err(AppError::BadRequest("name cannot be empty".into()));
+            return Err(AppError::BadRequest(msg::NAME_EMPTY.into()));
         }
         if let Some(ref prefix) = self.license_key_prefix
             && prefix.trim().is_empty()

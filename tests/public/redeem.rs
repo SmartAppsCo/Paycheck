@@ -27,8 +27,12 @@ async fn test_redeem_with_valid_code_returns_token() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
 
         // Create an activation code
         let activation_code =
@@ -112,8 +116,12 @@ async fn test_redeem_with_invalid_device_type_returns_error() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
 
         let activation_code =
             queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
@@ -214,15 +222,19 @@ async fn test_redeem_code_already_used_returns_forbidden() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
 
         let activation_code =
             queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
                 .unwrap();
 
         // Mark the code as used
-        queries::mark_activation_code_used(&conn, &activation_code.id).unwrap();
+        queries::mark_activation_code_used(&conn, &activation_code.code).unwrap();
 
         public_key = project.public_key.clone();
         code = activation_code.code.clone();
@@ -271,8 +283,12 @@ async fn test_redeem_code_creates_device_record() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
 
         let activation_code =
             queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
@@ -340,8 +356,12 @@ async fn test_redeem_revoked_license_returns_forbidden() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
 
         let activation_code =
             queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
@@ -466,8 +486,12 @@ async fn test_redeem_device_limit_exceeded_returns_error() {
         let product =
             queries::create_product(&conn, &project.id, &input).expect("Failed to create product");
 
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
 
         // Create a device (using up the limit)
         create_test_device(&conn, &license.id, "device-1", DeviceType::Uuid);
@@ -523,8 +547,12 @@ async fn test_redeem_same_device_returns_token() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
 
         // Create an existing device
         create_test_device(&conn, &license.id, "existing-device", DeviceType::Uuid);
@@ -580,8 +608,12 @@ async fn test_redeem_with_public_key() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
 
         let activation_code =
             queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
@@ -641,8 +673,12 @@ mod activation_code_security {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             let activation_code =
                 queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
@@ -720,8 +756,12 @@ mod activation_code_security {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             let activation_code =
                 queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
@@ -729,8 +769,8 @@ mod activation_code_security {
 
             // Manually set the expiry to 1 second ago (past)
             conn.execute(
-                "UPDATE activation_codes SET expires_at = ?1 WHERE id = ?2",
-                rusqlite::params![now() - 1, &activation_code.id],
+                "UPDATE activation_codes SET expires_at = ?1 WHERE license_id = ?2",
+                rusqlite::params![now() - 1, &license.id],
             )
             .unwrap();
 
@@ -781,8 +821,12 @@ mod activation_code_security {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Create first activation code
             let first_activation_code =
@@ -793,7 +837,7 @@ mod activation_code_security {
             // Mark first code as used (simulating that a new code was requested, which should
             // invalidate old codes - in practice the system creates new codes without invalidating,
             // but this test verifies that used codes cannot be reused)
-            queries::mark_activation_code_used(&conn, &first_activation_code.id).unwrap();
+            queries::mark_activation_code_used(&conn, &first_activation_code.code).unwrap();
 
             // Create second activation code
             let second_activation_code =
@@ -872,8 +916,12 @@ mod activation_code_security {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Create activation code first
             let activation_code =
@@ -929,8 +977,12 @@ mod activation_code_security {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Create activation code first
             let activation_code =
@@ -1075,8 +1127,12 @@ mod device_limit_enforcement {
             };
             let product = queries::create_product(&conn, &project.id, &input).unwrap();
 
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Create an existing device (using up the limit)
             create_test_device(&conn, &license.id, "existing-device", DeviceType::Uuid);
@@ -1145,8 +1201,12 @@ mod device_limit_enforcement {
             };
             let product = queries::create_product(&conn, &project.id, &input).unwrap();
 
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             let activation_code =
                 queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
@@ -1211,8 +1271,12 @@ mod device_limit_enforcement {
             };
             let product = queries::create_product(&conn, &project.id, &input).unwrap();
 
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Create and then delete a device (simulating deactivation)
             let device = create_test_device(&conn, &license.id, "old-device", DeviceType::Uuid);
@@ -1289,8 +1353,12 @@ mod activation_limit_enforcement {
             };
             let product = queries::create_product(&conn, &project.id, &input).unwrap();
 
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Manually set activation_count to 2 (at the limit)
             conn.execute(
@@ -1362,8 +1430,12 @@ mod activation_limit_enforcement {
             };
             let product = queries::create_product(&conn, &project.id, &input).unwrap();
 
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Create 2 devices and then delete them (simulating activations followed by deactivations)
             let device1 = create_test_device(&conn, &license.id, "device-1", DeviceType::Uuid);
@@ -1443,8 +1515,12 @@ mod activation_limit_enforcement {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             let activation_code =
                 queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
@@ -1454,10 +1530,7 @@ mod activation_limit_enforcement {
 
             // First claim should succeed
             let first_claim = queries::try_claim_activation_code(&conn, &code).unwrap();
-            assert!(
-                first_claim.is_some(),
-                "first atomic claim should succeed"
-            );
+            assert!(first_claim.is_some(), "first atomic claim should succeed");
 
             // Second claim with same code should fail (already claimed)
             let second_claim = queries::try_claim_activation_code(&conn, &code).unwrap();
@@ -1498,15 +1571,22 @@ mod activation_limit_enforcement {
                 features: vec![],
             };
             let product = queries::create_product(&conn, &project.id, &input).unwrap();
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Create 5 different activation codes for the SAME license
             let mut activation_codes = vec![];
             for _ in 0..5 {
-                let code =
-                    queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
-                        .unwrap();
+                let code = queries::create_activation_code(
+                    &conn,
+                    &license.id,
+                    &project.license_key_prefix,
+                )
+                .unwrap();
                 activation_codes.push(code.code);
             }
 
@@ -1579,11 +1659,10 @@ mod activation_limit_enforcement {
             );
 
             // Verify activation_count is correct (only incremented once)
-            let license = queries::get_license_by_id(&conn, &license_id).unwrap().unwrap();
-            assert_eq!(
-                license.activation_count, 1,
-                "Activation count should be 1"
-            );
+            let license = queries::get_license_by_id(&conn, &license_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(license.activation_count, 1, "Activation count should be 1");
         }
     }
 
@@ -1616,15 +1695,22 @@ mod activation_limit_enforcement {
                 features: vec![],
             };
             let product = queries::create_product(&conn, &project.id, &input).unwrap();
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Create 5 different activation codes for the SAME license
             let mut activation_codes = vec![];
             for _ in 0..5 {
-                let code =
-                    queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
-                        .unwrap();
+                let code = queries::create_activation_code(
+                    &conn,
+                    &license.id,
+                    &project.license_key_prefix,
+                )
+                .unwrap();
                 activation_codes.push(code.code);
             }
 
@@ -1696,7 +1782,9 @@ mod activation_limit_enforcement {
                 "Exactly 2 devices should be created (activation_limit=2)"
             );
 
-            let license = queries::get_license_by_id(&conn, &license_id).unwrap().unwrap();
+            let license = queries::get_license_by_id(&conn, &license_id)
+                .unwrap()
+                .unwrap();
             assert_eq!(
                 license.activation_count, 2,
                 "Activation count should be exactly 2"
@@ -1730,8 +1818,12 @@ mod activation_limit_enforcement {
                 features: vec![],
             };
             let product = queries::create_product(&conn, &project.id, &input).unwrap();
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             let activation_code =
                 queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
@@ -1824,8 +1916,12 @@ mod input_length_validation {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             let activation_code =
                 queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
@@ -1872,7 +1968,10 @@ mod input_length_validation {
         );
         // Error details are in the "details" field
         assert!(
-            json["details"].as_str().unwrap().contains("device_id too long"),
+            json["details"]
+                .as_str()
+                .unwrap()
+                .contains("device_id too long"),
             "error should indicate device_id is too long"
         );
     }
@@ -1890,8 +1989,12 @@ mod input_length_validation {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             let activation_code =
                 queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
@@ -1938,7 +2041,10 @@ mod input_length_validation {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
         assert!(
-            json["details"].as_str().unwrap().contains("device_name too long"),
+            json["details"]
+                .as_str()
+                .unwrap()
+                .contains("device_name too long"),
             "error should indicate device_name is too long"
         );
     }
@@ -1956,8 +2062,12 @@ mod input_length_validation {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             let activation_code =
                 queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
@@ -2000,7 +2110,10 @@ mod input_length_validation {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
         assert!(
-            json["details"].as_str().unwrap().contains("device_id cannot be empty"),
+            json["details"]
+                .as_str()
+                .unwrap()
+                .contains("device_id cannot be empty"),
             "error should indicate device_id cannot be empty"
         );
     }
@@ -2018,8 +2131,12 @@ mod input_length_validation {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             let activation_code =
                 queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)

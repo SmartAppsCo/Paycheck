@@ -18,9 +18,9 @@
 mod common;
 use common::*;
 
-use axum::{Router, body::Body, http::Request};
 use axum::body::to_bytes;
 use axum::http::StatusCode;
+use axum::{Router, body::Body, http::Request};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use serde_json::{Value, json};
@@ -29,10 +29,10 @@ use tower::ServiceExt;
 use paycheck::config::RateLimitConfig;
 use paycheck::db::AppState;
 use paycheck::handlers;
-use paycheck::models::{OrgMemberRole, OperatorRole};
+use paycheck::models::{OperatorRole, OrgMemberRole};
 
 // Use time constants from common module for readable tests
-use common::{ONE_YEAR};
+use common::ONE_YEAR;
 
 // ============================================================================
 // Test App Setup Helpers
@@ -484,8 +484,7 @@ mod user_enumeration_prevention {
         let conn = state.db.get().unwrap();
 
         // Create an admin operator
-        let (_, _, api_key) =
-            create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+        let (_, _, api_key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
 
         // Create a real user
         let _real_user = create_test_user(&conn, "real@example.com", "Real User");
@@ -493,7 +492,10 @@ mod user_enumeration_prevention {
         // Look up nonexistent user vs real user (but with wrong API key scope)
         let test_cases = vec![
             ("fake-user-id", "nonexistent user"),
-            ("00000000-0000-0000-0000-000000000000", "UUID format but nonexistent"),
+            (
+                "00000000-0000-0000-0000-000000000000",
+                "UUID format but nonexistent",
+            ),
         ];
 
         let mut error_responses = Vec::new();
@@ -598,8 +600,7 @@ mod user_enumeration_prevention {
         assert_eq!(
             status1, status2,
             "unauthorized user should get same status for real member ({}) and fake member ({}) to prevent enumeration",
-            status1,
-            status2
+            status1, status2
         );
 
         // Verify with valid key from org_a, we can tell the difference
@@ -637,7 +638,12 @@ mod user_enumeration_prevention {
         let product = create_test_product(&conn, &project.id, "Pro", "pro");
 
         // Create a license with known email
-        let _license = create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let _license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
 
         // Try activation code request with real email vs fake email
         // Both should return similar responses (to prevent enumeration)
@@ -833,7 +839,7 @@ mod consistent_error_format {
             base_url: "http://localhost:3000".to_string(),
             audit_log_enabled: false,
             master_key,
-        email_hasher: paycheck::crypto::EmailHasher::from_bytes([0xAA; 32]),
+            email_hasher: paycheck::crypto::EmailHasher::from_bytes([0xAA; 32]),
             success_page_url: "http://localhost:3000/success".to_string(),
             activation_rate_limiter: std::sync::Arc::new(
                 paycheck::rate_limit::ActivationRateLimiter::default(),
@@ -1046,10 +1052,7 @@ mod validation_error_safety {
                 "/orgs/{}/projects/{}/licenses?limit=abc",
                 org.id, project.id
             ),
-            format!(
-                "/orgs/{}/projects/{}/licenses?limit=-1",
-                org.id, project.id
-            ),
+            format!("/orgs/{}/projects/{}/licenses?limit=-1", org.id, project.id),
             format!(
                 "/orgs/{}/projects/{}/licenses?limit=999999999999",
                 org.id, project.id
@@ -1201,8 +1204,7 @@ mod resource_existence_leakage {
         assert_eq!(
             responses[0].1, responses[1].1,
             "unauthorized user should receive same status for real license ({}) and fake license ({}) to prevent license enumeration",
-            responses[0].1,
-            responses[1].1
+            responses[0].1, responses[1].1
         );
     }
 }

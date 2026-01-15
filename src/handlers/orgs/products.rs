@@ -5,7 +5,7 @@ use axum::{
 
 use crate::db::queries::ProductWithPaymentConfig;
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path, RestoreRequest};
 use crate::middleware::OrgMemberContext;
 use crate::models::{ActorType, AuditAction, CreateProduct, UpdateProduct};
@@ -27,7 +27,7 @@ pub async fn create_product(
     Json(input): Json<CreateProduct>,
 ) -> Result<Json<ProductWithPaymentConfig>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
     input.validate()?;
 
@@ -72,10 +72,10 @@ pub async fn get_product(
 ) -> Result<Json<ProductWithPaymentConfig>> {
     let conn = state.db.get()?;
     let product = queries::get_product_with_config(&conn, &path.product_id)?
-        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+        .or_not_found(msg::PRODUCT_NOT_FOUND)?;
 
     if product.product.project_id != path.project_id {
-        return Err(AppError::NotFound("Product not found".into()));
+        return Err(AppError::NotFound(msg::PRODUCT_NOT_FOUND.into()));
     }
 
     Ok(Json(product))
@@ -89,7 +89,7 @@ pub async fn update_product(
     Json(input): Json<UpdateProduct>,
 ) -> Result<Json<ProductWithPaymentConfig>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
     input.validate()?;
 
@@ -97,10 +97,10 @@ pub async fn update_product(
     let audit_conn = state.audit.get()?;
 
     let existing = queries::get_product_by_id(&conn, &path.product_id)?
-        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+        .or_not_found(msg::PRODUCT_NOT_FOUND)?;
 
     if existing.project_id != path.project_id {
-        return Err(AppError::NotFound("Product not found".into()));
+        return Err(AppError::NotFound(msg::PRODUCT_NOT_FOUND.into()));
     }
 
     queries::update_product(&conn, &path.product_id, &input)?;
@@ -117,7 +117,7 @@ pub async fn update_product(
         .save()?;
 
     let product = queries::get_product_with_config(&conn, &path.product_id)?
-        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+        .or_not_found(msg::PRODUCT_NOT_FOUND)?;
 
     Ok(Json(product))
 }
@@ -129,17 +129,17 @@ pub async fn delete_product(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     let existing = queries::get_product_by_id(&conn, &path.product_id)?
-        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+        .or_not_found(msg::PRODUCT_NOT_FOUND)?;
 
     if existing.project_id != path.project_id {
-        return Err(AppError::NotFound("Product not found".into()));
+        return Err(AppError::NotFound(msg::PRODUCT_NOT_FOUND.into()));
     }
 
     queries::soft_delete_product(&conn, &path.product_id)?;
@@ -167,23 +167,23 @@ pub async fn restore_product(
     Json(input): Json<RestoreRequest>,
 ) -> Result<Json<ProductWithPaymentConfig>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     let existing = queries::get_deleted_product_by_id(&conn, &path.product_id)?
-        .ok_or_else(|| AppError::NotFound("Deleted product not found".into()))?;
+        .or_not_found(msg::DELETED_PRODUCT_NOT_FOUND)?;
 
     if existing.project_id != path.project_id {
-        return Err(AppError::NotFound("Deleted product not found".into()));
+        return Err(AppError::NotFound(msg::DELETED_PRODUCT_NOT_FOUND.into()));
     }
 
     queries::restore_product(&conn, &path.product_id, input.force)?;
 
     let product = queries::get_product_with_config(&conn, &path.product_id)?
-        .ok_or_else(|| AppError::Internal("Product not found after restore".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::PRODUCT_NOT_FOUND_AFTER_RESTORE.into()))?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))

@@ -56,7 +56,6 @@ pub struct CreateLicense {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActivationCode {
-    pub id: String,
     pub code: String,
     pub license_id: String,
     pub expires_at: i64,
@@ -66,9 +65,8 @@ pub struct ActivationCode {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RevokedJti {
-    pub id: String,
-    pub license_id: String,
     pub jti: String,
+    pub license_id: String,
     pub revoked_at: i64,
     pub details: Option<String>,
 }

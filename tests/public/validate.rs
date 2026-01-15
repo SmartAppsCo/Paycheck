@@ -27,8 +27,12 @@ fn setup_validate_test() -> (axum::Router, String, String, String, String) {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
         let device = create_test_device(&conn, &license.id, "test-device-123", DeviceType::Uuid);
 
         jti = device.jti.clone();
@@ -150,8 +154,12 @@ async fn test_validate_with_revoked_license_returns_invalid() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
         let device = create_test_device(&conn, &license.id, "test-device-123", DeviceType::Uuid);
 
         jti = device.jti.clone();
@@ -211,8 +219,12 @@ async fn test_validate_with_revoked_jti_returns_invalid() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
         let device = create_test_device(&conn, &license.id, "test-device-123", DeviceType::Uuid);
 
         jti = device.jti.clone();
@@ -334,8 +346,12 @@ async fn test_validate_with_wrong_project_returns_invalid() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
         let device = create_test_device(&conn, &license.id, "test-device-123", DeviceType::Uuid);
 
         jti = device.jti.clone();
@@ -421,8 +437,12 @@ async fn test_validate_updates_last_seen_timestamp() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
         let device = create_test_device(&conn, &license.id, "test-device-123", DeviceType::Uuid);
 
         jti = device.jti.clone();

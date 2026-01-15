@@ -6,7 +6,7 @@ use rand::rngs::OsRng;
 use serde::Deserialize;
 
 use super::LicenseClaims;
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Result, msg};
 
 /// Generate a new Ed25519 key pair
 /// Returns (private_key_bytes, public_key_base64)
@@ -31,12 +31,12 @@ pub fn sign_claims(
     jti: &str,
 ) -> Result<String> {
     if private_key.len() != 32 {
-        return Err(AppError::Internal("Invalid private key length".into()));
+        return Err(AppError::Internal(msg::INVALID_PRIVATE_KEY_LENGTH.into()));
     }
 
     let key_bytes: [u8; 32] = private_key
         .try_into()
-        .map_err(|_| AppError::Internal("Failed to convert key bytes".into()))?;
+        .map_err(|_| AppError::Internal(msg::FAILED_TO_CONVERT_KEY_BYTES.into()))?;
 
     let signing_key = SigningKey::from_bytes(&key_bytes);
     let key_pair = Ed25519KeyPair::from_bytes(&signing_key.to_keypair_bytes())
@@ -62,12 +62,12 @@ pub fn sign_claims(
 pub fn decode_unverified(token: &str) -> Result<LicenseClaims> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
-        return Err(AppError::BadRequest("Invalid token format".into()));
+        return Err(AppError::BadRequest(msg::INVALID_TOKEN_FORMAT.into()));
     }
 
     let payload = BASE64_URL
         .decode(parts[1])
-        .map_err(|_| AppError::BadRequest("Invalid token encoding".into()))?;
+        .map_err(|_| AppError::BadRequest(msg::INVALID_TOKEN_ENCODING.into()))?;
 
     #[derive(Deserialize)]
     struct TokenPayload {
@@ -76,7 +76,7 @@ pub fn decode_unverified(token: &str) -> Result<LicenseClaims> {
     }
 
     let payload: TokenPayload = serde_json::from_slice(&payload)
-        .map_err(|_| AppError::BadRequest("Invalid token payload".into()))?;
+        .map_err(|_| AppError::BadRequest(msg::INVALID_TOKEN_PAYLOAD.into()))?;
 
     Ok(payload.claims)
 }
@@ -108,12 +108,12 @@ fn verify_token_internal(
         .map_err(|e| AppError::Internal(format!("Invalid public key encoding: {}", e)))?;
 
     if public_bytes.len() != 32 {
-        return Err(AppError::Internal("Invalid public key length".into()));
+        return Err(AppError::Internal(msg::INVALID_PUBLIC_KEY_LENGTH.into()));
     }
 
     let key_bytes: [u8; 32] = public_bytes
         .try_into()
-        .map_err(|_| AppError::Internal("Failed to convert key bytes".into()))?;
+        .map_err(|_| AppError::Internal(msg::FAILED_TO_CONVERT_KEY_BYTES.into()))?;
 
     let verifying_key = VerifyingKey::from_bytes(&key_bytes)
         .map_err(|e| AppError::Internal(format!("Invalid public key: {}", e)))?;

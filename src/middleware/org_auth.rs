@@ -182,6 +182,16 @@ impl OrgMemberContext {
         self.impersonator.is_some()
     }
 
+    /// Returns impersonator info as JSON for audit log details
+    pub fn impersonator_json(&self) -> Option<serde_json::Value> {
+        self.impersonator.as_ref().map(|i| {
+            serde_json::json!({
+                "user_id": i.user_id,
+                "email": i.email
+            })
+        })
+    }
+
     /// Get audit log names pre-populated with the member's user info.
     /// Chain with `.resource()`, `.org()`, `.project()` to add more context.
     pub fn audit_names(&self) -> AuditLogNames {
@@ -450,6 +460,7 @@ pub async fn org_member_auth(
             org_id: org_id.to_string(),
             role: OrgMemberRole::Owner, // Operators get owner-level access
             created_at: operator.created_at,
+            updated_at: operator.updated_at,
             deleted_at: None,
             deleted_cascade_depth: None,
         };
@@ -575,6 +586,7 @@ pub async fn org_member_project_auth(
                         org_id: org_id.to_string(),
                         role: OrgMemberRole::Owner,
                         created_at: operator.created_at,
+                        updated_at: operator.updated_at,
                         deleted_at: None,
                         deleted_cascade_depth: None,
                     };

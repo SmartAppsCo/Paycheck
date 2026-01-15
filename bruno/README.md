@@ -61,7 +61,7 @@ Requests are grouped by resource type:
 | 1-7 | Users |
 | 8-15 | Organizations |
 | 16-20 | Operators |
-| 21-23 | Operator API Keys |
+| 21-23 | User API Keys |
 | 24-26 | Utilities (Lookup, Audit Logs) |
 
 ## How Ordering Works

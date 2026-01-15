@@ -143,7 +143,6 @@ impl MasterKey {
 
         Ok(plaintext)
     }
-
 }
 
 /// Email hasher with a stable HMAC key.
@@ -194,8 +193,8 @@ impl EmailHasher {
         let normalized = normalized.trim();
 
         // Compute HMAC-SHA256
-        let mut mac: Hmac<Sha256> = Mac::new_from_slice(&self.hmac_key)
-            .expect("HMAC can take key of any size");
+        let mut mac: Hmac<Sha256> =
+            Mac::new_from_slice(&self.hmac_key).expect("HMAC can take key of any size");
         mac.update(normalized.as_bytes());
 
         hex::encode(mac.finalize().into_bytes())

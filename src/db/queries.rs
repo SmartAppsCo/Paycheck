@@ -198,9 +198,15 @@ pub fn soft_delete_user(conn: &Connection, id: &str) -> Result<bool> {
     }
 
     // Cascade to operators and org_members (depth 1)
-    // Note: project_members will be orphaned but that's OK
+    // Note: org_members cascade will further cascade to project_members
     cascade_delete_direct(conn, "operators", "user_id", id, result.deleted_at, 1)?;
     cascade_delete_direct(conn, "org_members", "user_id", id, result.deleted_at, 1)?;
+    // Cascade to project_members (depth 2 - via org_members)
+    conn.execute(
+        "UPDATE project_members SET deleted_at = ?1, deleted_cascade_depth = 2
+         WHERE org_member_id IN (SELECT id FROM org_members WHERE user_id = ?2) AND deleted_at IS NULL",
+        params![result.deleted_at, id],
+    )?;
 
     Ok(true)
 }
@@ -393,9 +399,9 @@ pub fn create_operator(conn: &Connection, input: &CreateOperator) -> Result<Oper
     let now = now();
 
     conn.execute(
-        "INSERT INTO operators (id, user_id, role, created_at)
-         VALUES (?1, ?2, ?3, ?4)",
-        params![&id, &input.user_id, input.role.as_ref(), now],
+        "INSERT INTO operators (id, user_id, role, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![&id, &input.user_id, input.role.as_ref(), now, now],
     )?;
 
     Ok(Operator {
@@ -403,6 +409,7 @@ pub fn create_operator(conn: &Connection, input: &CreateOperator) -> Result<Oper
         user_id: input.user_id.clone(),
         role: input.role,
         created_at: now,
+        updated_at: now,
         deleted_at: None,
         deleted_cascade_depth: None,
     })
@@ -492,6 +499,7 @@ pub fn list_operators_paginated(
 
 pub fn update_operator(conn: &Connection, id: &str, input: &UpdateOperator) -> Result<()> {
     UpdateBuilder::new("operators", id)
+        .with_updated_at()
         .set_opt("role", input.role.map(|r| r.as_ref().to_string()))
         .execute(conn)?;
     Ok(())
@@ -604,6 +612,32 @@ pub fn create_api_key(
                 ));
             }
 
+            // Validate that user is a member of the organization OR is an admin+ operator
+            // Operators with admin/owner role have synthetic access to all orgs
+            let is_member: bool = conn
+                .query_row(
+                    "SELECT 1 FROM org_members WHERE user_id = ?1 AND org_id = ?2 AND deleted_at IS NULL",
+                    params![user_id, &scope.org_id],
+                    |_| Ok(true),
+                )
+                .optional()?
+                .unwrap_or(false);
+
+            let is_admin_operator: bool = conn
+                .query_row(
+                    "SELECT 1 FROM operators WHERE user_id = ?1 AND role IN ('admin', 'owner') AND deleted_at IS NULL",
+                    params![user_id],
+                    |_| Ok(true),
+                )
+                .optional()?
+                .unwrap_or(false);
+
+            if !is_member && !is_admin_operator {
+                return Err(AppError::BadRequest(
+                    "Invalid scope: user is not a member of the specified organization".into(),
+                ));
+            }
+
             // Validate that project belongs to org (if project_id is specified)
             if let Some(ref project_id) = scope.project_id {
                 let project_org_id: Option<String> = conn
@@ -622,7 +656,8 @@ pub fn create_api_key(
                     }
                     Some(org_id) if org_id != scope.org_id => {
                         return Err(AppError::BadRequest(
-                            "Invalid scope: project does not belong to the specified organization".into(),
+                            "Invalid scope: project does not belong to the specified organization"
+                                .into(),
                         ));
                     }
                     _ => {} // Valid: project exists and belongs to the org
@@ -634,7 +669,7 @@ pub fn create_api_key(
     let id = gen_id();
     let now = now();
     let key = generate_api_key();
-    let prefix = &key[..8];
+    let prefix = &key[..12];
     let key_hash = hash_secret(&key);
     let expires_at = expires_in_days.map(|days| now + days * 86400);
 
@@ -1399,9 +1434,9 @@ pub fn create_org_member(
     let now = now();
 
     conn.execute(
-        "INSERT INTO org_members (id, user_id, org_id, role, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![&id, &input.user_id, org_id, input.role.as_ref(), now],
+        "INSERT INTO org_members (id, user_id, org_id, role, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![&id, &input.user_id, org_id, input.role.as_ref(), now, now],
     )?;
 
     Ok(OrgMember {
@@ -1410,6 +1445,7 @@ pub fn create_org_member(
         org_id: org_id.to_string(),
         role: input.role,
         created_at: now,
+        updated_at: now,
         deleted_at: None,
         deleted_cascade_depth: None,
     })
@@ -1587,6 +1623,7 @@ pub fn list_org_members_with_user_paginated(
 
 pub fn update_org_member(conn: &Connection, id: &str, input: &UpdateOrgMember) -> Result<()> {
     UpdateBuilder::new("org_members", id)
+        .with_updated_at()
         .set_opt("role", input.role.map(|r| r.as_ref().to_string()))
         .execute(conn)?;
     Ok(())
@@ -1597,10 +1634,26 @@ pub fn delete_org_member(conn: &Connection, id: &str) -> Result<bool> {
     Ok(deleted > 0)
 }
 
-/// Soft delete an org member. Project_members will become orphaned (OK - they use FK CASCADE).
+/// Soft delete an org member and cascade to project_members.
 pub fn soft_delete_org_member(conn: &Connection, id: &str) -> Result<bool> {
-    use super::soft_delete::soft_delete_entity;
-    Ok(soft_delete_entity(conn, "org_members", id)?.deleted)
+    use super::soft_delete::{cascade_delete_direct, soft_delete_entity};
+
+    let result = soft_delete_entity(conn, "org_members", id)?;
+    if !result.deleted {
+        return Ok(false);
+    }
+
+    // Cascade to project_members (depth 1)
+    cascade_delete_direct(
+        conn,
+        "project_members",
+        "org_member_id",
+        id,
+        result.deleted_at,
+        1,
+    )?;
+
+    Ok(true)
 }
 
 /// Get a soft-deleted org member by ID (for restore operations).
@@ -1972,13 +2025,14 @@ pub fn create_project_member(
     let now = now();
 
     conn.execute(
-        "INSERT INTO project_members (id, org_member_id, project_id, role, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO project_members (id, org_member_id, project_id, role, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             &id,
             &input.org_member_id,
             project_id,
             input.role.as_ref(),
+            now,
             now
         ],
     )?;
@@ -1989,6 +2043,9 @@ pub fn create_project_member(
         project_id: project_id.to_string(),
         role: input.role,
         created_at: now,
+        updated_at: now,
+        deleted_at: None,
+        deleted_cascade_depth: None,
     })
 }
 
@@ -2000,7 +2057,7 @@ pub fn get_project_member(
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM project_members WHERE org_member_id = ?1 AND project_id = ?2",
+            "SELECT {} FROM project_members WHERE org_member_id = ?1 AND project_id = ?2 AND deleted_at IS NULL",
             PROJECT_MEMBER_COLS
         ),
         &[&org_member_id, &project_id],
@@ -2014,11 +2071,11 @@ pub fn get_project_member_by_id(
 ) -> Result<Option<ProjectMemberWithDetails>> {
     query_one(
         conn,
-        "SELECT pm.id, pm.org_member_id, om.user_id, pm.project_id, pm.role, pm.created_at, u.email, u.name
+        "SELECT pm.id, pm.org_member_id, om.user_id, pm.project_id, pm.role, pm.created_at, pm.updated_at, pm.deleted_at, pm.deleted_cascade_depth, u.email, u.name
          FROM project_members pm
          JOIN org_members om ON pm.org_member_id = om.id
          JOIN users u ON om.user_id = u.id
-         WHERE pm.id = ?1",
+         WHERE pm.id = ?1 AND pm.deleted_at IS NULL",
         &[&id],
     )
 }
@@ -2032,11 +2089,11 @@ pub fn get_project_member_by_user_and_project(
 ) -> Result<Option<ProjectMemberWithDetails>> {
     query_one(
         conn,
-        "SELECT pm.id, pm.org_member_id, om.user_id, pm.project_id, pm.role, pm.created_at, u.email, u.name
+        "SELECT pm.id, pm.org_member_id, om.user_id, pm.project_id, pm.role, pm.created_at, pm.updated_at, pm.deleted_at, pm.deleted_cascade_depth, u.email, u.name
          FROM project_members pm
          JOIN org_members om ON pm.org_member_id = om.id
          JOIN users u ON om.user_id = u.id
-         WHERE u.id = ?1 AND om.org_id = ?2 AND pm.project_id = ?3 AND om.deleted_at IS NULL",
+         WHERE u.id = ?1 AND om.org_id = ?2 AND pm.project_id = ?3 AND om.deleted_at IS NULL AND pm.deleted_at IS NULL",
         params![user_id, org_id, project_id],
     )
 }
@@ -2047,11 +2104,11 @@ pub fn list_project_members(
 ) -> Result<Vec<ProjectMemberWithDetails>> {
     query_all(
         conn,
-        "SELECT pm.id, pm.org_member_id, om.user_id, pm.project_id, pm.role, pm.created_at, u.email, u.name
+        "SELECT pm.id, pm.org_member_id, om.user_id, pm.project_id, pm.role, pm.created_at, pm.updated_at, pm.deleted_at, pm.deleted_cascade_depth, u.email, u.name
          FROM project_members pm
          JOIN org_members om ON pm.org_member_id = om.id
          JOIN users u ON om.user_id = u.id
-         WHERE pm.project_id = ?1
+         WHERE pm.project_id = ?1 AND pm.deleted_at IS NULL
          ORDER BY pm.created_at DESC",
         &[&project_id],
     )
@@ -2065,18 +2122,18 @@ pub fn list_project_members_paginated(
     offset: i64,
 ) -> Result<(Vec<ProjectMemberWithDetails>, i64)> {
     let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM project_members WHERE project_id = ?1",
+        "SELECT COUNT(*) FROM project_members WHERE project_id = ?1 AND deleted_at IS NULL",
         params![project_id],
         |row| row.get(0),
     )?;
 
     let items = query_all(
         conn,
-        "SELECT pm.id, pm.org_member_id, om.user_id, pm.project_id, pm.role, pm.created_at, u.email, u.name
+        "SELECT pm.id, pm.org_member_id, om.user_id, pm.project_id, pm.role, pm.created_at, pm.updated_at, pm.deleted_at, pm.deleted_cascade_depth, u.email, u.name
          FROM project_members pm
          JOIN org_members om ON pm.org_member_id = om.id
          JOIN users u ON om.user_id = u.id
-         WHERE pm.project_id = ?1
+         WHERE pm.project_id = ?1 AND pm.deleted_at IS NULL
          ORDER BY pm.created_at DESC
          LIMIT ?2 OFFSET ?3",
         params![project_id, limit, offset],
@@ -2092,18 +2149,25 @@ pub fn update_project_member(
     input: &UpdateProjectMember,
 ) -> Result<bool> {
     let affected = conn.execute(
-        "UPDATE project_members SET role = ?1 WHERE id = ?2 AND project_id = ?3",
-        params![input.role.as_ref(), id, project_id],
+        "UPDATE project_members SET role = ?1, updated_at = ?2 WHERE id = ?3 AND project_id = ?4",
+        params![input.role.as_ref(), now(), id, project_id],
     )?;
     Ok(affected > 0)
 }
 
-pub fn delete_project_member(conn: &Connection, id: &str, project_id: &str) -> Result<bool> {
-    let deleted = conn.execute(
-        "DELETE FROM project_members WHERE id = ?1 AND project_id = ?2",
+/// Soft delete a project member. Returns true if the member was found and soft deleted.
+pub fn soft_delete_project_member(conn: &Connection, id: &str, project_id: &str) -> Result<bool> {
+    use super::soft_delete::soft_delete_entity;
+    // Verify project_id matches before soft deleting
+    let exists: bool = conn.query_row(
+        "SELECT 1 FROM project_members WHERE id = ?1 AND project_id = ?2 AND deleted_at IS NULL",
         params![id, project_id],
-    )?;
-    Ok(deleted > 0)
+        |_| Ok(true),
+    ).unwrap_or(false);
+    if !exists {
+        return Ok(false);
+    }
+    Ok(soft_delete_entity(conn, "project_members", id)?.deleted)
 }
 
 // ============ Products ============
@@ -2816,19 +2880,20 @@ pub fn add_revoked_jti(
     jti: &str,
     details: Option<&str>,
 ) -> Result<()> {
-    let id = gen_id();
     let now = now();
     conn.execute(
-        "INSERT OR IGNORE INTO revoked_jtis (id, license_id, jti, revoked_at, details) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![id, license_id, jti, now, details],
+        "INSERT OR IGNORE INTO revoked_jtis (jti, license_id, revoked_at, details) VALUES (?1, ?2, ?3, ?4)",
+        params![jti, license_id, now, details],
     )?;
     Ok(())
 }
 
-pub fn is_jti_revoked(conn: &Connection, license_id: &str, jti: &str) -> Result<bool> {
+/// Check if a JTI has been revoked.
+/// JTIs are globally unique UUIDs, so no need to scope by license_id.
+pub fn is_jti_revoked(conn: &Connection, jti: &str) -> Result<bool> {
     let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM revoked_jtis WHERE license_id = ?1 AND jti = ?2",
-        params![license_id, jti],
+        "SELECT COUNT(*) FROM revoked_jtis WHERE jti = ?1",
+        params![jti],
         |row| row.get(0),
     )?;
     Ok(count > 0)
@@ -3002,20 +3067,18 @@ pub fn create_activation_code(
     license_id: &str,
     prefix: &str,
 ) -> Result<ActivationCode> {
-    let id = gen_id();
     let code = generate_activation_code(prefix);
     let code_hash = hash_secret(&code);
     let now = now();
     let expires_at = now + ACTIVATION_CODE_TTL_SECONDS;
 
     conn.execute(
-        "INSERT INTO activation_codes (id, code_hash, license_id, expires_at, used, created_at)
-         VALUES (?1, ?2, ?3, ?4, 0, ?5)",
-        params![&id, &code_hash, license_id, expires_at, now],
+        "INSERT INTO activation_codes (code_hash, license_id, expires_at, used, created_at)
+         VALUES (?1, ?2, ?3, 0, ?4)",
+        params![&code_hash, license_id, expires_at, now],
     )?;
 
     Ok(ActivationCode {
-        id,
         code,
         license_id: license_id.to_string(),
         expires_at,
@@ -3049,10 +3112,7 @@ pub fn get_activation_code_by_code(
 ///
 /// Returns Ok(Some(ActivationCode)) if successfully claimed.
 /// Returns Ok(None) if the code doesn't exist, is already used, or is expired.
-pub fn try_claim_activation_code(
-    conn: &Connection,
-    code: &str,
-) -> Result<Option<ActivationCode>> {
+pub fn try_claim_activation_code(conn: &Connection, code: &str) -> Result<Option<ActivationCode>> {
     let code_hash = hash_secret(code);
     let now = now();
 
@@ -3078,10 +3138,11 @@ pub fn try_claim_activation_code(
     )
 }
 
-pub fn mark_activation_code_used(conn: &Connection, id: &str) -> Result<()> {
+pub fn mark_activation_code_used(conn: &Connection, code: &str) -> Result<()> {
+    let code_hash = hash_secret(code);
     conn.execute(
-        "UPDATE activation_codes SET used = 1 WHERE id = ?1",
-        params![id],
+        "UPDATE activation_codes SET used = 1 WHERE code_hash = ?1",
+        params![code_hash],
     )?;
     Ok(())
 }
@@ -3394,10 +3455,9 @@ pub fn purge_old_payment_sessions(conn: &Connection, retention_days: i64) -> Res
 /// Uses INSERT OR IGNORE for atomicity - if the (provider, event_id) pair
 /// already exists, the insert is silently ignored and we return false.
 pub fn try_record_webhook_event(conn: &Connection, provider: &str, event_id: &str) -> Result<bool> {
-    let id = gen_id();
     let affected = conn.execute(
-        "INSERT OR IGNORE INTO webhook_events (id, provider, event_id, created_at) VALUES (?1, ?2, ?3, ?4)",
-        params![id, provider, event_id, now()],
+        "INSERT OR IGNORE INTO webhook_events (provider, event_id, created_at) VALUES (?1, ?2, ?3)",
+        params![provider, event_id, now()],
     )?;
     Ok(affected > 0)
 }

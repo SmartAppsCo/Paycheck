@@ -8,6 +8,16 @@ use rusqlite::{Connection, OptionalExtension, Row, ToSql};
 
 use crate::models::*;
 
+/// Parse a string column into an enum type, converting parse errors to rusqlite errors.
+///
+/// This provides graceful error handling instead of panicking when database
+/// contains invalid enum values (from corruption, migration errors, etc.).
+fn parse_enum<T: std::str::FromStr>(row: &Row, col: usize, col_name: &str) -> rusqlite::Result<T> {
+    row.get::<_, String>(col)?.parse::<T>().map_err(|_| {
+        rusqlite::Error::InvalidColumnType(col, col_name.to_string(), rusqlite::types::Type::Text)
+    })
+}
+
 /// Trait for constructing a type from a database row.
 ///
 /// Implementing this trait allows using the `query_one` and `query_all`
@@ -46,17 +56,17 @@ pub fn query_all<T: FromRow>(
 pub const USER_COLS: &str =
     "id, email, name, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
-pub const OPERATOR_COLS: &str = "id, user_id, role, created_at, deleted_at, deleted_cascade_depth";
+pub const OPERATOR_COLS: &str =
+    "id, user_id, role, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
-pub const OPERATOR_WITH_USER_COLS: &str =
-    "o.id, o.user_id, u.email, u.name, o.role, o.created_at, o.deleted_at, o.deleted_cascade_depth";
+pub const OPERATOR_WITH_USER_COLS: &str = "o.id, o.user_id, u.email, u.name, o.role, o.created_at, o.updated_at, o.deleted_at, o.deleted_cascade_depth";
 
 pub const ORGANIZATION_COLS: &str = "id, name, stripe_config, ls_config, resend_api_key, payment_provider, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
 pub const ORG_MEMBER_COLS: &str =
-    "id, user_id, org_id, role, created_at, deleted_at, deleted_cascade_depth";
+    "id, user_id, org_id, role, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
-pub const ORG_MEMBER_WITH_USER_COLS: &str = "m.id, m.user_id, u.email, u.name, m.org_id, m.role, m.created_at, m.deleted_at, m.deleted_cascade_depth";
+pub const ORG_MEMBER_WITH_USER_COLS: &str = "m.id, m.user_id, u.email, u.name, m.org_id, m.role, m.created_at, m.updated_at, m.deleted_at, m.deleted_cascade_depth";
 
 pub const API_KEY_COLS: &str = "id, user_id, name, key_prefix, key_hash, user_manageable, created_at, last_used_at, expires_at, revoked_at";
 
@@ -64,7 +74,7 @@ pub const API_KEY_SCOPE_COLS: &str = "api_key_id, org_id, project_id, access";
 
 pub const PROJECT_COLS: &str = "id, org_id, name, license_key_prefix, private_key, public_key, redirect_url, email_from, email_enabled, email_webhook_url, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
-pub const PROJECT_MEMBER_COLS: &str = "id, org_member_id, project_id, role, created_at";
+pub const PROJECT_MEMBER_COLS: &str = "id, org_member_id, project_id, role, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
 pub const PRODUCT_COLS: &str = "id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, features, created_at, deleted_at, deleted_cascade_depth";
 
@@ -79,7 +89,7 @@ pub const DEVICE_COLS: &str =
 pub const PAYMENT_SESSION_COLS: &str =
     "id, product_id, customer_id, created_at, completed, license_id";
 
-pub const ACTIVATION_CODE_COLS: &str = "id, code_hash, license_id, expires_at, used, created_at";
+pub const ACTIVATION_CODE_COLS: &str = "code_hash, license_id, expires_at, used, created_at";
 
 // ============ FromRow Implementations ============
 
@@ -102,10 +112,11 @@ impl FromRow for Operator {
         Ok(Operator {
             id: row.get(0)?,
             user_id: row.get(1)?,
-            role: row.get::<_, String>(2)?.parse::<OperatorRole>().unwrap(),
+            role: parse_enum(row, 2, "role")?,
             created_at: row.get(3)?,
-            deleted_at: row.get(4)?,
-            deleted_cascade_depth: row.get(5)?,
+            updated_at: row.get(4)?,
+            deleted_at: row.get(5)?,
+            deleted_cascade_depth: row.get(6)?,
         })
     }
 }
@@ -117,10 +128,11 @@ impl FromRow for OperatorWithUser {
             user_id: row.get(1)?,
             email: row.get(2)?,
             name: row.get(3)?,
-            role: row.get::<_, String>(4)?.parse::<OperatorRole>().unwrap(),
+            role: parse_enum(row, 4, "role")?,
             created_at: row.get(5)?,
-            deleted_at: row.get(6)?,
-            deleted_cascade_depth: row.get(7)?,
+            updated_at: row.get(6)?,
+            deleted_at: row.get(7)?,
+            deleted_cascade_depth: row.get(8)?,
         })
     }
 }
@@ -152,10 +164,11 @@ impl FromRow for OrgMember {
             id: row.get(0)?,
             user_id: row.get(1)?,
             org_id: row.get(2)?,
-            role: row.get::<_, String>(3)?.parse::<OrgMemberRole>().unwrap(),
+            role: parse_enum(row, 3, "role")?,
             created_at: row.get(4)?,
-            deleted_at: row.get(5)?,
-            deleted_cascade_depth: row.get(6)?,
+            updated_at: row.get(5)?,
+            deleted_at: row.get(6)?,
+            deleted_cascade_depth: row.get(7)?,
         })
     }
 }
@@ -168,10 +181,11 @@ impl FromRow for OrgMemberWithUser {
             email: row.get(2)?,
             name: row.get(3)?,
             org_id: row.get(4)?,
-            role: row.get::<_, String>(5)?.parse::<OrgMemberRole>().unwrap(),
+            role: parse_enum(row, 5, "role")?,
             created_at: row.get(6)?,
-            deleted_at: row.get(7)?,
-            deleted_cascade_depth: row.get(8)?,
+            updated_at: row.get(7)?,
+            deleted_at: row.get(8)?,
+            deleted_cascade_depth: row.get(9)?,
         })
     }
 }
@@ -199,7 +213,7 @@ impl FromRow for ApiKeyScope {
             api_key_id: row.get(0)?,
             org_id: row.get(1)?,
             project_id: row.get(2)?,
-            access: row.get::<_, String>(3)?.parse::<AccessLevel>().unwrap(),
+            access: parse_enum(row, 3, "access")?,
         })
     }
 }
@@ -231,11 +245,11 @@ impl FromRow for ProjectMember {
             id: row.get(0)?,
             org_member_id: row.get(1)?,
             project_id: row.get(2)?,
-            role: row
-                .get::<_, String>(3)?
-                .parse::<ProjectMemberRole>()
-                .unwrap(),
+            role: parse_enum(row, 3, "role")?,
             created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+            deleted_at: row.get(6)?,
+            deleted_cascade_depth: row.get(7)?,
         })
     }
 }
@@ -247,13 +261,13 @@ impl FromRow for ProjectMemberWithDetails {
             org_member_id: row.get(1)?,
             user_id: row.get(2)?,
             project_id: row.get(3)?,
-            role: row
-                .get::<_, String>(4)?
-                .parse::<ProjectMemberRole>()
-                .unwrap(),
+            role: parse_enum(row, 4, "role")?,
             created_at: row.get(5)?,
-            email: row.get(6)?,
-            name: row.get(7)?,
+            updated_at: row.get(6)?,
+            deleted_at: row.get(7)?,
+            deleted_cascade_depth: row.get(8)?,
+            email: row.get(9)?,
+            name: row.get(10)?,
         })
     }
 }
@@ -323,7 +337,7 @@ impl FromRow for Device {
             id: row.get(0)?,
             license_id: row.get(1)?,
             device_id: row.get(2)?,
-            device_type: row.get::<_, String>(3)?.parse::<DeviceType>().unwrap(),
+            device_type: parse_enum(row, 3, "device_type")?,
             name: row.get(4)?,
             jti: row.get(5)?,
             activated_at: row.get(6)?,
@@ -348,12 +362,11 @@ impl FromRow for PaymentSession {
 impl FromRow for ActivationCode {
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
         Ok(ActivationCode {
-            id: row.get(0)?,
-            code: row.get(1)?,
-            license_id: row.get(2)?,
-            expires_at: row.get(3)?,
-            used: row.get::<_, i32>(4)? != 0,
-            created_at: row.get(5)?,
+            code: row.get(0)?,
+            license_id: row.get(1)?,
+            expires_at: row.get(2)?,
+            used: row.get::<_, i32>(3)? != 0,
+            created_at: row.get(4)?,
         })
     }
 }

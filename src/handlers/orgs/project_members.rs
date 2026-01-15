@@ -4,7 +4,7 @@ use axum::{
 };
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path};
 use crate::middleware::OrgMemberContext;
 use crate::models::{
@@ -28,7 +28,7 @@ pub async fn create_project_member(
     Json(input): Json<CreateProjectMember>,
 ) -> Result<Json<ProjectMemberWithDetails>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
     let conn = state.db.get()?;
@@ -36,7 +36,7 @@ pub async fn create_project_member(
 
     // Verify the org member exists and belongs to the same org (with user details for audit)
     let target_member = queries::get_org_member_with_user_by_id(&conn, &input.org_member_id)?
-        .ok_or_else(|| AppError::NotFound("Org member not found".into()))?;
+        .or_not_found(msg::ORG_MEMBER_NOT_FOUND)?;
 
     if target_member.org_id != path.org_id {
         return Err(AppError::BadRequest(
@@ -71,6 +71,9 @@ pub async fn create_project_member(
         project_id: project_member.project_id,
         role: project_member.role,
         created_at: project_member.created_at,
+        updated_at: project_member.updated_at,
+        deleted_at: project_member.deleted_at,
+        deleted_cascade_depth: project_member.deleted_cascade_depth,
         email: target_member.email,
         name: target_member.name,
     }))
@@ -101,7 +104,7 @@ pub async fn get_project_member(
         &path.org_id,
         &path.project_id,
     )?
-    .ok_or_else(|| AppError::NotFound("User is not a member of this project".into()))?;
+    .or_not_found(msg::NOT_PROJECT_MEMBER)?;
 
     Ok(Json(member))
 }
@@ -114,7 +117,7 @@ pub async fn update_project_member(
     Json(input): Json<UpdateProjectMember>,
 ) -> Result<Json<serde_json::Value>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
     let conn = state.db.get()?;
@@ -127,7 +130,7 @@ pub async fn update_project_member(
         &path.org_id,
         &path.project_id,
     )?
-    .ok_or_else(|| AppError::NotFound("User is not a member of this project".into()))?;
+    .or_not_found(msg::NOT_PROJECT_MEMBER)?;
 
     let updated = queries::update_project_member(&conn, &existing.id, &path.project_id, &input)?;
     if !updated {
@@ -160,7 +163,7 @@ pub async fn delete_project_member(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
     let conn = state.db.get()?;
@@ -173,9 +176,9 @@ pub async fn delete_project_member(
         &path.org_id,
         &path.project_id,
     )?
-    .ok_or_else(|| AppError::NotFound("User is not a member of this project".into()))?;
+    .or_not_found(msg::NOT_PROJECT_MEMBER)?;
 
-    let deleted = queries::delete_project_member(&conn, &existing.id, &path.project_id)?;
+    let deleted = queries::soft_delete_project_member(&conn, &existing.id, &path.project_id)?;
     if !deleted {
         return Err(AppError::NotFound(
             "User is not a member of this project".into(),

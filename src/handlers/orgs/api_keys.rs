@@ -5,7 +5,7 @@ use axum::{
 use serde::Deserialize;
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path};
 use crate::middleware::OrgMemberContext;
 use crate::models::{ActorType, ApiKeyCreated, ApiKeyInfo, AuditAction, CreateApiKey};
@@ -45,7 +45,7 @@ pub async fn create_api_key(
     // Get the target member with user details
     let target_member =
         queries::get_org_member_with_user_by_user_and_org(&conn, &path.user_id, &path.org_id)?
-            .ok_or_else(|| AppError::NotFound("User is not a member of this org".into()))?;
+            .or_not_found(msg::NOT_ORG_MEMBER)?;
 
     // Validate that all scopes are for the current org (security boundary)
     // Users should only be able to create scopes for orgs they're managing keys within
@@ -86,10 +86,7 @@ pub async fn create_api_key(
             "target_user_id": path.user_id,
             "target_email": target_member.email,
             "name": input.name,
-            "impersonator": ctx.impersonator.as_ref().map(|i| serde_json::json!({
-                "user_id": i.user_id,
-                "email": i.email
-            }))
+            "impersonator": ctx.impersonator_json()
         }))
         .org(&path.org_id)
         .names(&ctx.audit_names().resource(key_record.name.clone()))
@@ -125,7 +122,7 @@ pub async fn list_api_keys(
     // Verify the user is a member of this org
     let _target_member =
         queries::get_org_member_with_user_by_user_and_org(&conn, &path.user_id, &path.org_id)?
-            .ok_or_else(|| AppError::NotFound("User is not a member of this org".into()))?;
+            .or_not_found(msg::NOT_ORG_MEMBER)?;
 
     let limit = query.limit();
     let offset = query.offset();
@@ -169,14 +166,14 @@ pub async fn revoke_api_key(
     // Verify the user is a member of this org
     let target_member =
         queries::get_org_member_with_user_by_user_and_org(&conn, &path.user_id, &path.org_id)?
-            .ok_or_else(|| AppError::NotFound("User is not a member of this org".into()))?;
+            .or_not_found(msg::NOT_ORG_MEMBER)?;
 
     // Verify key exists and belongs to the right user
-    let key = queries::get_api_key_by_id(&conn, &path.key_id)?
-        .ok_or_else(|| AppError::NotFound("API key not found".into()))?;
+    let key =
+        queries::get_api_key_by_id(&conn, &path.key_id)?.or_not_found(msg::API_KEY_NOT_FOUND)?;
 
     if key.user_id != path.user_id {
-        return Err(AppError::NotFound("API key not found".into()));
+        return Err(AppError::NotFound(msg::API_KEY_NOT_FOUND.into()));
     }
 
     queries::revoke_api_key(&conn, &path.key_id)?;
@@ -189,10 +186,7 @@ pub async fn revoke_api_key(
             "target_user_id": path.user_id,
             "target_email": target_member.email,
             "key_name": key.name,
-            "impersonator": ctx.impersonator.as_ref().map(|i| serde_json::json!({
-                "user_id": i.user_id,
-                "email": i.email
-            }))
+            "impersonator": ctx.impersonator_json()
         }))
         .org(&path.org_id)
         .names(&ctx.audit_names().resource(key.name.clone()))

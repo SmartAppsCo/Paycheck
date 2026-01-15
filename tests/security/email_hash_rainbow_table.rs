@@ -206,5 +206,8 @@ fn test_secure_hash_database_lookup() {
     let wrong_hash = state.email_hasher.hash("other@example.com");
     let not_found = queries::get_licenses_by_email_hash(&conn, &project.id, &wrong_hash).unwrap();
 
-    assert!(not_found.is_empty(), "Wrong email should not find the license");
+    assert!(
+        not_found.is_empty(),
+        "Wrong email should not find the license"
+    );
 }

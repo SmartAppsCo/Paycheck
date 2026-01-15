@@ -231,7 +231,7 @@ fn setup_corrupted_lemonsqueezy_config(conn: &rusqlite::Connection, org_id: &str
     queries::update_organization_encrypted_configs(
         conn,
         org_id,
-        None, // No Stripe config
+        None,                   // No Stripe config
         Some(&corrupted_bytes), // Corrupted LemonSqueezy config
         None,
     )

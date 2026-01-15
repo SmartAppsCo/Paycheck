@@ -13,9 +13,9 @@
 mod common;
 use common::{ONE_YEAR, *};
 
+use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
-use axum::Router;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use serde_json::{Value, json};
@@ -119,9 +119,8 @@ fn operator_app_with_audit() -> (Router, AppState) {
 /// Helper to parse response body as JSON
 async fn body_json(response: axum::response::Response) -> Value {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    serde_json::from_slice(&body).unwrap_or_else(|_| {
-        json!({ "raw": String::from_utf8_lossy(&body).to_string() })
-    })
+    serde_json::from_slice(&body)
+        .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&body).to_string() }))
 }
 
 // ============================================================================
@@ -205,7 +204,10 @@ mod operation_logging {
 
         let json = body_json(response).await;
         let items = json["items"].as_array().unwrap();
-        assert!(!items.is_empty(), "should have audit log for license creation");
+        assert!(
+            !items.is_empty(),
+            "should have audit log for license creation"
+        );
 
         let log = &items[0];
         assert_eq!(
@@ -260,8 +262,12 @@ mod operation_logging {
                 create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             org_id = org.id;
             project_id = project.id;
@@ -556,7 +562,10 @@ mod operation_logging {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri(format!("/orgs/{}/audit-logs?action=create_org_member", org_id))
+                    .uri(format!(
+                        "/orgs/{}/audit-logs?action=create_org_member",
+                        org_id
+                    ))
                     .header("Authorization", format!("Bearer {}", api_key))
                     .body(Body::empty())
                     .unwrap(),
@@ -648,7 +657,10 @@ mod operation_logging {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri(format!("/orgs/{}/audit-logs?action=delete_org_member", org_id))
+                    .uri(format!(
+                        "/orgs/{}/audit-logs?action=delete_org_member",
+                        org_id
+                    ))
                     .header("Authorization", format!("Bearer {}", api_key))
                     .body(Body::empty())
                     .unwrap(),
@@ -1292,7 +1304,10 @@ mod impersonation_logging {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri(format!("/orgs/{}/audit-logs?action=create_org_member", org_id))
+                    .uri(format!(
+                        "/orgs/{}/audit-logs?action=create_org_member",
+                        org_id
+                    ))
                     .header("Authorization", format!("Bearer {}", operator_api_key))
                     .header("X-On-Behalf-Of", &member_user_id)
                     .body(Body::empty())
@@ -1546,10 +1561,7 @@ mod org_scoped_queries {
 
         // Verify org2's action is not visible
         let has_org2_action = items.iter().any(|i| i["action"] == "action_org2");
-        assert!(
-            !has_org2_action,
-            "should not see other org's audit logs"
-        );
+        assert!(!has_org2_action, "should not see other org's audit logs");
     }
 
     /// Verify that query param org_id cannot override path org_id.
@@ -1744,7 +1756,10 @@ mod org_scoped_queries {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri(format!("/orgs/{}/audit-logs?project_id={}", org_id, project_id))
+                    .uri(format!(
+                        "/orgs/{}/audit-logs?project_id={}",
+                        org_id, project_id
+                    ))
                     .header("Authorization", format!("Bearer {}", api_key))
                     .body(Body::empty())
                     .unwrap(),

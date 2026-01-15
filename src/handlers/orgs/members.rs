@@ -4,7 +4,7 @@ use axum::{
 };
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path, RestoreRequest};
 use crate::middleware::OrgMemberContext;
 use crate::models::{
@@ -30,7 +30,7 @@ pub async fn create_org_member(
 
     // Verify the user exists
     let user = queries::get_user_by_id(&conn, &input.user_id)?
-        .ok_or_else(|| AppError::BadRequest("User not found".into()))?;
+        .ok_or_else(|| AppError::BadRequest(msg::USER_NOT_FOUND.into()))?;
 
     let member = queries::create_org_member(&conn, &org_id, &input)?;
 
@@ -42,10 +42,7 @@ pub async fn create_org_member(
             "user_id": input.user_id,
             "email": user.email,
             "role": input.role,
-            "impersonator": ctx.impersonator.as_ref().map(|i| serde_json::json!({
-                "user_id": i.user_id,
-                "email": i.email
-            }))
+            "impersonator": ctx.impersonator_json()
         }))
         .org(&org_id)
         .names(&ctx.audit_names().resource_user(&user.name, &user.email))
@@ -83,7 +80,7 @@ pub async fn get_org_member(
     let conn = state.db.get()?;
     let member =
         queries::get_org_member_with_user_by_user_and_org(&conn, &path.user_id, &path.org_id)?
-            .ok_or_else(|| AppError::NotFound("User is not a member of this org".into()))?;
+            .or_not_found(msg::NOT_ORG_MEMBER)?;
 
     Ok(Json(member))
 }
@@ -102,12 +99,12 @@ pub async fn update_org_member(
 
     // Prevent changing your own role
     if path.user_id == ctx.member.user_id && input.role.is_some() {
-        return Err(AppError::BadRequest("Cannot change your own role".into()));
+        return Err(AppError::BadRequest(msg::CANNOT_CHANGE_OWN_ROLE.into()));
     }
 
     let existing =
         queries::get_org_member_with_user_by_user_and_org(&conn, &path.user_id, &path.org_id)?
-            .ok_or_else(|| AppError::NotFound("User is not a member of this org".into()))?;
+            .or_not_found(msg::NOT_ORG_MEMBER)?;
 
     queries::update_org_member(&conn, &existing.id, &input)?;
 
@@ -117,10 +114,7 @@ pub async fn update_org_member(
         .resource("org_member", &existing.id)
         .details(&serde_json::json!({
             "role": input.role,
-            "impersonator": ctx.impersonator.as_ref().map(|i| serde_json::json!({
-                "user_id": i.user_id,
-                "email": i.email
-            }))
+            "impersonator": ctx.impersonator_json()
         }))
         .org(&path.org_id)
         .names(
@@ -132,7 +126,7 @@ pub async fn update_org_member(
 
     let member =
         queries::get_org_member_with_user_by_user_and_org(&conn, &path.user_id, &path.org_id)?
-            .ok_or_else(|| AppError::NotFound("User is not a member of this org".into()))?;
+            .or_not_found(msg::NOT_ORG_MEMBER)?;
 
     Ok(Json(member))
 }
@@ -150,12 +144,12 @@ pub async fn delete_org_member(
 
     // Prevent self-deletion
     if path.user_id == ctx.member.user_id {
-        return Err(AppError::BadRequest("Cannot delete yourself".into()));
+        return Err(AppError::BadRequest(msg::CANNOT_DELETE_SELF.into()));
     }
 
     let existing =
         queries::get_org_member_with_user_by_user_and_org(&conn, &path.user_id, &path.org_id)?
-            .ok_or_else(|| AppError::NotFound("User is not a member of this org".into()))?;
+            .or_not_found(msg::NOT_ORG_MEMBER)?;
 
     queries::soft_delete_org_member(&conn, &existing.id)?;
 
@@ -166,10 +160,7 @@ pub async fn delete_org_member(
         .details(&serde_json::json!({
             "user_id": path.user_id,
             "email": existing.email,
-            "impersonator": ctx.impersonator.as_ref().map(|i| serde_json::json!({
-                "user_id": i.user_id,
-                "email": i.email
-            }))
+            "impersonator": ctx.impersonator_json()
         }))
         .org(&path.org_id)
         .names(
@@ -197,13 +188,13 @@ pub async fn restore_org_member(
 
     let existing =
         queries::get_deleted_org_member_by_user_and_org(&conn, &path.user_id, &path.org_id)?
-            .ok_or_else(|| AppError::NotFound("Deleted member not found".into()))?;
+            .or_not_found(msg::DELETED_MEMBER_NOT_FOUND)?;
 
     queries::restore_org_member(&conn, &existing.id, input.force)?;
 
     // Get user info for audit log
     let user = queries::get_user_by_id(&conn, &path.user_id)?
-        .ok_or_else(|| AppError::Internal("User not found".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::USER_NOT_FOUND.into()))?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))
@@ -212,10 +203,7 @@ pub async fn restore_org_member(
         .details(&serde_json::json!({
             "user_id": path.user_id,
             "force": input.force,
-            "impersonator": ctx.impersonator.as_ref().map(|i| serde_json::json!({
-                "user_id": i.user_id,
-                "email": i.email
-            }))
+            "impersonator": ctx.impersonator_json()
         }))
         .org(&path.org_id)
         .names(&ctx.audit_names().resource_user(&user.name, &user.email))
@@ -224,7 +212,7 @@ pub async fn restore_org_member(
 
     let member =
         queries::get_org_member_with_user_by_user_and_org(&conn, &path.user_id, &path.org_id)?
-            .ok_or_else(|| AppError::Internal("Member not found after restore".into()))?;
+            .ok_or_else(|| AppError::Internal(msg::MEMBER_NOT_FOUND_AFTER_RESTORE.into()))?;
 
     Ok(Json(member))
 }

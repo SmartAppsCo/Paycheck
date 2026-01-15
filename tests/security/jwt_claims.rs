@@ -23,7 +23,7 @@ use tower::ServiceExt;
 
 #[path = "../common/mod.rs"]
 mod common;
-use common::{*, ONE_YEAR, ONE_DAY, UPDATES_VALID_DAYS};
+use common::{ONE_DAY, ONE_YEAR, UPDATES_VALID_DAYS, *};
 
 use paycheck::db::AppState;
 use paycheck::handlers::public::{refresh_token, validate_license};
@@ -112,7 +112,12 @@ fn setup_complete_license(state: &AppState) -> (String, Vec<u8>, String, String,
     let org = create_test_org(&conn, "Test Org");
     let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
     let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-    let license = create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+    let license = create_test_license(
+        &conn,
+        &project.id,
+        &product.id,
+        Some(future_timestamp(ONE_YEAR)),
+    );
 
     // Create a device for this license
     let jti = uuid::Uuid::new_v4().to_string();
@@ -171,13 +176,21 @@ mod expiration_validation {
         );
 
         // Sign a token normally (1 hour validity by default)
-        let token =
-            jwt::sign_claims(&claims, &private_key, "license-id", "project-name", "jti-123")
-                .unwrap();
+        let token = jwt::sign_claims(
+            &claims,
+            &private_key,
+            "license-id",
+            "project-name",
+            "jti-123",
+        )
+        .unwrap();
 
         // This should work immediately
         let result = jwt::verify_token(&token, &public_key);
-        assert!(result.is_ok(), "fresh token should verify successfully with valid signature");
+        assert!(
+            result.is_ok(),
+            "fresh token should verify successfully with valid signature"
+        );
 
         // Simulate an expired token by creating one with expired claims
         // Note: The jwt-simple library handles exp internally, so we test with
@@ -198,13 +211,21 @@ mod expiration_validation {
             "uuid",
         );
 
-        let token =
-            jwt::sign_claims(&claims, &private_key, "license-id", "project-name", "jti-123")
-                .unwrap();
+        let token = jwt::sign_claims(
+            &claims,
+            &private_key,
+            "license-id",
+            "project-name",
+            "jti-123",
+        )
+        .unwrap();
 
         // allow_expired should accept it regardless of exp claim
         let result = jwt::verify_token_allow_expired(&token, &public_key);
-        assert!(result.is_ok(), "allow_expired mode should accept tokens with valid signature regardless of expiration");
+        assert!(
+            result.is_ok(),
+            "allow_expired mode should accept tokens with valid signature regardless of expiration"
+        );
     }
 
     /// Verify that /validate endpoint rejects requests with invalid JTI (not found).
@@ -299,7 +320,12 @@ mod expiration_validation {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
         let product = create_test_product(&conn, &project.id, "Pro", "pro");
-        let license = create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
 
         let private_key = state
             .master_key
@@ -317,8 +343,8 @@ mod expiration_validation {
             "uuid",
         );
 
-        let token = jwt::sign_claims(&claims, &private_key, &license.id, &project.name, &fake_jti)
-            .unwrap();
+        let token =
+            jwt::sign_claims(&claims, &private_key, &license.id, &project.name, &fake_jti).unwrap();
 
         let response = app
             .oneshot(
@@ -397,9 +423,14 @@ mod issuer_validation {
             "uuid",
         );
 
-        let token =
-            jwt::sign_claims(&claims, &private_key, "license-id", "project-name", "jti-123")
-                .unwrap();
+        let token = jwt::sign_claims(
+            &claims,
+            &private_key,
+            "license-id",
+            "project-name",
+            "jti-123",
+        )
+        .unwrap();
 
         // Verify the token has correct issuer
         let verified = jwt::verify_token(&token, &public_key).unwrap();
@@ -424,9 +455,14 @@ mod issuer_validation {
             "uuid",
         );
 
-        let token =
-            jwt::sign_claims(&claims, &private_key, "license-id", "project-name", "jti-123")
-                .unwrap();
+        let token = jwt::sign_claims(
+            &claims,
+            &private_key,
+            "license-id",
+            "project-name",
+            "jti-123",
+        )
+        .unwrap();
 
         // decode_unverified should extract claims without checking issuer
         let decoded = jwt::decode_unverified(&token).unwrap();
@@ -465,8 +501,7 @@ mod audience_validation {
 
         // Sign with a specific audience
         let token =
-            jwt::sign_claims(&claims, &private_key, "license-id", "my-project", "jti-123")
-                .unwrap();
+            jwt::sign_claims(&claims, &private_key, "license-id", "my-project", "jti-123").unwrap();
 
         // Verify should succeed (audience not enforced)
         let verified = jwt::verify_token(&token, &public_key).unwrap();
@@ -530,8 +565,7 @@ mod jti_validation {
 
         let expected_jti = "unique-jti-12345";
         let token =
-            jwt::sign_claims(&claims, &private_key, "license-id", "project", expected_jti)
-                .unwrap();
+            jwt::sign_claims(&claims, &private_key, "license-id", "project", expected_jti).unwrap();
 
         let verified = jwt::verify_token(&token, &public_key).unwrap();
         assert_eq!(
@@ -570,10 +604,7 @@ mod jti_validation {
             .await
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
-        assert_eq!(
-            json["valid"], true,
-            "JTI should be valid before revocation"
-        );
+        assert_eq!(json["valid"], true, "JTI should be valid before revocation");
 
         // Revoke the JTI
         {
@@ -700,7 +731,12 @@ mod signature_validation {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
         let product = create_test_product(&conn, &project.id, "Pro", "pro");
-        let _license = create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let _license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
 
         // Create a token signed with a DIFFERENT key (attacker's key)
         let (attacker_private_key, _) = jwt::generate_keypair();
@@ -806,8 +842,7 @@ mod device_type_validation {
         );
 
         let token_uuid =
-            jwt::sign_claims(&claims_uuid, &private_key, "license-id", "project", "jti-1")
-                .unwrap();
+            jwt::sign_claims(&claims_uuid, &private_key, "license-id", "project", "jti-1").unwrap();
         let verified = jwt::verify_token(&token_uuid, &public_key).unwrap();
         assert_eq!(
             verified.custom.device_type, "uuid",
@@ -824,9 +859,14 @@ mod device_type_validation {
             "machine",
         );
 
-        let token_machine =
-            jwt::sign_claims(&claims_machine, &private_key, "license-id", "project", "jti-2")
-                .unwrap();
+        let token_machine = jwt::sign_claims(
+            &claims_machine,
+            &private_key,
+            "license-id",
+            "project",
+            "jti-2",
+        )
+        .unwrap();
         let verified = jwt::verify_token(&token_machine, &public_key).unwrap();
         assert_eq!(
             verified.custom.device_type, "machine",
@@ -905,10 +945,7 @@ mod malformed_jwt {
 
         // Header and payload only (missing signature)
         let result = jwt::decode_unverified("eyJhbGciOiJIUzI1NiJ9.eyJ0ZXN0IjoxfQ");
-        assert!(
-            result.is_err(),
-            "JWT without signature should be rejected"
-        );
+        assert!(result.is_err(), "JWT without signature should be rejected");
 
         // Same tests for verify_token
         let result = jwt::verify_token("eyJhbGciOiJIUzI1NiJ9", &public_key);
@@ -1269,15 +1306,24 @@ mod claims_content {
             license_exp: Some(1234567890),
             updates_exp: Some(1234567891),
             tier: "enterprise".to_string(),
-            features: vec!["feat1".to_string(), "feat2".to_string(), "feat3".to_string()],
+            features: vec![
+                "feat1".to_string(),
+                "feat2".to_string(),
+                "feat3".to_string(),
+            ],
             device_id: "my-device-uuid-123".to_string(),
             device_type: "machine".to_string(),
             product_id: "prod-abc-123".to_string(),
         };
 
-        let token =
-            jwt::sign_claims(&claims, &private_key, "license-xyz", "project-name", "jti-456")
-                .unwrap();
+        let token = jwt::sign_claims(
+            &claims,
+            &private_key,
+            "license-xyz",
+            "project-name",
+            "jti-456",
+        )
+        .unwrap();
 
         let verified = jwt::verify_token(&token, &public_key).unwrap();
 
@@ -1470,10 +1516,7 @@ mod claims_content {
             license_exp: None,
             updates_exp: None,
             tier: "tier".to_string(),
-            features: vec![
-                "feature".to_string(),
-                "export".to_string(),
-            ],
+            features: vec!["feature".to_string(), "export".to_string()],
             device_id: "device-id".to_string(),
             device_type: "uuid".to_string(),
             product_id: "product-id".to_string(),
@@ -1527,10 +1570,8 @@ mod key_validation {
         );
 
         // Valid base64 but wrong length
-        let short_key = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            [0u8; 16],
-        );
+        let short_key =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 16]);
         let result = jwt::verify_token(&token, &short_key);
         assert!(
             result.is_err(),
@@ -1576,9 +1617,6 @@ mod key_validation {
         // Empty
         let empty_key: Vec<u8> = vec![];
         let result = jwt::sign_claims(&claims, &empty_key, "license-id", "project", "jti-123");
-        assert!(
-            result.is_err(),
-            "empty private key should be rejected"
-        );
+        assert!(result.is_err(), "empty private key should be rejected");
     }
 }

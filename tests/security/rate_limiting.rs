@@ -46,7 +46,10 @@ fn public_app_with_rate_limits(config: RateLimitConfig) -> (Router, AppState) {
 
 /// Creates a public app with rate limiting and a specific mock IP address.
 /// Useful for testing per-IP rate limiting isolation.
-fn public_app_with_rate_limits_and_ip(config: RateLimitConfig, ip: SocketAddr) -> (Router, AppState) {
+fn public_app_with_rate_limits_and_ip(
+    config: RateLimitConfig,
+    ip: SocketAddr,
+) -> (Router, AppState) {
     let master_key = test_master_key();
 
     let manager = SqliteConnectionManager::memory();
@@ -130,7 +133,9 @@ fn public_app_with_activation_limiter(
 
     // Use axum::Extension to directly inject ConnectInfo for PeerIpKeyExtractor
     let app = handlers::public::router(rate_config)
-        .layer(axum::Extension(ConnectInfo("127.0.0.1:12345".parse::<SocketAddr>().unwrap())))
+        .layer(axum::Extension(ConnectInfo(
+            "127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
+        )))
         .with_state(state.clone());
 
     (app, state)
@@ -242,8 +247,8 @@ mod rate_limit_headers {
 
         // Check for retry-after header
         let headers = second_response.headers();
-        let has_retry_header = headers.get("retry-after").is_some()
-            || headers.get("x-ratelimit-after").is_some();
+        let has_retry_header =
+            headers.get("retry-after").is_some() || headers.get("x-ratelimit-after").is_some();
 
         assert!(
             has_retry_header,
@@ -344,8 +349,12 @@ mod strict_rate_limit {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
             let product = create_test_product(&conn, &project.id, "Pro", "pro");
-            let _license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_MONTH)));
+            let _license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_MONTH)),
+            );
             public_key = project.public_key;
         }
 
@@ -901,7 +910,7 @@ mod tier_differentiation {
     #[tokio::test]
     async fn test_strict_more_restrictive_than_standard() {
         let config = RateLimitConfig {
-            strict_rpm: 1,  // Very restrictive
+            strict_rpm: 1,   // Very restrictive
             standard_rpm: 5, // More permissive
             relaxed_rpm: 10,
             org_ops_rpm: 3000,
@@ -1235,6 +1244,7 @@ mod per_ip_rate_limiting {
     use super::*;
 
     /// Verify that different IPs have separate rate limits.
+    /// This is Issue 11 from the security audit - test per-IP isolation.
     /// Each IP should have its own quota.
     #[tokio::test]
     async fn test_different_ips_have_separate_limits() {
@@ -1357,6 +1367,227 @@ mod per_ip_rate_limiting {
             response.status(),
             StatusCode::TOO_MANY_REQUESTS,
             "Request after limit exhausted should return 429"
+        );
+    }
+}
+
+// ============================================================================
+// RATE LIMIT WINDOW BOUNDARY TESTS (Issue 11 from security audit)
+// ============================================================================
+
+mod window_boundary_tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    /// Test rate limit window reset behavior.
+    /// Issue 11 from security audit: Verify requests are allowed after window resets.
+    ///
+    /// Uses high RPM (60) to get 1-second period for fast testing.
+    /// Governor uses token bucket: burst_size tokens, replenished at period rate.
+    #[tokio::test]
+    async fn test_rate_limit_window_reset() {
+        // For this test, we use the activation limiter which has configurable windows.
+        // The tower-governor IP-based rate limiter uses period = 60/rpm seconds,
+        // making it impractical to test window reset quickly (e.g., 2 RPM = 30s period).
+        // The activation limiter uses a sliding window that's easier to test.
+        let activation_limiter = ActivationRateLimiter::new(2, 2); // 2 requests per 2 seconds
+
+        let email_hash = "window_reset_test";
+
+        // Exhaust the limit
+        assert!(
+            activation_limiter.check(email_hash).is_ok(),
+            "Request 1 should succeed"
+        );
+        assert!(
+            activation_limiter.check(email_hash).is_ok(),
+            "Request 2 should succeed"
+        );
+        assert!(
+            activation_limiter.check(email_hash).is_err(),
+            "Request 3 should be rate limited"
+        );
+
+        // Wait for window to reset
+        sleep(Duration::from_secs(3)).await;
+
+        // After window reset, requests should succeed again
+        assert!(
+            activation_limiter.check(email_hash).is_ok(),
+            "Request after window reset should succeed"
+        );
+    }
+
+    /// Test that rate limit counts correctly near window boundaries.
+    /// Verifies the sliding window correctly removes expired timestamps.
+    #[tokio::test]
+    async fn test_rate_limit_sliding_window() {
+        let activation_limiter = ActivationRateLimiter::new(3, 2); // 3 requests per 2 seconds
+
+        let email_hash = "sliding_window_test";
+
+        // Make 2 requests at T=0
+        assert!(
+            activation_limiter.check(email_hash).is_ok(),
+            "Request 1 at T=0"
+        );
+        assert!(
+            activation_limiter.check(email_hash).is_ok(),
+            "Request 2 at T=0"
+        );
+
+        // Wait 1 second (within window)
+        sleep(Duration::from_secs(1)).await;
+
+        // Make 1 more request (should succeed - 3rd of 3 allowed)
+        assert!(
+            activation_limiter.check(email_hash).is_ok(),
+            "Request 3 at T=1 should succeed (3 of 3 allowed)"
+        );
+
+        // 4th request should fail
+        assert!(
+            activation_limiter.check(email_hash).is_err(),
+            "Request 4 at T=1 should fail (exceeds limit)"
+        );
+
+        // Wait for the first 2 requests to expire (they were at T=0, window is 2s)
+        sleep(Duration::from_secs(2)).await;
+
+        // Now only request 3 should be in window, so 2 more should be allowed
+        assert!(
+            activation_limiter.check(email_hash).is_ok(),
+            "Request 5 at T=3 should succeed (first 2 expired)"
+        );
+    }
+}
+
+// ============================================================================
+// CONCURRENT BURST TESTS (Issue 11 from security audit)
+// ============================================================================
+
+mod concurrent_burst_tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Test rate limit with burst of concurrent requests.
+    /// Issue 11 from security audit: Verify atomic counter increment.
+    ///
+    /// Tests that exactly N requests succeed when N is the limit and M > N
+    /// concurrent requests are sent.
+    #[tokio::test]
+    async fn test_rate_limit_concurrent_burst() {
+        let config = RateLimitConfig {
+            strict_rpm: 10,
+            standard_rpm: 30,
+            relaxed_rpm: 5, // Allow exactly 5 requests
+            org_ops_rpm: 3000,
+        };
+        let (app, _state) = public_app_with_rate_limits(config);
+
+        let success_count = Arc::new(AtomicUsize::new(0));
+        let rate_limited_count = Arc::new(AtomicUsize::new(0));
+
+        // Send 10 concurrent requests
+        let mut handles = Vec::new();
+        for _ in 0..10 {
+            let app_clone = app.clone();
+            let success_clone = Arc::clone(&success_count);
+            let limited_clone = Arc::clone(&rate_limited_count);
+
+            let handle = tokio::spawn(async move {
+                let response = app_clone
+                    .oneshot(
+                        Request::builder()
+                            .method("GET")
+                            .uri("/health")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+
+                if response.status() == StatusCode::OK {
+                    success_clone.fetch_add(1, Ordering::SeqCst);
+                } else if response.status() == StatusCode::TOO_MANY_REQUESTS {
+                    limited_clone.fetch_add(1, Ordering::SeqCst);
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all requests to complete
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        let successes = success_count.load(Ordering::SeqCst);
+        let limited = rate_limited_count.load(Ordering::SeqCst);
+
+        // Exactly 5 should succeed (the burst size)
+        assert_eq!(
+            successes, 5,
+            "Expected exactly 5 successful requests (burst_size), got {}",
+            successes
+        );
+
+        // Exactly 5 should be rate limited
+        assert_eq!(
+            limited, 5,
+            "Expected exactly 5 rate-limited requests, got {}",
+            limited
+        );
+    }
+
+    /// Test activation rate limiter handles concurrent requests atomically.
+    #[tokio::test]
+    async fn test_activation_limiter_concurrent_burst() {
+        let limiter = Arc::new(ActivationRateLimiter::new(5, 60)); // 5 requests per minute
+        let email_hash = "concurrent_activation_test";
+
+        let success_count = Arc::new(AtomicUsize::new(0));
+        let failure_count = Arc::new(AtomicUsize::new(0));
+
+        // Send 10 concurrent requests
+        let mut handles = Vec::new();
+        for _ in 0..10 {
+            let limiter_clone = Arc::clone(&limiter);
+            let success_clone = Arc::clone(&success_count);
+            let failure_clone = Arc::clone(&failure_count);
+            let email = email_hash.to_string();
+
+            let handle = tokio::spawn(async move {
+                if limiter_clone.check(&email).is_ok() {
+                    success_clone.fetch_add(1, Ordering::SeqCst);
+                } else {
+                    failure_clone.fetch_add(1, Ordering::SeqCst);
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all requests to complete
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        let successes = success_count.load(Ordering::SeqCst);
+        let failures = failure_count.load(Ordering::SeqCst);
+
+        // Exactly 5 should succeed
+        assert_eq!(
+            successes, 5,
+            "Expected exactly 5 successful requests, got {} (atomic counter issue?)",
+            successes
+        );
+
+        // Exactly 5 should fail
+        assert_eq!(
+            failures, 5,
+            "Expected exactly 5 failed requests, got {}",
+            failures
         );
     }
 }

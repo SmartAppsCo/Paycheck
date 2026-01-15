@@ -5,7 +5,7 @@ use axum::{
 use serde::Deserialize;
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path};
 use crate::middleware::OperatorContext;
 use crate::models::{ActorType, ApiKeyCreated, ApiKeyInfo, AuditAction, CreateApiKey};
@@ -35,8 +35,8 @@ pub async fn create_api_key(
     let audit_conn = state.audit.get()?;
 
     // Verify the target user exists
-    let target_user = queries::get_user_by_id(&conn, &path.user_id)?
-        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+    let target_user =
+        queries::get_user_by_id(&conn, &path.user_id)?.or_not_found(msg::USER_NOT_FOUND)?;
 
     // Create API key for the user
     let user_manageable = input.user_manageable.unwrap_or(true);
@@ -94,8 +94,8 @@ pub async fn list_api_keys(
     let conn = state.db.get()?;
 
     // Verify the target user exists
-    let _target_user = queries::get_user_by_id(&conn, &path.user_id)?
-        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+    let _target_user =
+        queries::get_user_by_id(&conn, &path.user_id)?.or_not_found(msg::USER_NOT_FOUND)?;
 
     let limit = query.limit();
     let offset = query.offset();
@@ -132,15 +132,15 @@ pub async fn revoke_api_key(
     let audit_conn = state.audit.get()?;
 
     // Verify the target user exists
-    let target_user = queries::get_user_by_id(&conn, &path.user_id)?
-        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+    let target_user =
+        queries::get_user_by_id(&conn, &path.user_id)?.or_not_found(msg::USER_NOT_FOUND)?;
 
     // Verify key exists and belongs to the right user
-    let key = queries::get_api_key_by_id(&conn, &path.key_id)?
-        .ok_or_else(|| AppError::NotFound("API key not found".into()))?;
+    let key =
+        queries::get_api_key_by_id(&conn, &path.key_id)?.or_not_found(msg::API_KEY_NOT_FOUND)?;
 
     if key.user_id != path.user_id {
-        return Err(AppError::NotFound("API key not found".into()));
+        return Err(AppError::NotFound(msg::API_KEY_NOT_FOUND.into()));
     }
 
     queries::revoke_api_key(&conn, &path.key_id)?;

@@ -4,7 +4,7 @@ use axum::{
 };
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path};
 use crate::middleware::OrgMemberContext;
 use crate::models::{
@@ -35,7 +35,7 @@ pub async fn create_payment_config(
     Json(input): Json<CreatePaymentConfig>,
 ) -> Result<Json<ProductPaymentConfig>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
     let conn = state.db.get()?;
@@ -43,10 +43,10 @@ pub async fn create_payment_config(
 
     // Verify product exists and belongs to this project
     let product = queries::get_product_by_id(&conn, &path.product_id)?
-        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+        .or_not_found(msg::PRODUCT_NOT_FOUND)?;
 
     if product.project_id != path.project_id {
-        return Err(AppError::NotFound("Product not found".into()));
+        return Err(AppError::NotFound(msg::PRODUCT_NOT_FOUND.into()));
     }
 
     // Check if config already exists for this provider
@@ -81,10 +81,10 @@ pub async fn list_payment_configs(
 
     // Verify product exists and belongs to this project
     let product = queries::get_product_by_id(&conn, &path.product_id)?
-        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+        .or_not_found(msg::PRODUCT_NOT_FOUND)?;
 
     if product.project_id != path.project_id {
-        return Err(AppError::NotFound("Product not found".into()));
+        return Err(AppError::NotFound(msg::PRODUCT_NOT_FOUND.into()));
     }
 
     let configs = queries::get_payment_configs_for_product(&conn, &path.product_id)?;
@@ -98,19 +98,19 @@ pub async fn get_payment_config_handler(
     let conn = state.db.get()?;
 
     let config = queries::get_payment_config_by_id(&conn, &path.config_id)?
-        .ok_or_else(|| AppError::NotFound("Payment config not found".into()))?;
+        .or_not_found(msg::PAYMENT_CONFIG_NOT_FOUND)?;
 
     // Verify it belongs to the specified product
     if config.product_id != path.product_id {
-        return Err(AppError::NotFound("Payment config not found".into()));
+        return Err(AppError::NotFound(msg::PAYMENT_CONFIG_NOT_FOUND.into()));
     }
 
     // Verify product belongs to this project
     let product = queries::get_product_by_id(&conn, &path.product_id)?
-        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+        .or_not_found(msg::PRODUCT_NOT_FOUND)?;
 
     if product.project_id != path.project_id {
-        return Err(AppError::NotFound("Product not found".into()));
+        return Err(AppError::NotFound(msg::PRODUCT_NOT_FOUND.into()));
     }
 
     Ok(Json(config))
@@ -124,26 +124,26 @@ pub async fn update_payment_config_handler(
     Json(input): Json<UpdatePaymentConfig>,
 ) -> Result<Json<ProductPaymentConfig>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     let existing = queries::get_payment_config_by_id(&conn, &path.config_id)?
-        .ok_or_else(|| AppError::NotFound("Payment config not found".into()))?;
+        .or_not_found(msg::PAYMENT_CONFIG_NOT_FOUND)?;
 
     // Verify it belongs to the specified product
     if existing.product_id != path.product_id {
-        return Err(AppError::NotFound("Payment config not found".into()));
+        return Err(AppError::NotFound(msg::PAYMENT_CONFIG_NOT_FOUND.into()));
     }
 
     // Verify product belongs to this project
     let product = queries::get_product_by_id(&conn, &path.product_id)?
-        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+        .or_not_found(msg::PRODUCT_NOT_FOUND)?;
 
     if product.project_id != path.project_id {
-        return Err(AppError::NotFound("Product not found".into()));
+        return Err(AppError::NotFound(msg::PRODUCT_NOT_FOUND.into()));
     }
 
     queries::update_payment_config(&conn, &path.config_id, &input)?;
@@ -162,7 +162,7 @@ pub async fn update_payment_config_handler(
         .save()?;
 
     let config = queries::get_payment_config_by_id(&conn, &path.config_id)?
-        .ok_or_else(|| AppError::NotFound("Payment config not found".into()))?;
+        .or_not_found(msg::PAYMENT_CONFIG_NOT_FOUND)?;
 
     Ok(Json(config))
 }
@@ -174,26 +174,26 @@ pub async fn delete_payment_config_handler(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     let existing = queries::get_payment_config_by_id(&conn, &path.config_id)?
-        .ok_or_else(|| AppError::NotFound("Payment config not found".into()))?;
+        .or_not_found(msg::PAYMENT_CONFIG_NOT_FOUND)?;
 
     // Verify it belongs to the specified product
     if existing.product_id != path.product_id {
-        return Err(AppError::NotFound("Payment config not found".into()));
+        return Err(AppError::NotFound(msg::PAYMENT_CONFIG_NOT_FOUND.into()));
     }
 
     // Verify product belongs to this project
     let product = queries::get_product_by_id(&conn, &path.product_id)?
-        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+        .or_not_found(msg::PRODUCT_NOT_FOUND)?;
 
     if product.project_id != path.project_id {
-        return Err(AppError::NotFound("Product not found".into()));
+        return Err(AppError::NotFound(msg::PRODUCT_NOT_FOUND.into()));
     }
 
     queries::delete_payment_config(&conn, &path.config_id)?;

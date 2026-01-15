@@ -610,3 +610,209 @@ mod deleted_entity_tests {
         );
     }
 }
+
+// ============================================================================
+// API KEY TTL BOUNDARY TESTS
+// ============================================================================
+
+mod ttl_boundary_tests {
+    use super::*;
+    use rusqlite::params;
+
+    /// Helper to create an API key with a specific expires_at timestamp.
+    /// This bypasses the days-based helper for precise boundary testing.
+    fn create_api_key_with_exact_expiration(
+        conn: &rusqlite::Connection,
+        user_id: &str,
+        expires_at: Option<i64>,
+    ) -> String {
+        // Create key with no expiration first
+        let (key_record, raw_key) =
+            queries::create_api_key(conn, user_id, "Boundary Test", None, true, None)
+                .expect("Failed to create API key");
+
+        // Update to exact expires_at via direct DB update
+        if let Some(exp) = expires_at {
+            conn.execute(
+                "UPDATE api_keys SET expires_at = ?1 WHERE id = ?2",
+                params![exp, key_record.id],
+            )
+            .expect("Failed to set expires_at");
+        }
+
+        raw_key
+    }
+
+    fn now() -> i64 {
+        chrono::Utc::now().timestamp()
+    }
+
+    /// Test API key expiring exactly at current timestamp.
+    /// SQL check is `expires_at > unixepoch()`, so exactly-now should be rejected.
+    #[tokio::test]
+    async fn test_api_key_expires_at_boundary() {
+        let (app, state) = org_app();
+        let conn = state.db.get().unwrap();
+
+        // Create org and member
+        let org = create_test_org(&conn, "Test Org");
+        let (user, _member, _valid_key) =
+            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+
+        // Create key that expires exactly now
+        let boundary_key = create_api_key_with_exact_expiration(&conn, &user.id, Some(now()));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/orgs/{}/members", org.id))
+                    .header("Authorization", format!("Bearer {}", boundary_key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "Key expiring exactly at current timestamp should be rejected (boundary is exclusive)"
+        );
+    }
+
+    /// Test API key that expires in 1 second (still valid).
+    #[tokio::test]
+    async fn test_api_key_expires_soon() {
+        let (app, state) = org_app();
+        let conn = state.db.get().unwrap();
+
+        let org = create_test_org(&conn, "Test Org");
+        let (user, _member, _valid_key) =
+            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+
+        // Create key that expires 2 seconds from now (buffer for test execution time)
+        let soon_key = create_api_key_with_exact_expiration(&conn, &user.id, Some(now() + 2));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/orgs/{}/members", org.id))
+                    .header("Authorization", format!("Bearer {}", soon_key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "Key expiring soon (but not yet) should be accepted"
+        );
+    }
+
+    /// Test API key that expired 1 second ago.
+    #[tokio::test]
+    async fn test_api_key_just_expired() {
+        let (app, state) = org_app();
+        let conn = state.db.get().unwrap();
+
+        let org = create_test_org(&conn, "Test Org");
+        let (user, _member, _valid_key) =
+            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+
+        // Create key that expired 1 second ago
+        let just_expired_key =
+            create_api_key_with_exact_expiration(&conn, &user.id, Some(now() - 1));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/orgs/{}/members", org.id))
+                    .header("Authorization", format!("Bearer {}", just_expired_key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "Key that just expired should be rejected"
+        );
+    }
+
+    /// Test API key with NULL expires_at (never expires).
+    #[tokio::test]
+    async fn test_api_key_never_expires() {
+        let (app, state) = org_app();
+        let conn = state.db.get().unwrap();
+
+        let org = create_test_org(&conn, "Test Org");
+        let (user, _member, _valid_key) =
+            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+
+        // Create key with no expiration (NULL expires_at)
+        let never_expires_key = create_api_key_with_exact_expiration(&conn, &user.id, None);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/orgs/{}/members", org.id))
+                    .header("Authorization", format!("Bearer {}", never_expires_key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "Key with NULL expires_at (never expires) should be accepted"
+        );
+    }
+
+    /// Test that a revoked key is rejected even if it hasn't expired.
+    /// Revocation should take precedence over expiration.
+    #[tokio::test]
+    async fn test_revoked_key_rejected_before_expiry() {
+        let (app, state) = org_app();
+        let conn = state.db.get().unwrap();
+
+        let org = create_test_org(&conn, "Test Org");
+        let (user, _member, _valid_key) =
+            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+
+        // Create key that expires far in the future
+        let (key_record, raw_key) =
+            queries::create_api_key(&conn, &user.id, "Far Future", Some(365), true, None)
+                .expect("Failed to create API key");
+
+        // Revoke it immediately
+        queries::revoke_api_key(&conn, &key_record.id).expect("Failed to revoke API key");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/orgs/{}/members", org.id))
+                    .header("Authorization", format!("Bearer {}", raw_key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "Revoked key should be rejected even though it hasn't expired"
+        );
+    }
+}

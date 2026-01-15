@@ -112,10 +112,7 @@ fn admin_app_with_origins(origins: Vec<&str>) -> (Router, AppState) {
     };
 
     // Create CORS layer with specified origins
-    let origin_values: Vec<HeaderValue> = origins
-        .iter()
-        .filter_map(|o| o.parse().ok())
-        .collect();
+    let origin_values: Vec<HeaderValue> = origins.iter().filter_map(|o| o.parse().ok()).collect();
 
     let cors = CorsLayer::new()
         .allow_origin(origin_values)
@@ -178,10 +175,7 @@ fn operator_app_with_origins(origins: Vec<&str>) -> (Router, AppState) {
     };
 
     // Create CORS layer with specified origins
-    let origin_values: Vec<HeaderValue> = origins
-        .iter()
-        .filter_map(|o| o.parse().ok())
-        .collect();
+    let origin_values: Vec<HeaderValue> = origins.iter().filter_map(|o| o.parse().ok()).collect();
 
     let cors = CorsLayer::new()
         .allow_origin(origin_values)
@@ -311,12 +305,16 @@ mod public_cors {
 
         // Should have CORS headers
         assert!(
-            response.headers().contains_key("access-control-allow-origin"),
+            response
+                .headers()
+                .contains_key("access-control-allow-origin"),
             "Preflight response should have Access-Control-Allow-Origin"
         );
 
         assert!(
-            response.headers().contains_key("access-control-allow-methods"),
+            response
+                .headers()
+                .contains_key("access-control-allow-methods"),
             "Preflight response should have Access-Control-Allow-Methods"
         );
     }
@@ -331,8 +329,18 @@ mod public_cors {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
         let product = create_test_product(&conn, &project.id, "Pro", "pro");
-        let license = create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_MONTH)));
-        let _device = create_test_device(&conn, &license.id, "device-1", paycheck::models::DeviceType::Uuid);
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_MONTH)),
+        );
+        let _device = create_test_device(
+            &conn,
+            &license.id,
+            "device-1",
+            paycheck::models::DeviceType::Uuid,
+        );
         drop(conn);
 
         // Make a POST request to /validate
@@ -413,7 +421,10 @@ mod public_cors {
                     .uri("/redeem")
                     .header("Origin", "https://example.com")
                     .header("Access-Control-Request-Method", "POST")
-                    .header("Access-Control-Request-Headers", "content-type,authorization")
+                    .header(
+                        "Access-Control-Request-Headers",
+                        "content-type,authorization",
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -685,7 +696,10 @@ mod admin_cors {
                     .uri(format!("/orgs/{}/members", org.id))
                     .header("Origin", allowed_origin)
                     .header("Access-Control-Request-Method", "POST")
-                    .header("Access-Control-Request-Headers", "authorization,content-type")
+                    .header(
+                        "Access-Control-Request-Headers",
+                        "authorization,content-type",
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -826,7 +840,10 @@ mod preflight_requests {
                     .uri(format!("/orgs/{}/projects", org.id))
                     .header("Origin", allowed_origin)
                     .header("Access-Control-Request-Method", "PUT")
-                    .header("Access-Control-Request-Headers", "authorization,content-type")
+                    .header(
+                        "Access-Control-Request-Headers",
+                        "authorization,content-type",
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )

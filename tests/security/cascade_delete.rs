@@ -11,13 +11,17 @@
 
 #[path = "../common/mod.rs"]
 mod common;
-use common::{*, ONE_MONTH, LICENSE_VALID_DAYS};
+use common::{LICENSE_VALID_DAYS, ONE_MONTH, *};
 
-use axum::{Router, body::Body, http::{Request, StatusCode}};
+use axum::{
+    Router,
+    body::Body,
+    http::{Request, StatusCode},
+};
 use paycheck::config::RateLimitConfig;
 use paycheck::db::{AppState, queries};
 use paycheck::handlers;
-use paycheck::models::{DeviceType, OrgMemberRole, OperatorRole};
+use paycheck::models::{DeviceType, OperatorRole, OrgMemberRole};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use tower::ServiceExt;
@@ -106,8 +110,7 @@ fn operator_app() -> (Router, AppState) {
         trusted_issuers: vec![],
     };
 
-    let app = handlers::operators::router(state.clone())
-        .with_state(state.clone());
+    let app = handlers::operators::router(state.clone()).with_state(state.clone());
 
     (app, state)
 }
@@ -198,7 +201,10 @@ mod user_cascade {
             .expect("Query failed")
             .expect("Deleted org member should be found");
 
-        assert!(deleted.deleted_at.is_some(), "Org member deleted_at timestamp should be set after cascade delete from user");
+        assert!(
+            deleted.deleted_at.is_some(),
+            "Org member deleted_at timestamp should be set after cascade delete from user"
+        );
         assert_eq!(
             deleted.deleted_cascade_depth,
             Some(1),
@@ -228,7 +234,10 @@ mod user_cascade {
             .expect("Query failed")
             .expect("Deleted operator should be found");
 
-        assert!(deleted.deleted_at.is_some(), "Operator deleted_at timestamp should be set after cascade delete from user");
+        assert!(
+            deleted.deleted_at.is_some(),
+            "Operator deleted_at timestamp should be set after cascade delete from user"
+        );
         assert_eq!(
             deleted.deleted_cascade_depth,
             Some(1),
@@ -308,8 +317,12 @@ mod org_cascade {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
 
         // Soft delete the organization
         queries::soft_delete_organization(&conn, &org.id).expect("Soft delete failed");
@@ -326,19 +339,31 @@ mod org_cascade {
         let deleted_project = queries::get_deleted_project_by_id(&conn, &project.id)
             .expect("Query failed")
             .expect("Deleted project should be found");
-        assert_eq!(deleted_project.deleted_cascade_depth, Some(1), "Project cascade depth should be 1 when deleted via org cascade");
+        assert_eq!(
+            deleted_project.deleted_cascade_depth,
+            Some(1),
+            "Project cascade depth should be 1 when deleted via org cascade"
+        );
 
         // Product should be cascade deleted (depth 2)
         let deleted_product = queries::get_deleted_product_by_id(&conn, &product.id)
             .expect("Query failed")
             .expect("Deleted product should be found");
-        assert_eq!(deleted_product.deleted_cascade_depth, Some(2), "Product cascade depth should be 2 when deleted via org->project cascade");
+        assert_eq!(
+            deleted_product.deleted_cascade_depth,
+            Some(2),
+            "Product cascade depth should be 2 when deleted via org->project cascade"
+        );
 
         // License should be cascade deleted (depth 3)
         let deleted_license = queries::get_deleted_license_by_id(&conn, &license.id)
             .expect("Query failed")
             .expect("Deleted license should be found");
-        assert_eq!(deleted_license.deleted_cascade_depth, Some(3), "License cascade depth should be 3 when deleted via org->project->product cascade");
+        assert_eq!(
+            deleted_license.deleted_cascade_depth,
+            Some(3),
+            "License cascade depth should be 3 when deleted via org->project->product cascade"
+        );
     }
 
     /// Delete org -> cascades to org_members.
@@ -364,7 +389,11 @@ mod org_cascade {
         let deleted_member = queries::get_deleted_org_member_by_id(&conn, &member.id)
             .expect("Query failed")
             .expect("Deleted member should be found");
-        assert_eq!(deleted_member.deleted_cascade_depth, Some(1), "Org member cascade depth should be 1 when deleted via org cascade");
+        assert_eq!(
+            deleted_member.deleted_cascade_depth,
+            Some(1),
+            "Org member cascade depth should be 1 when deleted via org cascade"
+        );
     }
 
     /// Delete org -> API keys for org members stop working for that org.
@@ -434,13 +463,21 @@ mod org_cascade {
         // Create multiple projects with products and licenses
         let project1 = create_test_project(&conn, &org.id, "Project 1", &master_key);
         let product1 = create_test_product(&conn, &project1.id, "Pro 1", "pro");
-        let license1 =
-            create_test_license(&conn, &project1.id, &product1.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
+        let license1 = create_test_license(
+            &conn,
+            &project1.id,
+            &product1.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
 
         let project2 = create_test_project(&conn, &org.id, "Project 2", &master_key);
         let product2 = create_test_product(&conn, &project2.id, "Pro 2", "pro");
-        let license2 =
-            create_test_license(&conn, &project2.id, &product2.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
+        let license2 = create_test_license(
+            &conn,
+            &project2.id,
+            &product2.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
 
         // Soft delete the organization
         queries::soft_delete_organization(&conn, &org.id).expect("Soft delete failed");
@@ -516,8 +553,12 @@ mod project_cascade {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
 
         // Soft delete the project
         queries::soft_delete_project(&conn, &project.id).expect("Soft delete failed");
@@ -526,19 +567,31 @@ mod project_cascade {
         let deleted_project = queries::get_deleted_project_by_id(&conn, &project.id)
             .expect("Query failed")
             .expect("Deleted project should be found");
-        assert_eq!(deleted_project.deleted_cascade_depth, Some(0), "Directly deleted project should have cascade depth 0");
+        assert_eq!(
+            deleted_project.deleted_cascade_depth,
+            Some(0),
+            "Directly deleted project should have cascade depth 0"
+        );
 
         // Product cascade deleted at depth 1
         let deleted_product = queries::get_deleted_product_by_id(&conn, &product.id)
             .expect("Query failed")
             .expect("Deleted product should be found");
-        assert_eq!(deleted_product.deleted_cascade_depth, Some(1), "Product cascade depth should be 1 when deleted via project cascade");
+        assert_eq!(
+            deleted_product.deleted_cascade_depth,
+            Some(1),
+            "Product cascade depth should be 1 when deleted via project cascade"
+        );
 
         // License cascade deleted at depth 2
         let deleted_license = queries::get_deleted_license_by_id(&conn, &license.id)
             .expect("Query failed")
             .expect("Deleted license should be found");
-        assert_eq!(deleted_license.deleted_cascade_depth, Some(2), "License cascade depth should be 2 when deleted via project->product cascade");
+        assert_eq!(
+            deleted_license.deleted_cascade_depth,
+            Some(2),
+            "License cascade depth should be 2 when deleted via project->product cascade"
+        );
     }
 
     /// Delete project with multiple products - all cascade correctly.
@@ -555,12 +608,24 @@ mod project_cascade {
         let product3 = create_test_product(&conn, &project.id, "Enterprise", "enterprise");
 
         // Create licenses for each
-        let license1 =
-            create_test_license(&conn, &project.id, &product1.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
-        let license2 =
-            create_test_license(&conn, &project.id, &product2.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
-        let license3 =
-            create_test_license(&conn, &project.id, &product3.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
+        let license1 = create_test_license(
+            &conn,
+            &project.id,
+            &product1.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
+        let license2 = create_test_license(
+            &conn,
+            &project.id,
+            &product2.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
+        let license3 = create_test_license(
+            &conn,
+            &project.id,
+            &product3.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
 
         // Soft delete the project
         queries::soft_delete_project(&conn, &project.id).expect("Soft delete failed");
@@ -570,7 +635,11 @@ mod project_cascade {
             let deleted = queries::get_deleted_product_by_id(&conn, product_id)
                 .unwrap()
                 .unwrap();
-            assert_eq!(deleted.deleted_cascade_depth, Some(1), "Product cascade depth should be 1 when deleted via project cascade");
+            assert_eq!(
+                deleted.deleted_cascade_depth,
+                Some(1),
+                "Product cascade depth should be 1 when deleted via project cascade"
+            );
         }
 
         // All licenses should be cascade deleted at depth 2
@@ -578,7 +647,11 @@ mod project_cascade {
             let deleted = queries::get_deleted_license_by_id(&conn, license_id)
                 .unwrap()
                 .unwrap();
-            assert_eq!(deleted.deleted_cascade_depth, Some(2), "License cascade depth should be 2 when deleted via project->product cascade");
+            assert_eq!(
+                deleted.deleted_cascade_depth,
+                Some(2),
+                "License cascade depth should be 2 when deleted via project->product cascade"
+            );
         }
     }
 
@@ -591,8 +664,12 @@ mod project_cascade {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
 
         // Create device for license
         let _device = create_test_device(&conn, &license.id, "device-123", DeviceType::Machine);
@@ -646,8 +723,18 @@ mod restore_cascade {
         queries::soft_delete_user(&conn, &user.id).expect("Soft delete failed");
 
         // Verify both are deleted
-        assert!(queries::get_operator_by_id(&conn, &operator.id).unwrap().is_none(), "Operator should be excluded from normal queries after user soft delete");
-        assert!(queries::get_org_member_by_id(&conn, &member.id).unwrap().is_none(), "Org member should be excluded from normal queries after user soft delete");
+        assert!(
+            queries::get_operator_by_id(&conn, &operator.id)
+                .unwrap()
+                .is_none(),
+            "Operator should be excluded from normal queries after user soft delete"
+        );
+        assert!(
+            queries::get_org_member_by_id(&conn, &member.id)
+                .unwrap()
+                .is_none(),
+            "Org member should be excluded from normal queries after user soft delete"
+        );
 
         // Restore the user
         queries::restore_user(&conn, &user.id, false).expect("Restore failed");
@@ -677,18 +764,47 @@ mod restore_cascade {
             create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
 
         // Soft delete the organization (cascades to all children)
         queries::soft_delete_organization(&conn, &org.id).expect("Soft delete failed");
 
         // Verify all are deleted
-        assert!(queries::get_organization_by_id(&conn, &org.id).unwrap().is_none(), "Organization should be excluded from normal queries after soft delete");
-        assert!(queries::get_org_member_by_id(&conn, &member.id).unwrap().is_none(), "Org member should be excluded after org cascade delete");
-        assert!(queries::get_project_by_id(&conn, &project.id).unwrap().is_none(), "Project should be excluded after org cascade delete");
-        assert!(queries::get_product_by_id(&conn, &product.id).unwrap().is_none(), "Product should be excluded after org cascade delete");
-        assert!(queries::get_license_by_id(&conn, &license.id).unwrap().is_none(), "License should be excluded after org cascade delete");
+        assert!(
+            queries::get_organization_by_id(&conn, &org.id)
+                .unwrap()
+                .is_none(),
+            "Organization should be excluded from normal queries after soft delete"
+        );
+        assert!(
+            queries::get_org_member_by_id(&conn, &member.id)
+                .unwrap()
+                .is_none(),
+            "Org member should be excluded after org cascade delete"
+        );
+        assert!(
+            queries::get_project_by_id(&conn, &project.id)
+                .unwrap()
+                .is_none(),
+            "Project should be excluded after org cascade delete"
+        );
+        assert!(
+            queries::get_product_by_id(&conn, &product.id)
+                .unwrap()
+                .is_none(),
+            "Product should be excluded after org cascade delete"
+        );
+        assert!(
+            queries::get_license_by_id(&conn, &license.id)
+                .unwrap()
+                .is_none(),
+            "License should be excluded after org cascade delete"
+        );
 
         // Restore the organization
         queries::restore_organization(&conn, &org.id).expect("Restore failed");
@@ -745,13 +861,19 @@ mod restore_cascade {
 
         // Restore operator with force should succeed
         let result = queries::restore_operator(&conn, &operator.id, true);
-        assert!(result.is_ok(), "Restore with force=true should succeed even for cascade-deleted items");
+        assert!(
+            result.is_ok(),
+            "Restore with force=true should succeed even for cascade-deleted items"
+        );
 
         // Operator should be found again (but user is still deleted)
         let restored = queries::get_operator_by_id(&conn, &operator.id)
             .expect("Query failed")
             .expect("Restored operator should be found");
-        assert!(restored.deleted_at.is_none(), "Restored operator's deleted_at should be cleared");
+        assert!(
+            restored.deleted_at.is_none(),
+            "Restored operator's deleted_at should be cleared"
+        );
     }
 
     /// Restore project -> restores products and licenses.
@@ -762,8 +884,12 @@ mod restore_cascade {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
 
         // Soft delete the project
         queries::soft_delete_project(&conn, &project.id).expect("Soft delete failed");
@@ -868,7 +994,11 @@ mod restore_cascade {
             )
             .await
             .unwrap();
-        assert_eq!(response_deleted.status(), StatusCode::UNAUTHORIZED, "API key should return 401 when user is soft deleted");
+        assert_eq!(
+            response_deleted.status(),
+            StatusCode::UNAUTHORIZED,
+            "API key should return 401 when user is soft deleted"
+        );
 
         // Restore the user
         queries::restore_user(&conn, &user.id, false).expect("Restore failed");
@@ -922,7 +1052,10 @@ mod purge_verification {
         let result = queries::purge_soft_deleted_records(&conn, ONE_MONTH).expect("Purge failed");
 
         // Should have purged the organization
-        assert!(result.organizations > 0, "Purge should have removed organizations older than retention period");
+        assert!(
+            result.organizations > 0,
+            "Purge should have removed organizations older than retention period"
+        );
 
         // Org should be completely gone (not even as deleted)
         let gone = queries::get_deleted_organization_by_id(&conn, &org.id).expect("Query failed");
@@ -979,8 +1112,12 @@ mod purge_verification {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
 
         // Soft delete organization (cascades to all)
         queries::soft_delete_organization(&conn, &org.id).expect("Soft delete failed");
@@ -1015,7 +1152,10 @@ mod purge_verification {
         assert!(result.licenses > 0, "Purge should have removed licenses");
         assert!(result.products > 0, "Purge should have removed products");
         assert!(result.projects > 0, "Purge should have removed projects");
-        assert!(result.organizations > 0, "Purge should have removed organizations");
+        assert!(
+            result.organizations > 0,
+            "Purge should have removed organizations"
+        );
 
         // Verify nothing remains
         assert!(
@@ -1073,7 +1213,10 @@ mod purge_verification {
 
         // Both should be purged
         assert!(result.users > 0, "Purge should have removed users");
-        assert!(result.org_members > 0, "Purge should have removed org members");
+        assert!(
+            result.org_members > 0,
+            "Purge should have removed org members"
+        );
 
         // Verify completely gone
         assert!(
@@ -1113,9 +1256,15 @@ mod list_query_filtering {
         // List should exclude deleted user (include_deleted = false)
         let (users, total) =
             queries::list_users_paginated(&conn, 100, 0, false).expect("Query failed");
-        assert_eq!(total, 2, "User count should be 2, excluding soft-deleted user");
+        assert_eq!(
+            total, 2,
+            "User count should be 2, excluding soft-deleted user"
+        );
         assert_eq!(users.len(), 2, "Returned user list should have 2 entries");
-        assert!(users.iter().all(|u| u.email != "deleted@example.com"), "Soft-deleted user should not appear in list results");
+        assert!(
+            users.iter().all(|u| u.email != "deleted@example.com"),
+            "Soft-deleted user should not appear in list results"
+        );
     }
 
     /// Deleted orgs don't appear in list queries (by default).
@@ -1132,9 +1281,15 @@ mod list_query_filtering {
         // List should exclude deleted org (include_deleted = false)
         let (orgs, total) =
             queries::list_organizations_paginated(&conn, 100, 0, false).expect("Query failed");
-        assert_eq!(total, 2, "Organization count should be 2, excluding soft-deleted org");
+        assert_eq!(
+            total, 2,
+            "Organization count should be 2, excluding soft-deleted org"
+        );
         assert_eq!(orgs.len(), 2, "Returned org list should have 2 entries");
-        assert!(orgs.iter().all(|o| o.name != "Deleted Org"), "Soft-deleted org should not appear in list results");
+        assert!(
+            orgs.iter().all(|o| o.name != "Deleted Org"),
+            "Soft-deleted org should not appear in list results"
+        );
     }
 
     /// Deleted projects don't appear in list queries.
@@ -1154,9 +1309,19 @@ mod list_query_filtering {
         // List should exclude deleted project
         let (projects, total) =
             queries::list_projects_for_org_paginated(&conn, &org.id, 100, 0).expect("Query failed");
-        assert_eq!(total, 2, "Project count should be 2, excluding soft-deleted project");
-        assert_eq!(projects.len(), 2, "Returned project list should have 2 entries");
-        assert!(projects.iter().all(|p| p.name != "Deleted Project"), "Soft-deleted project should not appear in list results");
+        assert_eq!(
+            total, 2,
+            "Project count should be 2, excluding soft-deleted project"
+        );
+        assert_eq!(
+            projects.len(),
+            2,
+            "Returned project list should have 2 entries"
+        );
+        assert!(
+            projects.iter().all(|p| p.name != "Deleted Project"),
+            "Soft-deleted project should not appear in list results"
+        );
     }
 
     /// Deleted products don't appear in list queries.
@@ -1176,10 +1341,21 @@ mod list_query_filtering {
 
         // List should exclude deleted product
         let (products, total) =
-            queries::list_products_for_project_paginated(&conn, &project.id, 100, 0).expect("Query failed");
-        assert_eq!(total, 2, "Product count should be 2, excluding soft-deleted product");
-        assert_eq!(products.len(), 2, "Returned product list should have 2 entries");
-        assert!(products.iter().all(|p| p.name != "Deleted Product"), "Soft-deleted product should not appear in list results");
+            queries::list_products_for_project_paginated(&conn, &project.id, 100, 0)
+                .expect("Query failed");
+        assert_eq!(
+            total, 2,
+            "Product count should be 2, excluding soft-deleted product"
+        );
+        assert_eq!(
+            products.len(),
+            2,
+            "Returned product list should have 2 entries"
+        );
+        assert!(
+            products.iter().all(|p| p.name != "Deleted Product"),
+            "Soft-deleted product should not appear in list results"
+        );
     }
 
     /// Deleted licenses don't appear in list queries.
@@ -1191,12 +1367,24 @@ mod list_query_filtering {
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro", "pro");
 
-        let license1 =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
-        let license_to_delete =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
-        let license3 =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
+        let license1 = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
+        let license_to_delete = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
+        let license3 = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
 
         // Soft delete one license
         queries::soft_delete_license(&conn, &license_to_delete.id).expect("Soft delete failed");
@@ -1204,15 +1392,34 @@ mod list_query_filtering {
         // List should exclude deleted license
         // list_licenses_for_project_paginated returns LicenseWithProduct
         let (licenses, total) =
-            queries::list_licenses_for_project_paginated(&conn, &project.id, 100, 0).expect("Query failed");
-        assert_eq!(total, 2, "License count should be 2, excluding soft-deleted license");
-        assert_eq!(licenses.len(), 2, "Returned license list should have 2 entries");
-        assert!(licenses.iter().all(|l| l.license.id != license_to_delete.id), "Soft-deleted license should not appear in list results");
+            queries::list_licenses_for_project_paginated(&conn, &project.id, 100, 0)
+                .expect("Query failed");
+        assert_eq!(
+            total, 2,
+            "License count should be 2, excluding soft-deleted license"
+        );
+        assert_eq!(
+            licenses.len(),
+            2,
+            "Returned license list should have 2 entries"
+        );
+        assert!(
+            licenses
+                .iter()
+                .all(|l| l.license.id != license_to_delete.id),
+            "Soft-deleted license should not appear in list results"
+        );
 
         // Verify the two remaining are the expected ones
         let license_ids: Vec<&str> = licenses.iter().map(|l| l.license.id.as_str()).collect();
-        assert!(license_ids.contains(&license1.id.as_str()), "License 1 should be in the list");
-        assert!(license_ids.contains(&license3.id.as_str()), "License 3 should be in the list");
+        assert!(
+            license_ids.contains(&license1.id.as_str()),
+            "License 1 should be in the list"
+        );
+        assert!(
+            license_ids.contains(&license3.id.as_str()),
+            "License 3 should be in the list"
+        );
     }
 
     /// Include deleted flag shows deleted entities in list.
@@ -1229,9 +1436,19 @@ mod list_query_filtering {
         // List with include_deleted=true should include all users
         let (users, total) =
             queries::list_users_paginated(&conn, 100, 0, true).expect("Query failed");
-        assert_eq!(total, 2, "Total user count with include_deleted=true should be 2");
-        assert_eq!(users.len(), 2, "Returned user list with include_deleted=true should have 2 entries");
-        assert!(users.iter().any(|u| u.email == "deleted@example.com"), "Soft-deleted user should appear when include_deleted=true");
+        assert_eq!(
+            total, 2,
+            "Total user count with include_deleted=true should be 2"
+        );
+        assert_eq!(
+            users.len(),
+            2,
+            "Returned user list with include_deleted=true should have 2 entries"
+        );
+        assert!(
+            users.iter().any(|u| u.email == "deleted@example.com"),
+            "Soft-deleted user should appear when include_deleted=true"
+        );
     }
 
     /// Include deleted flag shows deleted orgs in list.
@@ -1247,9 +1464,19 @@ mod list_query_filtering {
         // List with include_deleted=true should include all orgs
         let (orgs, total) =
             queries::list_organizations_paginated(&conn, 100, 0, true).expect("Query failed");
-        assert_eq!(total, 2, "Total org count with include_deleted=true should be 2");
-        assert_eq!(orgs.len(), 2, "Returned org list with include_deleted=true should have 2 entries");
-        assert!(orgs.iter().any(|o| o.name == "Deleted Org"), "Soft-deleted org should appear when include_deleted=true");
+        assert_eq!(
+            total, 2,
+            "Total org count with include_deleted=true should be 2"
+        );
+        assert_eq!(
+            orgs.len(),
+            2,
+            "Returned org list with include_deleted=true should have 2 entries"
+        );
+        assert!(
+            orgs.iter().any(|o| o.name == "Deleted Org"),
+            "Soft-deleted org should appear when include_deleted=true"
+        );
     }
 }
 
@@ -1301,19 +1528,31 @@ mod cascade_depth_tracking {
         let deleted_user = queries::get_deleted_user_by_id(&conn, &user.id)
             .unwrap()
             .unwrap();
-        assert_eq!(deleted_user.deleted_cascade_depth, Some(0), "Directly deleted user should have cascade depth 0");
+        assert_eq!(
+            deleted_user.deleted_cascade_depth,
+            Some(0),
+            "Directly deleted user should have cascade depth 0"
+        );
 
         // Operator at depth 1
         let deleted_operator = queries::get_deleted_operator_by_id(&conn, &operator.id)
             .unwrap()
             .unwrap();
-        assert_eq!(deleted_operator.deleted_cascade_depth, Some(1), "Operator cascade depth should be 1 when deleted via user cascade");
+        assert_eq!(
+            deleted_operator.deleted_cascade_depth,
+            Some(1),
+            "Operator cascade depth should be 1 when deleted via user cascade"
+        );
 
         // Org member at depth 1
         let deleted_member = queries::get_deleted_org_member_by_id(&conn, &member.id)
             .unwrap()
             .unwrap();
-        assert_eq!(deleted_member.deleted_cascade_depth, Some(1), "Org member cascade depth should be 1 when deleted via user cascade");
+        assert_eq!(
+            deleted_member.deleted_cascade_depth,
+            Some(1),
+            "Org member cascade depth should be 1 when deleted via user cascade"
+        );
     }
 
     /// Cascade from org sets correct depths down the hierarchy.
@@ -1326,8 +1565,12 @@ mod cascade_depth_tracking {
             create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
 
         queries::soft_delete_organization(&conn, &org.id).expect("Soft delete failed");
 
@@ -1390,8 +1633,12 @@ mod cascade_depth_tracking {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
 
         queries::soft_delete_project(&conn, &project.id).expect("Soft delete failed");
 
@@ -1434,8 +1681,12 @@ mod cascade_depth_tracking {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(LICENSE_VALID_DAYS)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
 
         queries::soft_delete_product(&conn, &product.id).expect("Soft delete failed");
 

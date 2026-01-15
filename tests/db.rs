@@ -11,3 +11,6 @@ mod device;
 
 #[path = "db/soft_delete.rs"]
 mod soft_delete;
+
+#[path = "db/from_row_panic.rs"]
+mod from_row_panic;

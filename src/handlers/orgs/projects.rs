@@ -4,7 +4,7 @@ use axum::{
 };
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path, RestoreRequest};
 use crate::jwt;
 use crate::middleware::OrgMemberContext;
@@ -29,8 +29,7 @@ pub async fn create_project(
     let audit_conn = state.audit.get()?;
 
     // Look up org for audit log
-    let org = queries::get_organization_by_id(&conn, &org_id)?
-        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+    let org = queries::get_organization_by_id(&conn, &org_id)?.or_not_found(msg::ORG_NOT_FOUND)?;
 
     // Generate Ed25519 key pair
     let (private_key, public_key) = jwt::generate_keypair();
@@ -96,10 +95,10 @@ pub async fn get_project(
 ) -> Result<Json<ProjectPublic>> {
     let conn = state.db.get()?;
     let project = queries::get_project_by_id(&conn, &path.project_id)?
-        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+        .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
     if project.org_id != path.org_id {
-        return Err(AppError::NotFound("Project not found".into()));
+        return Err(AppError::NotFound(msg::PROJECT_NOT_FOUND.into()));
     }
 
     Ok(Json(project.into()))
@@ -113,7 +112,7 @@ pub async fn update_project(
     Json(input): Json<UpdateProject>,
 ) -> Result<Json<ProjectPublic>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
     input.validate()?;
 
@@ -121,10 +120,10 @@ pub async fn update_project(
     let audit_conn = state.audit.get()?;
 
     // Look up org and project for audit log
-    let org = queries::get_organization_by_id(&conn, &path.org_id)?
-        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+    let org =
+        queries::get_organization_by_id(&conn, &path.org_id)?.or_not_found(msg::ORG_NOT_FOUND)?;
     let existing = queries::get_project_by_id(&conn, &path.project_id)?
-        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+        .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
     queries::update_project(&conn, &path.project_id, &input)?;
 
@@ -140,7 +139,7 @@ pub async fn update_project(
         .save()?;
 
     let project = queries::get_project_by_id(&conn, &path.project_id)?
-        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+        .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
     Ok(Json(project.into()))
 }
@@ -157,10 +156,10 @@ pub async fn delete_project(
     let audit_conn = state.audit.get()?;
 
     // Look up org and project for audit log
-    let org = queries::get_organization_by_id(&conn, &path.org_id)?
-        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+    let org =
+        queries::get_organization_by_id(&conn, &path.org_id)?.or_not_found(msg::ORG_NOT_FOUND)?;
     let existing = queries::get_project_by_id(&conn, &path.project_id)?
-        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+        .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
     queries::soft_delete_project(&conn, &path.project_id)?;
 
@@ -196,8 +195,7 @@ pub async fn get_payment_config(
     ctx.require_admin()?;
 
     let conn = state.db.get()?;
-    let org = queries::get_organization_by_id(&conn, &org_id)?
-        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+    let org = queries::get_organization_by_id(&conn, &org_id)?.or_not_found(msg::ORG_NOT_FOUND)?;
 
     let stripe_config = org
         .decrypt_stripe_config(&state.master_key)?
@@ -231,20 +229,20 @@ pub async fn restore_project(
     let audit_conn = state.audit.get()?;
 
     // Look up org for audit log
-    let org = queries::get_organization_by_id(&conn, &path.org_id)?
-        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+    let org =
+        queries::get_organization_by_id(&conn, &path.org_id)?.or_not_found(msg::ORG_NOT_FOUND)?;
 
     let existing = queries::get_deleted_project_by_id(&conn, &path.project_id)?
-        .ok_or_else(|| AppError::NotFound("Deleted project not found".into()))?;
+        .or_not_found(msg::DELETED_PROJECT_NOT_FOUND)?;
 
     if existing.org_id != path.org_id {
-        return Err(AppError::NotFound("Deleted project not found".into()));
+        return Err(AppError::NotFound(msg::DELETED_PROJECT_NOT_FOUND.into()));
     }
 
     queries::restore_project(&conn, &path.project_id, input.force)?;
 
     let project = queries::get_project_by_id(&conn, &path.project_id)?
-        .ok_or_else(|| AppError::Internal("Project not found after restore".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::PROJECT_NOT_FOUND_AFTER_RESTORE.into()))?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))

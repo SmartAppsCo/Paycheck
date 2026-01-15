@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::MasterKey;
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Result, msg};
 use crate::models::project::{LemonSqueezyConfig, StripeConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,7 +95,7 @@ pub struct CreateOrganization {
 impl CreateOrganization {
     pub fn validate(&self) -> Result<()> {
         if self.name.trim().is_empty() {
-            return Err(AppError::BadRequest("name cannot be empty".into()));
+            return Err(AppError::BadRequest(msg::NAME_EMPTY.into()));
         }
         Ok(())
     }
@@ -121,7 +121,7 @@ impl UpdateOrganization {
         if let Some(ref name) = self.name
             && name.trim().is_empty()
         {
-            return Err(AppError::BadRequest("name cannot be empty".into()));
+            return Err(AppError::BadRequest(msg::NAME_EMPTY.into()));
         }
         // payment_provider can be cleared with null, but if set it shouldn't be empty
         if let Some(Some(ref provider)) = self.payment_provider

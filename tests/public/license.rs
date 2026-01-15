@@ -10,10 +10,10 @@ use tower::ServiceExt;
 #[path = "../common/mod.rs"]
 mod common;
 use common::{
+    CreateProduct, Device, DeviceType, ONE_DAY, ONE_YEAR, Product, Project, UPDATES_VALID_DAYS,
     create_test_app_state, create_test_device, create_test_license, create_test_org,
     create_test_product, create_test_project, future_timestamp, past_timestamp, public_app,
-    queries, test_master_key, CreateProduct, Device, DeviceType, Product, Project, ONE_DAY,
-    ONE_YEAR, UPDATES_VALID_DAYS,
+    queries, test_master_key,
 };
 
 use paycheck::jwt::{self, LicenseClaims};
@@ -64,8 +64,12 @@ fn setup_license_test() -> (axum::Router, paycheck::db::AppState, String, String
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
         let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
 
         token = create_test_jwt(&project, &product, &license.id, &device);
@@ -153,8 +157,12 @@ async fn test_license_with_devices_returns_device_list() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
 
         // Add some devices
         let device1 = create_test_device(&conn, &license.id, "device-1", DeviceType::Uuid);
@@ -289,8 +297,12 @@ async fn test_license_revoked_shows_revoked_status() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
         let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
 
         token = create_test_jwt(&project, &product, &license.id, &device);
@@ -505,8 +517,12 @@ async fn test_license_shows_correct_limits() {
         let product =
             queries::create_product(&conn, &project.id, &input).expect("Failed to create product");
 
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
         let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
 
         token = create_test_jwt(&project, &product, &license.id, &device);

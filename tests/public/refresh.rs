@@ -17,9 +17,7 @@ use tower::ServiceExt;
 
 #[path = "../common/mod.rs"]
 mod common;
-use common::{
-    *, ONE_YEAR, UPDATES_VALID_DAYS, ONE_DAY, ONE_HOUR_SECS,
-};
+use common::{ONE_DAY, ONE_HOUR_SECS, ONE_YEAR, UPDATES_VALID_DAYS, *};
 
 use paycheck::db::AppState;
 use paycheck::db::queries;
@@ -48,8 +46,12 @@ fn setup_refresh_test() -> (Router, String, String, String, String) {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
 
         // Create a device
         let device = create_test_device(&conn, &license.id, "test-device-123", DeviceType::Uuid);
@@ -181,7 +183,9 @@ async fn test_refresh_returns_token_without_license_key() {
         .unwrap();
     let json: Value = serde_json::from_slice(&body).expect("Response should be valid JSON");
 
-    let new_token = json["token"].as_str().expect("token field should be a string");
+    let new_token = json["token"]
+        .as_str()
+        .expect("token field should be a string");
 
     // Decode the new token and verify it doesn't contain license_key
     let claims = jwt::decode_unverified(new_token).unwrap();
@@ -325,8 +329,12 @@ async fn test_refresh_with_revoked_license_fails() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
         let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
 
         // Create JWT
@@ -421,8 +429,12 @@ async fn test_refresh_with_revoked_jti_fails() {
         let org = create_test_org(&conn, "Test Org");
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
         let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
 
         // Create JWT
@@ -521,8 +533,12 @@ async fn test_refresh_with_expired_jwt_succeeds() {
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
         // License valid for 365 days
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(ONE_YEAR)),
+        );
         let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
 
         // Create claims
@@ -634,8 +650,12 @@ async fn test_refresh_with_expired_license_fails() {
         let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
         // License expired 1 day ago (database-level expiration)
-        let license =
-            create_test_license(&conn, &project.id, &product.id, Some(past_timestamp(ONE_DAY)));
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(past_timestamp(ONE_DAY)),
+        );
         let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
 
         // Create claims (these don't matter since DB-level expiration is checked first)

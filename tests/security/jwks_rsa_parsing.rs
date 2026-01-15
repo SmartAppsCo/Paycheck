@@ -7,8 +7,8 @@
 #[path = "../common/mod.rs"]
 mod common;
 
-use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use jwt_simple::prelude::*;
 
 // ============ VALID KEY PARSING TESTS ============
@@ -60,10 +60,7 @@ fn test_key_verifies_signature() {
     let token = key_pair.sign(claims).unwrap();
 
     let verification = public_key.verify_token::<NoCustomClaims>(&token, None);
-    assert!(
-        verification.is_ok(),
-        "Key should verify valid signature"
-    );
+    assert!(verification.is_ok(), "Key should verify valid signature");
 
     let verified_claims = verification.unwrap();
     assert_eq!(
@@ -112,10 +109,7 @@ fn test_key_rejects_tampered_token() {
     let tampered_token = format!("{}.{}.{}", parts[0], tampered_payload, parts[2]);
 
     let verification = public_key.verify_token::<NoCustomClaims>(&tampered_token, None);
-    assert!(
-        verification.is_err(),
-        "Key should reject tampered token"
-    );
+    assert!(verification.is_err(), "Key should reject tampered token");
 }
 
 // ============ from_components TESTS ============
@@ -223,15 +217,30 @@ fn test_various_key_sizes() {
     let key_2048 = RS256KeyPair::generate(2048).unwrap();
     let claims = Claims::create(Duration::from_hours(1));
     let token = key_2048.sign(claims.clone()).unwrap();
-    assert!(key_2048.public_key().verify_token::<NoCustomClaims>(&token, None).is_ok());
+    assert!(
+        key_2048
+            .public_key()
+            .verify_token::<NoCustomClaims>(&token, None)
+            .is_ok()
+    );
 
     // 3072-bit
     let key_3072 = RS256KeyPair::generate(3072).unwrap();
     let token = key_3072.sign(claims.clone()).unwrap();
-    assert!(key_3072.public_key().verify_token::<NoCustomClaims>(&token, None).is_ok());
+    assert!(
+        key_3072
+            .public_key()
+            .verify_token::<NoCustomClaims>(&token, None)
+            .is_ok()
+    );
 
     // 4096-bit
     let key_4096 = RS256KeyPair::generate(4096).unwrap();
     let token = key_4096.sign(claims).unwrap();
-    assert!(key_4096.public_key().verify_token::<NoCustomClaims>(&token, None).is_ok());
+    assert!(
+        key_4096
+            .public_key()
+            .verify_token::<NoCustomClaims>(&token, None)
+            .is_ok()
+    );
 }

@@ -5,7 +5,7 @@ use axum::{
 use serde::Deserialize;
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path, RestoreRequest};
 use crate::middleware::OperatorContext;
 use crate::models::{ActorType, AuditAction, CreateUser, UpdateUser, User, UserWithRoles};
@@ -37,7 +37,7 @@ pub async fn create_user(
 
     // Check if email already exists
     if queries::get_user_by_email(&conn, &input.email)?.is_some() {
-        return Err(AppError::BadRequest("Email already exists".into()));
+        return Err(AppError::BadRequest(msg::EMAIL_ALREADY_EXISTS.into()));
     }
 
     let user = queries::create_user(&conn, &input)?;
@@ -56,7 +56,7 @@ pub async fn create_user(
 
     // Return user with roles (will be empty for new user)
     let user_with_roles = queries::get_user_with_roles(&conn, &user.id)?
-        .ok_or_else(|| AppError::Internal("Failed to fetch created user".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::FAILED_TO_FETCH_CREATED_USER.into()))?;
 
     Ok(Json(user_with_roles))
 }
@@ -73,7 +73,7 @@ pub async fn list_users(
         let user = queries::get_user_by_email(&conn, email)?;
         if let Some(user) = user {
             let user_with_roles = queries::get_user_with_roles(&conn, &user.id)?
-                .ok_or_else(|| AppError::Internal("Failed to fetch user".into()))?;
+                .ok_or_else(|| AppError::Internal(msg::FAILED_TO_FETCH_USER.into()))?;
             return Ok(Json(Paginated::new(vec![user_with_roles], 1, 1, 0)));
         } else {
             return Ok(Json(Paginated::new(vec![], 0, 1, 0)));
@@ -94,8 +94,7 @@ pub async fn get_user(
     Path(id): Path<String>,
 ) -> Result<Json<UserWithRoles>> {
     let conn = state.db.get()?;
-    let user = queries::get_user_with_roles(&conn, &id)?
-        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+    let user = queries::get_user_with_roles(&conn, &id)?.or_not_found(msg::USER_NOT_FOUND)?;
     Ok(Json(user))
 }
 
@@ -112,15 +111,14 @@ pub async fn update_user(
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
-    let existing = queries::get_user_by_id(&conn, &id)?
-        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+    let existing = queries::get_user_by_id(&conn, &id)?.or_not_found(msg::USER_NOT_FOUND)?;
 
     // If changing email, check it doesn't conflict
     if let Some(ref new_email) = input.email
         && new_email != &existing.email
         && queries::get_user_by_email(&conn, new_email)?.is_some()
     {
-        return Err(AppError::BadRequest("Email already exists".into()));
+        return Err(AppError::BadRequest(msg::EMAIL_ALREADY_EXISTS.into()));
     }
 
     queries::update_user(&conn, &id, &input)?;
@@ -140,8 +138,7 @@ pub async fn update_user(
         .auth_method(&ctx.auth_method)
         .save()?;
 
-    let user = queries::get_user_with_roles(&conn, &id)?
-        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+    let user = queries::get_user_with_roles(&conn, &id)?.or_not_found(msg::USER_NOT_FOUND)?;
 
     Ok(Json(user))
 }
@@ -159,11 +156,10 @@ pub async fn delete_user(
 
     // Don't allow deleting yourself
     if id == ctx.user.id {
-        return Err(AppError::BadRequest("Cannot delete yourself".into()));
+        return Err(AppError::BadRequest(msg::CANNOT_DELETE_SELF.into()));
     }
 
-    let existing = queries::get_user_by_id(&conn, &id)?
-        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+    let existing = queries::get_user_by_id(&conn, &id)?.or_not_found(msg::USER_NOT_FOUND)?;
 
     queries::soft_delete_user(&conn, &id)?;
 
@@ -197,15 +193,15 @@ pub async fn restore_user(
     let audit_conn = state.audit.get()?;
 
     // Get the deleted user
-    let existing = queries::get_deleted_user_by_id(&conn, &id)?
-        .ok_or_else(|| AppError::NotFound("Deleted user not found".into()))?;
+    let existing =
+        queries::get_deleted_user_by_id(&conn, &id)?.or_not_found(msg::DELETED_USER_NOT_FOUND)?;
 
     // Restore the user and cascade-deleted children
     queries::restore_user(&conn, &id, input.force)?;
 
     // Get the restored user
     let user = queries::get_user_by_id(&conn, &id)?
-        .ok_or_else(|| AppError::Internal("User not found after restore".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::USER_NOT_FOUND_AFTER_RESTORE.into()))?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.user.id))
@@ -239,13 +235,13 @@ pub async fn hard_delete_user(
 
     // Don't allow deleting yourself
     if id == ctx.user.id {
-        return Err(AppError::BadRequest("Cannot hard delete yourself".into()));
+        return Err(AppError::BadRequest(msg::CANNOT_HARD_DELETE_SELF.into()));
     }
 
     // Get user info for audit log (may be soft-deleted already)
     let existing = queries::get_user_by_id(&conn, &id)?
         .or_else(|| queries::get_deleted_user_by_id(&conn, &id).ok().flatten())
-        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+        .or_not_found(msg::USER_NOT_FOUND)?;
 
     // Perform hard delete (CASCADE removes all related data)
     queries::delete_user(&conn, &id)?;

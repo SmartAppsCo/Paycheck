@@ -9,7 +9,7 @@ use tower::ServiceExt;
 
 #[path = "../common/mod.rs"]
 mod common;
-use common::{*, ONE_YEAR, ONE_MONTH};
+use common::{ONE_MONTH, ONE_YEAR, *};
 
 use paycheck::db::AppState;
 use paycheck::handlers;
@@ -115,19 +115,35 @@ mod product_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "create product should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "create product should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert!(json["id"].as_str().is_some(), "response should include product ID");
+        assert!(
+            json["id"].as_str().is_some(),
+            "response should include product ID"
+        );
         assert_eq!(json["name"], "Pro Plan", "product name should match input");
         assert_eq!(json["tier"], "pro", "product tier should match input");
-        assert_eq!(json["license_exp_days"], ONE_YEAR, "license expiration should be one year");
-        assert_eq!(json["updates_exp_days"], 180, "updates expiration should be 180 days");
-        assert_eq!(json["activation_limit"], 10, "activation limit should match input");
+        assert_eq!(
+            json["license_exp_days"], ONE_YEAR,
+            "license expiration should be one year"
+        );
+        assert_eq!(
+            json["updates_exp_days"], 180,
+            "updates expiration should be 180 days"
+        );
+        assert_eq!(
+            json["activation_limit"], 10,
+            "activation limit should match input"
+        );
         assert_eq!(json["device_limit"], 5, "device limit should match input");
         assert_eq!(
             json["features"],
@@ -174,7 +190,11 @@ mod product_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "list products should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "list products should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -225,14 +245,21 @@ mod product_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "get product should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "get product should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["id"], product_id, "product ID should match requested ID");
+        assert_eq!(
+            json["id"], product_id,
+            "product ID should match requested ID"
+        );
         assert_eq!(json["name"], "Pro Plan", "product name should match");
         assert_eq!(json["tier"], "pro", "product tier should match");
     }
@@ -283,14 +310,21 @@ mod product_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "update product should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "update product should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["name"], "Pro Plan Plus", "product name should be updated");
+        assert_eq!(
+            json["name"], "Pro Plan Plus",
+            "product name should be updated"
+        );
         assert_eq!(json["tier"], "pro_plus", "product tier should be updated");
         assert_eq!(json["device_limit"], 10, "device limit should be updated");
     }
@@ -334,19 +368,29 @@ mod product_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "delete product should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "delete product should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["success"], true, "delete response should indicate success");
+        assert_eq!(
+            json["success"], true,
+            "delete response should indicate success"
+        );
 
         // Verify product is actually deleted
         let conn = state.db.get().unwrap();
         let result = queries::get_product_by_id(&conn, &product_id).unwrap();
-        assert!(result.is_none(), "product should no longer exist in database");
+        assert!(
+            result.is_none(),
+            "product should no longer exist in database"
+        );
     }
 
     #[tokio::test]
@@ -390,7 +434,11 @@ mod product_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND, "accessing product from wrong project should return 404");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::NOT_FOUND,
+            "accessing product from wrong project should return 404"
+        );
     }
 }
 
@@ -443,7 +491,11 @@ mod license_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "create license should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "create license should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -452,9 +504,15 @@ mod license_tests {
 
         let licenses = json["licenses"].as_array().unwrap();
         assert_eq!(licenses.len(), 1, "should create exactly one license");
-        assert!(licenses[0]["id"].as_str().is_some(), "license should have an ID");
+        assert!(
+            licenses[0]["id"].as_str().is_some(),
+            "license should have an ID"
+        );
         // Note: "key" field no longer exists (email-only activation model)
-        assert!(licenses[0]["expires_at"].as_i64().is_some(), "license should have expiration date from product default");
+        assert!(
+            licenses[0]["expires_at"].as_i64().is_some(),
+            "license should have expiration date from product default"
+        );
     }
 
     #[tokio::test]
@@ -500,7 +558,11 @@ mod license_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "bulk create licenses should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "bulk create licenses should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -508,12 +570,20 @@ mod license_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         let licenses = json["licenses"].as_array().unwrap();
-        assert_eq!(licenses.len(), 5, "should create exactly 5 licenses as requested");
+        assert_eq!(
+            licenses.len(),
+            5,
+            "should create exactly 5 licenses as requested"
+        );
 
         // All IDs should be unique
         let ids: Vec<&str> = licenses.iter().map(|l| l["id"].as_str().unwrap()).collect();
         let unique_ids: std::collections::HashSet<&str> = ids.iter().cloned().collect();
-        assert_eq!(ids.len(), unique_ids.len(), "all license IDs should be unique");
+        assert_eq!(
+            ids.len(),
+            unique_ids.len(),
+            "all license IDs should be unique"
+        );
     }
 
     #[tokio::test]
@@ -558,7 +628,11 @@ mod license_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST, "exceeding bulk limit of 100 should return 400");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::BAD_REQUEST,
+            "exceeding bulk limit of 100 should return 400"
+        );
     }
 
     #[tokio::test]
@@ -608,7 +682,11 @@ mod license_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "create license with custom expiration should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "create license with custom expiration should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -620,12 +698,24 @@ mod license_tests {
         let updates_exp = licenses[0]["updates_expires_at"].as_i64().unwrap();
 
         // Should be ~30 days from now
-        assert!(license_exp >= before + (ONE_MONTH * 86400) - 5, "license expiration should be at least 30 days from now");
-        assert!(license_exp <= before + (ONE_MONTH * 86400) + 5, "license expiration should be at most 30 days from now");
+        assert!(
+            license_exp >= before + (ONE_MONTH * 86400) - 5,
+            "license expiration should be at least 30 days from now"
+        );
+        assert!(
+            license_exp <= before + (ONE_MONTH * 86400) + 5,
+            "license expiration should be at most 30 days from now"
+        );
 
         // Updates should be ~60 days from now
-        assert!(updates_exp >= before + (60 * 86400) - 5, "updates expiration should be at least 60 days from now");
-        assert!(updates_exp <= before + (60 * 86400) + 5, "updates expiration should be at most 60 days from now");
+        assert!(
+            updates_exp >= before + (60 * 86400) - 5,
+            "updates expiration should be at least 60 days from now"
+        );
+        assert!(
+            updates_exp <= before + (60 * 86400) + 5,
+            "updates expiration should be at most 60 days from now"
+        );
     }
 
     #[tokio::test]
@@ -682,7 +772,11 @@ mod license_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "create perpetual license should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "create perpetual license should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -717,8 +811,12 @@ mod license_tests {
                 create_test_org_member(&conn, &org.id, "admin@test.com", OrgMemberRole::Owner);
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Create a device for the license
             create_test_device(&conn, &license.id, "device-1", DeviceType::Uuid);
@@ -744,7 +842,11 @@ mod license_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "get license should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "get license should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -752,13 +854,22 @@ mod license_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         // Verify license fields
-        assert_eq!(json["id"], license_id, "license ID should match requested ID");
-        assert!(json["product_name"].as_str().is_some(), "license should include product name");
+        assert_eq!(
+            json["id"], license_id,
+            "license ID should match requested ID"
+        );
+        assert!(
+            json["product_name"].as_str().is_some(),
+            "license should include product name"
+        );
 
         // Verify devices array
         let devices = json["devices"].as_array().unwrap();
         assert_eq!(devices.len(), 1, "license should have exactly one device");
-        assert_eq!(devices[0]["device_id"], "device-1", "device ID should match");
+        assert_eq!(
+            devices[0]["device_id"], "device-1",
+            "device ID should match"
+        );
     }
 
     #[tokio::test]
@@ -778,8 +889,12 @@ mod license_tests {
                 create_test_org_member(&conn, &org.id, "admin@test.com", OrgMemberRole::Owner);
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             org_id = org.id;
             project_id = project.id;
@@ -802,21 +917,31 @@ mod license_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "revoke license should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "revoke license should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["success"], true, "revoke response should indicate success");
+        assert_eq!(
+            json["success"], true,
+            "revoke response should indicate success"
+        );
 
         // Verify in database
         let conn = state.db.get().unwrap();
         let license = queries::get_license_by_id(&conn, &license_id)
             .unwrap()
             .unwrap();
-        assert!(license.revoked, "license should be marked as revoked in database");
+        assert!(
+            license.revoked,
+            "license should be marked as revoked in database"
+        );
     }
 
     #[tokio::test]
@@ -836,8 +961,12 @@ mod license_tests {
                 create_test_org_member(&conn, &org.id, "admin@test.com", OrgMemberRole::Owner);
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Pre-revoke the license
             queries::revoke_license(&conn, &license.id).unwrap();
@@ -863,7 +992,11 @@ mod license_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST, "revoking already-revoked license should return 400");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::BAD_REQUEST,
+            "revoking already-revoked license should return 400"
+        );
     }
 
     // NOTE: test_replace_license removed - license replacement endpoint no longer exists
@@ -887,8 +1020,12 @@ mod license_tests {
                 create_test_org_member(&conn, &org.id, "admin@test.com", OrgMemberRole::Owner);
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Create devices
             create_test_device(&conn, &license.id, "device-1", DeviceType::Uuid);
@@ -916,22 +1053,42 @@ mod license_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "deactivate device should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "deactivate device should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["deactivated"], true, "response should indicate device was deactivated");
-        assert_eq!(json["device_id"], device_id, "response should include deactivated device ID");
-        assert_eq!(json["remaining_devices"], 1, "remaining devices should be 1 after removing one of two");
+        assert_eq!(
+            json["deactivated"], true,
+            "response should indicate device was deactivated"
+        );
+        assert_eq!(
+            json["device_id"], device_id,
+            "response should include deactivated device ID"
+        );
+        assert_eq!(
+            json["remaining_devices"], 1,
+            "remaining devices should be 1 after removing one of two"
+        );
 
         // Verify device is removed from database
         let conn = state.db.get().unwrap();
         let devices = queries::list_devices_for_license(&conn, &license_id).unwrap();
-        assert_eq!(devices.len(), 1, "license should have 1 device remaining in database");
-        assert_eq!(devices[0].device_id, "device-2", "remaining device should be device-2");
+        assert_eq!(
+            devices.len(),
+            1,
+            "license should have 1 device remaining in database"
+        );
+        assert_eq!(
+            devices[0].device_id, "device-2",
+            "remaining device should be device-2"
+        );
     }
 }
 
@@ -978,19 +1135,38 @@ mod project_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "create project should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "create project should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert!(json["id"].as_str().is_some(), "response should include project ID");
-        assert_eq!(json["name"], "My New Project", "project name should match input");
-        assert_eq!(json["license_key_prefix"], "MNP", "license key prefix should match input");
-        assert_eq!(json["redirect_url"], "https://myapp.com/activated", "redirect URL should match input");
+        assert!(
+            json["id"].as_str().is_some(),
+            "response should include project ID"
+        );
+        assert_eq!(
+            json["name"], "My New Project",
+            "project name should match input"
+        );
+        assert_eq!(
+            json["license_key_prefix"], "MNP",
+            "license key prefix should match input"
+        );
+        assert_eq!(
+            json["redirect_url"], "https://myapp.com/activated",
+            "redirect URL should match input"
+        );
         // Public key should be present (for client-side JWT verification)
-        assert!(json["public_key"].as_str().is_some(), "project should include public key for JWT verification");
+        assert!(
+            json["public_key"].as_str().is_some(),
+            "project should include public key for JWT verification"
+        );
     }
 
     #[tokio::test]
@@ -1028,7 +1204,11 @@ mod project_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "list projects should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "list projects should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -1078,14 +1258,21 @@ mod project_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "update project should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "update project should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["name"], "Updated Name", "project name should be updated");
+        assert_eq!(
+            json["name"], "Updated Name",
+            "project name should be updated"
+        );
     }
 
     #[tokio::test]
@@ -1121,16 +1308,26 @@ mod project_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "get project should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "get project should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["id"], project_id, "project ID should match requested ID");
+        assert_eq!(
+            json["id"], project_id,
+            "project ID should match requested ID"
+        );
         assert_eq!(json["name"], "My Project", "project name should match");
-        assert!(json["public_key"].as_str().is_some(), "project should include public key");
+        assert!(
+            json["public_key"].as_str().is_some(),
+            "project should include public key"
+        );
     }
 
     #[tokio::test]
@@ -1162,7 +1359,11 @@ mod project_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND, "nonexistent project should return 404");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::NOT_FOUND,
+            "nonexistent project should return 404"
+        );
     }
 
     #[tokio::test]
@@ -1200,7 +1401,11 @@ mod project_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND, "accessing another org's project should return 404");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::NOT_FOUND,
+            "accessing another org's project should return 404"
+        );
     }
 
     #[tokio::test]
@@ -1236,19 +1441,29 @@ mod project_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "delete project should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "delete project should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["success"], true, "delete response should indicate success");
+        assert_eq!(
+            json["success"], true,
+            "delete response should indicate success"
+        );
 
         // Verify project is deleted
         let conn = state.db.get().unwrap();
         let project = queries::get_project_by_id(&conn, &project_id).unwrap();
-        assert!(project.is_none(), "project should no longer exist in database");
+        assert!(
+            project.is_none(),
+            "project should no longer exist in database"
+        );
     }
 
     #[tokio::test]
@@ -1280,7 +1495,11 @@ mod project_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND, "deleting nonexistent project should return 404");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::NOT_FOUND,
+            "deleting nonexistent project should return 404"
+        );
     }
 
     #[tokio::test]
@@ -1318,7 +1537,11 @@ mod project_tests {
             .unwrap();
 
         // Returns 404 (not 403) to avoid leaking project existence to unauthorized users
-        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND, "member role should see 404 to avoid leaking project existence");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::NOT_FOUND,
+            "member role should see 404 to avoid leaking project existence"
+        );
     }
 
     #[tokio::test]
@@ -1357,7 +1580,11 @@ mod project_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN, "member role should not be able to create projects");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::FORBIDDEN,
+            "member role should not be able to create projects"
+        );
     }
 
     #[tokio::test]
@@ -1404,7 +1631,11 @@ mod project_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "list projects should return 200 OK for member");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "list projects should return 200 OK for member"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -1413,9 +1644,19 @@ mod project_tests {
 
         let projects = json["items"].as_array().unwrap();
         // Member should only see the one project they're assigned to
-        assert_eq!(projects.len(), 1, "member should only see assigned projects");
-        assert_eq!(projects[0]["name"], assigned_project_name, "member should see their assigned project");
-        assert_eq!(json["total"], 1, "total should reflect only assigned projects");
+        assert_eq!(
+            projects.len(),
+            1,
+            "member should only see assigned projects"
+        );
+        assert_eq!(
+            projects[0]["name"], assigned_project_name,
+            "member should see their assigned project"
+        );
+        assert_eq!(
+            json["total"], 1,
+            "total should reflect only assigned projects"
+        );
     }
 
     #[tokio::test]
@@ -1481,7 +1722,10 @@ mod project_tests {
             secret_key
         );
         // LemonSqueezy config should be masked
-        assert!(json["ls_config"].is_object(), "ls_config should be present as an object");
+        assert!(
+            json["ls_config"].is_object(),
+            "ls_config should be present as an object"
+        );
         let ls = &json["ls_config"];
         let api_key = ls["api_key"].as_str().unwrap();
         assert!(
@@ -1520,7 +1764,11 @@ mod project_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "get payment config should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "get payment config should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -1528,8 +1776,14 @@ mod project_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         assert_eq!(json["org_id"], org_id, "response should include org ID");
-        assert!(json["stripe_config"].is_null(), "stripe_config should be null when not configured");
-        assert!(json["ls_config"].is_null(), "ls_config should be null when not configured");
+        assert!(
+            json["stripe_config"].is_null(),
+            "stripe_config should be null when not configured"
+        );
+        assert!(
+            json["ls_config"].is_null(),
+            "ls_config should be null when not configured"
+        );
     }
 
     #[tokio::test]
@@ -1561,7 +1815,11 @@ mod project_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN, "member role should not access payment config");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::FORBIDDEN,
+            "member role should not access payment config"
+        );
     }
 
     #[tokio::test]
@@ -1598,7 +1856,11 @@ mod project_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND, "updating nonexistent project should return 404");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::NOT_FOUND,
+            "updating nonexistent project should return 404"
+        );
     }
 }
 
@@ -1640,7 +1902,11 @@ mod org_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "list org members should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "list org members should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -1692,7 +1958,11 @@ mod org_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "create org member should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "create org member should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -1700,8 +1970,14 @@ mod org_member_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         // Response is OrgMember (user_id linked, no email/name in response)
-        assert!(json["id"].as_str().is_some(), "response should include member ID");
-        assert_eq!(json["user_id"], new_user_id, "member should be linked to correct user");
+        assert!(
+            json["id"].as_str().is_some(),
+            "response should include member ID"
+        );
+        assert_eq!(
+            json["user_id"], new_user_id,
+            "member should be linked to correct user"
+        );
         assert_eq!(json["role"], "admin", "member role should match input");
     }
 
@@ -1738,15 +2014,25 @@ mod org_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "get org member should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "get org member should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["user_id"], target_user_id, "member user_id should match requested ID");
-        assert_eq!(json["email"], "target@test.com", "member email should be included");
+        assert_eq!(
+            json["user_id"], target_user_id,
+            "member user_id should match requested ID"
+        );
+        assert_eq!(
+            json["email"], "target@test.com",
+            "member email should be included"
+        );
         assert_eq!(json["role"], "admin", "member role should match");
     }
 
@@ -1785,7 +2071,11 @@ mod org_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND, "accessing member from another org should return 404");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::NOT_FOUND,
+            "accessing member from another org should return 404"
+        );
     }
 
     #[tokio::test]
@@ -1827,14 +2117,21 @@ mod org_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "update org member should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "update org member should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["role"], "admin", "member role should be updated to admin");
+        assert_eq!(
+            json["role"], "admin",
+            "member role should be updated to admin"
+        );
     }
 
     #[tokio::test]
@@ -1874,7 +2171,11 @@ mod org_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST, "users should not be able to change their own role");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::BAD_REQUEST,
+            "users should not be able to change their own role"
+        );
     }
 
     // NOTE: test_update_org_member_can_change_own_name removed
@@ -1913,20 +2214,30 @@ mod org_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "delete org member should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "delete org member should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["success"], true, "delete response should indicate success");
+        assert_eq!(
+            json["success"], true,
+            "delete response should indicate success"
+        );
 
         // Verify member is removed from database (by user_id)
         let conn = state.db.get().unwrap();
         let result =
             queries::get_org_member_by_user_and_org(&conn, &target_user_id, &org_id).unwrap();
-        assert!(result.is_none(), "member should no longer exist in database");
+        assert!(
+            result.is_none(),
+            "member should no longer exist in database"
+        );
     }
 
     #[tokio::test]
@@ -1960,7 +2271,11 @@ mod org_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST, "users should not be able to delete themselves");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::BAD_REQUEST,
+            "users should not be able to delete themselves"
+        );
     }
 
     #[tokio::test]
@@ -1992,7 +2307,11 @@ mod org_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND, "deleting nonexistent member should return 404");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::NOT_FOUND,
+            "deleting nonexistent member should return 404"
+        );
     }
 }
 
@@ -2048,7 +2367,11 @@ mod project_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "create project member should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "create project member should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -2056,10 +2379,19 @@ mod project_member_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         // Internal IDs are hidden, check user_id instead
-        assert_eq!(json["user_id"], target_user_id, "project member should be linked to correct user");
-        assert_eq!(json["role"], "admin", "project member role should match input");
+        assert_eq!(
+            json["user_id"], target_user_id,
+            "project member should be linked to correct user"
+        );
+        assert_eq!(
+            json["role"], "admin",
+            "project member role should match input"
+        );
         // Should include org member details
-        assert_eq!(json["email"], "member@test.com", "response should include member email");
+        assert_eq!(
+            json["email"], "member@test.com",
+            "response should include member email"
+        );
     }
 
     #[tokio::test]
@@ -2113,7 +2445,11 @@ mod project_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT, "adding duplicate project member should return 409 conflict");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::CONFLICT,
+            "adding duplicate project member should return 409 conflict"
+        );
     }
 
     #[tokio::test]
@@ -2161,7 +2497,11 @@ mod project_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST, "adding member from another org should return 400");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::BAD_REQUEST,
+            "adding member from another org should return 400"
+        );
     }
 
     #[tokio::test]
@@ -2214,7 +2554,11 @@ mod project_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "list project members should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "list project members should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -2225,8 +2569,14 @@ mod project_member_tests {
         assert_eq!(members.len(), 2, "should return both project members");
         assert_eq!(json["total"], 2, "total count should be 2");
         // Should include email/name details
-        assert!(members[0]["email"].as_str().is_some(), "response should include member email");
-        assert!(members[0]["name"].as_str().is_some(), "response should include member name");
+        assert!(
+            members[0]["email"].as_str().is_some(),
+            "response should include member email"
+        );
+        assert!(
+            members[0]["name"].as_str().is_some(),
+            "response should include member name"
+        );
     }
 
     #[tokio::test]
@@ -2280,14 +2630,21 @@ mod project_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "update project member should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "update project member should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["updated"], true, "update response should indicate success");
+        assert_eq!(
+            json["updated"], true,
+            "update response should indicate success"
+        );
     }
 
     #[tokio::test]
@@ -2331,7 +2688,11 @@ mod project_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND, "updating nonexistent project member should return 404");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::NOT_FOUND,
+            "updating nonexistent project member should return 404"
+        );
     }
 
     #[tokio::test]
@@ -2380,19 +2741,30 @@ mod project_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::OK, "delete project member should return 200 OK");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "delete project member should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["success"], true, "delete response should indicate success");
+        assert_eq!(
+            json["success"], true,
+            "delete response should indicate success"
+        );
 
         // Verify member list is empty
         let conn = state.db.get().unwrap();
         let members = queries::list_project_members(&conn, &project_id).unwrap();
-        assert_eq!(members.len(), 0, "project should have no members after deletion");
+        assert_eq!(
+            members.len(),
+            0,
+            "project should have no members after deletion"
+        );
     }
 
     #[tokio::test]
@@ -2431,7 +2803,11 @@ mod project_member_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND, "deleting nonexistent project member should return 404");
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::NOT_FOUND,
+            "deleting nonexistent project member should return 404"
+        );
     }
 }
 
@@ -2489,7 +2865,11 @@ mod payment_config_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), 200, "create stripe payment config should return 200 OK");
+        assert_eq!(
+            response.status(),
+            200,
+            "create stripe payment config should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -2498,7 +2878,10 @@ mod payment_config_tests {
 
         assert!(json["id"].is_string(), "response should include config ID");
         assert_eq!(json["provider"], "stripe", "provider should be stripe");
-        assert_eq!(json["stripe_price_id"], "price_12345", "stripe_price_id should match input");
+        assert_eq!(
+            json["stripe_price_id"], "price_12345",
+            "stripe_price_id should match input"
+        );
         assert_eq!(json["price_cents"], 9999, "price_cents should match input");
         assert_eq!(json["currency"], "usd", "currency should match input");
     }
@@ -2550,7 +2933,11 @@ mod payment_config_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), 200, "create LemonSqueezy payment config should return 200 OK");
+        assert_eq!(
+            response.status(),
+            200,
+            "create LemonSqueezy payment config should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -2558,8 +2945,14 @@ mod payment_config_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         assert!(json["id"].is_string(), "response should include config ID");
-        assert_eq!(json["provider"], "lemonsqueezy", "provider should be lemonsqueezy");
-        assert_eq!(json["ls_variant_id"], "variant_abc123", "ls_variant_id should match input");
+        assert_eq!(
+            json["provider"], "lemonsqueezy",
+            "provider should be lemonsqueezy"
+        );
+        assert_eq!(
+            json["ls_variant_id"], "variant_abc123",
+            "ls_variant_id should match input"
+        );
     }
 
     #[tokio::test]
@@ -2624,14 +3017,21 @@ mod payment_config_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), 400, "duplicate provider config should return 400");
+        assert_eq!(
+            response.status(),
+            400,
+            "duplicate provider config should return 400"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
         // Error details are in "details" field, not "error"
-        assert!(json["details"].as_str().unwrap().contains("already exists"), "error should mention config already exists");
+        assert!(
+            json["details"].as_str().unwrap().contains("already exists"),
+            "error should mention config already exists"
+        );
     }
 
     #[tokio::test]
@@ -2676,7 +3076,11 @@ mod payment_config_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), 404, "creating config for nonexistent product should return 404");
+        assert_eq!(
+            response.status(),
+            404,
+            "creating config for nonexistent product should return 404"
+        );
     }
 
     #[tokio::test]
@@ -2746,7 +3150,11 @@ mod payment_config_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), 200, "list payment configs should return 200 OK");
+        assert_eq!(
+            response.status(),
+            200,
+            "list payment configs should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -2813,7 +3221,11 @@ mod payment_config_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), 200, "get payment config should return 200 OK");
+        assert_eq!(
+            response.status(),
+            200,
+            "get payment config should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -2822,7 +3234,10 @@ mod payment_config_tests {
 
         assert_eq!(json["id"], config_id, "config ID should match requested ID");
         assert_eq!(json["provider"], "stripe", "provider should match");
-        assert_eq!(json["stripe_price_id"], "price_123", "stripe_price_id should match");
+        assert_eq!(
+            json["stripe_price_id"], "price_123",
+            "stripe_price_id should match"
+        );
         assert_eq!(json["price_cents"], 999, "price_cents should match");
     }
 
@@ -2884,7 +3299,11 @@ mod payment_config_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), 404, "accessing config from wrong product should return 404");
+        assert_eq!(
+            response.status(),
+            404,
+            "accessing config from wrong product should return 404"
+        );
     }
 
     #[tokio::test]
@@ -2949,14 +3368,21 @@ mod payment_config_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), 200, "update payment config should return 200 OK");
+        assert_eq!(
+            response.status(),
+            200,
+            "update payment config should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["stripe_price_id"], "price_new", "stripe_price_id should be updated");
+        assert_eq!(
+            json["stripe_price_id"], "price_new",
+            "stripe_price_id should be updated"
+        );
         assert_eq!(json["price_cents"], 1999, "price_cents should be updated");
         // Currency should remain unchanged
         assert_eq!(json["currency"], "usd", "currency should remain unchanged");
@@ -3025,7 +3451,11 @@ mod payment_config_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), 200, "partial update should return 200 OK");
+        assert_eq!(
+            response.status(),
+            200,
+            "partial update should return 200 OK"
+        );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -3033,10 +3463,19 @@ mod payment_config_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         // Updated field changed
-        assert_eq!(json["stripe_price_id"], "price_new", "updated field should change");
+        assert_eq!(
+            json["stripe_price_id"], "price_new",
+            "updated field should change"
+        );
         // Other fields unchanged
-        assert_eq!(json["price_cents"], 999, "unspecified price_cents should remain unchanged");
-        assert_eq!(json["currency"], "usd", "unspecified currency should remain unchanged");
+        assert_eq!(
+            json["price_cents"], 999,
+            "unspecified price_cents should remain unchanged"
+        );
+        assert_eq!(
+            json["currency"], "usd",
+            "unspecified currency should remain unchanged"
+        );
     }
 
     #[tokio::test]
@@ -3095,13 +3534,20 @@ mod payment_config_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), 200, "delete payment config should return 200 OK");
+        assert_eq!(
+            response.status(),
+            200,
+            "delete payment config should return 200 OK"
+        );
 
         // Verify config is deleted
         let conn = state.db.get().unwrap();
         use paycheck::db::queries;
         let config = queries::get_payment_config_by_id(&conn, &config_id).unwrap();
-        assert!(config.is_none(), "config should no longer exist in database");
+        assert!(
+            config.is_none(),
+            "config should no longer exist in database"
+        );
     }
 
     #[tokio::test]
@@ -3143,7 +3589,11 @@ mod payment_config_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), 404, "deleting nonexistent config should return 404");
+        assert_eq!(
+            response.status(),
+            404,
+            "deleting nonexistent config should return 404"
+        );
     }
 
     #[tokio::test]
@@ -3206,6 +3656,10 @@ mod payment_config_tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), 403, "view-only access should not be able to create payment config");
+        assert_eq!(
+            response.status(),
+            403,
+            "view-only access should not be able to create payment config"
+        );
     }
 }

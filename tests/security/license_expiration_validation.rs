@@ -52,9 +52,8 @@ fn org_app() -> (Router, AppState) {
         trusted_issuers: vec![],
     };
 
-    let app =
-        handlers::orgs::router(state.clone(), paycheck::config::RateLimitConfig::disabled())
-            .with_state(state.clone());
+    let app = handlers::orgs::router(state.clone(), paycheck::config::RateLimitConfig::disabled())
+        .with_state(state.clone());
 
     (app, state)
 }

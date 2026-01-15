@@ -5,7 +5,7 @@ meta {
 }
 
 delete {
-  url: {{base_url}}/operators/{{operator_id}}
+  url: {{base_url}}/operators/{{user_id}}
   body: none
   auth: bearer
 }
@@ -15,6 +15,6 @@ auth:bearer {
 }
 
 docs {
-  Delete an operator (requires owner role).
+  Remove operator role from a user (requires owner role).
   Cannot delete yourself.
 }

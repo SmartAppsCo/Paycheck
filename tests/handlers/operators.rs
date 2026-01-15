@@ -173,11 +173,7 @@ mod operator_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         let operators = json["items"].as_array().unwrap();
-        assert_eq!(
-            operators.len(),
-            3,
-            "Should return all 3 created operators"
-        );
+        assert_eq!(operators.len(), 3, "Should return all 3 created operators");
         assert_eq!(json["total"], 3, "Total count should be 3");
     }
 
@@ -1471,6 +1467,196 @@ mod audit_log_tests {
             "Query audit logs text with filters should return 200 OK"
         );
     }
+
+    // ========================================================================
+    // PAGINATION EDGE CASE TESTS
+    // ========================================================================
+
+    /// Test pagination with offset beyond total results.
+    /// Should return empty items but still show correct total count.
+    #[tokio::test]
+    async fn test_audit_log_offset_beyond_total() {
+        let (app, state) = operator_app();
+
+        let api_key: String;
+        {
+            let conn = state.db.get().unwrap();
+            let (_, _, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            api_key = key;
+        }
+
+        // Query with offset=1000 (way beyond any existing logs)
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/operators/audit-logs?offset=1000&limit=10")
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "Offset beyond total should return 200 OK"
+        );
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert!(
+            json["items"].as_array().unwrap().is_empty(),
+            "Items should be empty when offset exceeds total"
+        );
+        assert!(
+            json["total"].as_i64().unwrap() >= 0,
+            "Total count should still be reported"
+        );
+        assert_eq!(
+            json["offset"].as_i64().unwrap(),
+            1000,
+            "Offset should reflect requested value"
+        );
+    }
+
+    /// Test pagination with limit=0.
+    /// The pagination layer clamps this to 1, so it should return at least 1 item.
+    #[tokio::test]
+    async fn test_audit_log_limit_zero() {
+        let (app, state) = operator_app();
+
+        let api_key: String;
+        {
+            let conn = state.db.get().unwrap();
+            let (_, _, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            // Create some audit logs by creating an org
+            let _ = create_test_org(&conn, "Test Org");
+            api_key = key;
+        }
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/operators/audit-logs?limit=0")
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "limit=0 should return 200 OK (clamped to 1)"
+        );
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        // Limit=0 is clamped to 1 by pagination.rs
+        assert_eq!(
+            json["limit"].as_i64().unwrap(),
+            1,
+            "Limit should be clamped to minimum of 1"
+        );
+    }
+
+    /// Test pagination with negative offset.
+    /// The pagination layer treats this as 0.
+    #[tokio::test]
+    async fn test_audit_log_negative_offset() {
+        let (app, state) = operator_app();
+
+        let api_key: String;
+        {
+            let conn = state.db.get().unwrap();
+            let (_, _, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            api_key = key;
+        }
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/operators/audit-logs?offset=-5")
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "Negative offset should return 200 OK (treated as 0)"
+        );
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        // Negative offset is treated as 0 by pagination.rs
+        assert_eq!(
+            json["offset"].as_i64().unwrap(),
+            0,
+            "Negative offset should be treated as 0"
+        );
+    }
+
+    /// Test pagination limit is capped at 100.
+    /// Requesting limit=1000 should return at most 100 entries.
+    #[tokio::test]
+    async fn test_audit_log_limit_capped() {
+        let (app, state) = operator_app();
+
+        let api_key: String;
+        {
+            let conn = state.db.get().unwrap();
+            let (_, _, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            api_key = key;
+        }
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/operators/audit-logs?limit=1000")
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "Very large limit should return 200 OK (capped at 100)"
+        );
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        // Limit is capped at 100 by pagination.rs
+        assert_eq!(
+            json["limit"].as_i64().unwrap(),
+            100,
+            "Limit should be capped at maximum of 100"
+        );
+    }
 }
 
 // ============================================================================
@@ -1509,11 +1695,7 @@ mod user_tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            response.status(),
-            200,
-            "Create user should return 200 OK"
-        );
+        assert_eq!(response.status(), 200, "Create user should return 200 OK");
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -1613,11 +1795,7 @@ mod user_tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            response.status(),
-            200,
-            "List users should return 200 OK"
-        );
+        assert_eq!(response.status(), 200, "List users should return 200 OK");
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -1706,11 +1884,7 @@ mod user_tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            response.status(),
-            200,
-            "Get user should return 200 OK"
-        );
+        assert_eq!(response.status(), 200, "Get user should return 200 OK");
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -1788,21 +1962,14 @@ mod user_tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            response.status(),
-            200,
-            "Update user should return 200 OK"
-        );
+        assert_eq!(response.status(), 200, "Update user should return 200 OK");
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(
-            json["name"], "New Name",
-            "User name should be updated"
-        );
+        assert_eq!(json["name"], "New Name", "User name should be updated");
         assert_eq!(
             json["email"], "update@example.com",
             "User email should remain unchanged"
@@ -1874,11 +2041,7 @@ mod user_tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            response.status(),
-            200,
-            "Delete user should return 200 OK"
-        );
+        assert_eq!(response.status(), 200, "Delete user should return 200 OK");
 
         // Verify user is soft-deleted (not found via normal query)
         let conn = state.db.get().unwrap();
@@ -1967,11 +2130,7 @@ mod user_tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            response.status(),
-            200,
-            "Restore user should return 200 OK"
-        );
+        assert_eq!(response.status(), 200, "Restore user should return 200 OK");
 
         // Verify user is restored
         let conn = state.db.get().unwrap();
@@ -2247,11 +2406,7 @@ mod operator_api_key_tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            response.status(),
-            200,
-            "List API keys should return 200 OK"
-        );
+        assert_eq!(response.status(), 200, "List API keys should return 200 OK");
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await

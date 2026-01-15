@@ -47,3 +47,6 @@ mod csrf_protection;
 
 #[path = "security/jwks_rsa_parsing.rs"]
 mod jwks_rsa_parsing;
+
+#[path = "security/email_validation.rs"]
+mod email_validation;

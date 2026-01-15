@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Result, msg};
 use crate::models::LemonSqueezyConfig;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -176,7 +176,7 @@ impl LemonSqueezyClient {
 
     pub fn verify_webhook_signature(&self, payload: &[u8], signature: &str) -> Result<bool> {
         let mut mac = HmacSha256::new_from_slice(self.webhook_secret.as_bytes())
-            .map_err(|_| AppError::Internal("Invalid webhook secret".into()))?;
+            .map_err(|_| AppError::Internal(msg::INVALID_WEBHOOK_SECRET.into()))?;
         mac.update(payload);
         let expected = hex::encode(mac.finalize().into_bytes());
 

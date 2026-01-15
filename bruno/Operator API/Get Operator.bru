@@ -5,7 +5,7 @@ meta {
 }
 
 get {
-  url: {{base_url}}/operators/{{operator_id}}
+  url: {{base_url}}/operators/{{user_id}}
   body: none
   auth: bearer
 }
@@ -15,5 +15,6 @@ auth:bearer {
 }
 
 docs {
-  Get a specific operator by ID.
+  Get operator role for a user by their user_id.
+  Returns 404 if the user is not an operator.
 }

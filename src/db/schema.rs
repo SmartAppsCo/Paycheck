@@ -25,6 +25,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
             role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'view')),
             created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
             deleted_at INTEGER,
             deleted_cascade_depth INTEGER
         );
@@ -85,6 +86,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
             role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'member')),
             created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
             deleted_at INTEGER,
             deleted_cascade_depth INTEGER,
             UNIQUE(user_id, org_id)
@@ -121,10 +123,14 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
             role TEXT NOT NULL CHECK (role IN ('admin', 'view')),
             created_at INTEGER NOT NULL,
-            UNIQUE(org_member_id, project_id)
+            updated_at INTEGER NOT NULL,
+            deleted_at INTEGER,
+            deleted_cascade_depth INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_project_members_project ON project_members(project_id);
         CREATE INDEX IF NOT EXISTS idx_project_members_member ON project_members(org_member_id);
+        CREATE INDEX IF NOT EXISTS idx_project_members_active ON project_members(id) WHERE deleted_at IS NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_project_members_unique_active ON project_members(org_member_id, project_id) WHERE deleted_at IS NULL;
 
         -- Products (tiers/plans within a project)
         CREATE TABLE IF NOT EXISTS products (
@@ -199,28 +205,24 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
 
         -- Activation codes (short-lived codes in PREFIX-XXXX-XXXX-XXXX-XXXX format)
         CREATE TABLE IF NOT EXISTS activation_codes (
-            id TEXT PRIMARY KEY,
-            code_hash TEXT NOT NULL UNIQUE,
+            code_hash TEXT PRIMARY KEY,
             license_id TEXT NOT NULL REFERENCES licenses(id) ON DELETE CASCADE,
             expires_at INTEGER NOT NULL,
             used INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_activation_codes_hash ON activation_codes(code_hash);
         CREATE INDEX IF NOT EXISTS idx_activation_codes_license ON activation_codes(license_id);
         CREATE INDEX IF NOT EXISTS idx_activation_codes_expires ON activation_codes(expires_at);
 
-        -- Revoked JTIs (individual token revocations per license)
+        -- Revoked JTIs (individual token revocations)
+        -- JTI is globally unique (UUID), license_id kept for FK cascade and admin queries
         CREATE TABLE IF NOT EXISTS revoked_jtis (
-            id TEXT PRIMARY KEY,
+            jti TEXT PRIMARY KEY,
             license_id TEXT NOT NULL REFERENCES licenses(id) ON DELETE CASCADE,
-            jti TEXT NOT NULL,
             revoked_at INTEGER NOT NULL,
-            details TEXT,
-            UNIQUE(license_id, jti)
+            details TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_revoked_jtis_license ON revoked_jtis(license_id);
-        CREATE INDEX IF NOT EXISTS idx_revoked_jtis_jti ON revoked_jtis(jti);
 
         -- Devices (activated devices for a license)
         CREATE TABLE IF NOT EXISTS devices (
@@ -253,13 +255,11 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
 
         -- Webhook events (for replay attack prevention)
         CREATE TABLE IF NOT EXISTS webhook_events (
-            id TEXT PRIMARY KEY,
             provider TEXT NOT NULL,
             event_id TEXT NOT NULL,
             created_at INTEGER NOT NULL,
-            UNIQUE(provider, event_id)
+            PRIMARY KEY (provider, event_id)
         );
-        CREATE INDEX IF NOT EXISTS idx_webhook_events_lookup ON webhook_events(provider, event_id);
 
         -- System configuration (stable secrets that survive master key rotation)
         -- Used for email HMAC key which must remain stable so email hashes stay valid

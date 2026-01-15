@@ -76,7 +76,7 @@ pub async fn refresh_token(
     }
 
     // Check if this specific JTI is revoked
-    if queries::is_jti_revoked(&conn, &license.id, &jti)? {
+    if queries::is_jti_revoked(&conn, &jti)? {
         return Err(AppError::Unauthorized);
     }
 

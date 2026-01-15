@@ -3,7 +3,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Result, msg};
 use crate::extractors::Json;
 use crate::util::LicenseExpirations;
 
@@ -65,7 +65,7 @@ pub async fn validate_license(
     }
 
     // Check if this specific JTI is revoked
-    if queries::is_jti_revoked(&conn, &license.id, &req.jti)? {
+    if queries::is_jti_revoked(&conn, &req.jti)? {
         return Ok(invalid_response());
     }
 
@@ -78,7 +78,7 @@ pub async fn validate_license(
 
     // Get the product for expiration info
     let product = queries::get_product_by_id(&conn, &license.product_id)?
-        .ok_or_else(|| AppError::Internal("Product not found".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::PRODUCT_NOT_FOUND.into()))?;
 
     // Verify project matches
     if product.project_id != project_id {

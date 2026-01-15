@@ -2,7 +2,7 @@ use axum::extract::State;
 use serde::{Deserialize, Serialize};
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::Json;
 use crate::models::CreatePaymentSession;
 use crate::payments::{LemonSqueezyClient, PaymentProvider, StripeClient};
@@ -39,12 +39,12 @@ pub async fn initiate_buy(
 
     // Get product - this gives us project_id and payment config
     let product = queries::get_product_by_id(&conn, &request.product_id)?
-        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+        .or_not_found(msg::PRODUCT_NOT_FOUND)?;
 
     // Get project - prefer public_key lookup if provided, otherwise use product's project_id
     let project = if let Some(ref public_key) = request.public_key {
         let project = queries::get_project_by_public_key(&conn, public_key)?
-            .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+            .or_not_found(msg::PROJECT_NOT_FOUND)?;
         // Verify the product belongs to this project
         if product.project_id != project.id {
             return Err(AppError::BadRequest(
@@ -54,24 +54,25 @@ pub async fn initiate_buy(
         project
     } else {
         queries::get_project_by_id(&conn, &product.project_id)?
-            .ok_or_else(|| AppError::NotFound("Project not found".into()))?
+            .or_not_found(msg::PROJECT_NOT_FOUND)?
     };
 
     // Get organization (payment config is at org level)
     let org = queries::get_organization_by_id(&conn, &project.org_id)?
-        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+        .or_not_found(msg::ORG_NOT_FOUND)?;
 
     // Determine payment provider
     let provider = if let Some(ref p) = request.provider {
         // Explicit provider specified
         p.parse::<PaymentProvider>()
             .ok()
-            .ok_or_else(|| AppError::BadRequest("Invalid provider".into()))?
+            .ok_or_else(|| AppError::BadRequest(msg::INVALID_PROVIDER.into()))?
     } else if let Some(ref provider) = org.payment_provider {
         // Use organization's payment provider
-        provider.parse::<PaymentProvider>().ok().ok_or_else(|| {
-            AppError::BadRequest("Invalid payment_provider in organization".into())
-        })?
+        provider
+            .parse::<PaymentProvider>()
+            .ok()
+            .ok_or_else(|| AppError::BadRequest(msg::INVALID_ORG_PROVIDER.into()))?
     } else {
         // Auto-detect: use the only configured provider, or error if both/neither
         let has_stripe = org.has_stripe_config();
@@ -123,12 +124,13 @@ pub async fn initiate_buy(
         PaymentProvider::Stripe => {
             let config = org
                 .decrypt_stripe_config(&state.master_key)?
-                .ok_or_else(|| AppError::BadRequest("Stripe not configured".into()))?;
+                .ok_or_else(|| AppError::BadRequest(msg::STRIPE_NOT_CONFIGURED.into()))?;
 
             // Get price from payment config
-            let price_cents = payment_config.price_cents.ok_or_else(|| {
-                AppError::BadRequest("Payment config has no price_cents configured.".into())
-            })? as u64;
+            let price_cents = payment_config
+                .price_cents
+                .ok_or_else(|| AppError::BadRequest(msg::NO_PRICE_CONFIGURED.into()))?
+                as u64;
             let currency = payment_config.currency.as_deref().unwrap_or("usd");
 
             let client = StripeClient::new(&config);
@@ -149,12 +151,13 @@ pub async fn initiate_buy(
         PaymentProvider::LemonSqueezy => {
             let config = org
                 .decrypt_ls_config(&state.master_key)?
-                .ok_or_else(|| AppError::BadRequest("LemonSqueezy not configured".into()))?;
+                .ok_or_else(|| AppError::BadRequest(msg::LS_NOT_CONFIGURED.into()))?;
 
             // Get variant ID from payment config
-            let variant_id = payment_config.ls_variant_id.as_ref().ok_or_else(|| {
-                AppError::BadRequest("Payment config has no ls_variant_id configured.".into())
-            })?;
+            let variant_id = payment_config
+                .ls_variant_id
+                .as_ref()
+                .ok_or_else(|| AppError::BadRequest(msg::NO_VARIANT_CONFIGURED.into()))?;
 
             let client = LemonSqueezyClient::new(&config);
             let (_, url) = client

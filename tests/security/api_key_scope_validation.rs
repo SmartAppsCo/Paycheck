@@ -10,7 +10,7 @@ use axum::{Router, body::Body, http::Request};
 use common::*;
 use paycheck::db::AppState;
 use paycheck::handlers;
-use paycheck::models::OrgMemberRole;
+use paycheck::models::{AccessLevel, CreateApiKeyScope, CreateOrgMember, OrgMemberRole};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use serde_json::json;
@@ -52,9 +52,8 @@ fn org_app() -> (Router, AppState) {
         trusted_issuers: vec![],
     };
 
-    let app =
-        handlers::orgs::router(state.clone(), paycheck::config::RateLimitConfig::disabled())
-            .with_state(state.clone());
+    let app = handlers::orgs::router(state.clone(), paycheck::config::RateLimitConfig::disabled())
+        .with_state(state.clone());
 
     (app, state)
 }
@@ -189,6 +188,50 @@ async fn test_api_key_scope_for_unauthorized_org_should_fail() {
          should fail with 400 or 403, but got {}. \
          Users should only be able to create scopes for orgs they have access to.",
         status
+    );
+}
+
+/// Test at the DB layer: Creating API key with scope for org user is not a member of should fail.
+/// This tests the defense-in-depth check in queries::create_api_key()
+#[test]
+fn test_db_layer_rejects_scope_for_non_member_org() {
+    let conn = setup_test_db();
+
+    // Create user and two orgs
+    let user = create_test_user(&conn, "user@example.com", "Test User");
+    let org_member_of = create_test_org(&conn, "Org User Is Member Of");
+    let org_not_member_of = create_test_org(&conn, "Org User Is NOT Member Of");
+
+    // Make user a member of only one org
+    let _ = queries::create_org_member(
+        &conn,
+        &org_member_of.id,
+        &CreateOrgMember {
+            user_id: user.id.clone(),
+            role: OrgMemberRole::Member,
+        },
+    )
+    .expect("Failed to create org member");
+
+    // Try to create API key with scope for org user is NOT a member of
+    let scope = CreateApiKeyScope {
+        org_id: org_not_member_of.id.clone(),
+        project_id: None,
+        access: AccessLevel::Admin,
+    };
+
+    let result = queries::create_api_key(&conn, &user.id, "Test Key", None, true, Some(&[scope]));
+
+    // This should fail because user is not a member of org_not_member_of
+    assert!(
+        result.is_err(),
+        "creating API key with scope for non-member org should fail"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("not a member"),
+        "expected 'not a member' error, got: {}",
+        err
     );
 }
 

@@ -24,7 +24,7 @@ use paycheck::config::RateLimitConfig;
 use paycheck::db::{AppState, queries};
 use paycheck::handlers;
 use paycheck::models::{
-    AccessLevel, ActorType, AuditLogNames, CreateOrgMember, OrgMemberRole, OperatorRole,
+    AccessLevel, ActorType, AuditLogNames, CreateOrgMember, OperatorRole, OrgMemberRole,
 };
 
 // ============================================================================
@@ -269,8 +269,9 @@ mod org_member_isolation {
         let _project_b = create_test_project(&conn, &org_b.id, "Project B", &state.master_key);
 
         // Create API key for the user (unscoped - can access both orgs)
-        let (_, api_key) = queries::create_api_key(&conn, &user.id, "Multi-org key", None, true, None)
-            .expect("Failed to create API key");
+        let (_, api_key) =
+            queries::create_api_key(&conn, &user.id, "Multi-org key", None, true, None)
+                .expect("Failed to create API key");
 
         // Query org_a's projects
         let response_a = app
@@ -685,16 +686,9 @@ mod audit_log_isolation {
         let logs_a = result_a["items"].as_array().unwrap();
 
         // Should only see org_a's 3 logs
-        assert_eq!(
-            logs_a.len(),
-            3,
-            "Org_a should have exactly 3 audit logs"
-        );
+        assert_eq!(logs_a.len(), 3, "Org_a should have exactly 3 audit logs");
         for log in logs_a {
-            assert_eq!(
-                log["org_id"], org_a.id,
-                "All logs should belong to org_a"
-            );
+            assert_eq!(log["org_id"], org_a.id, "All logs should belong to org_a");
             assert!(
                 log["action"].as_str().unwrap().starts_with("org_a_action"),
                 "All log actions should be from org_a"
@@ -725,16 +719,9 @@ mod audit_log_isolation {
         let logs_b = result_b["items"].as_array().unwrap();
 
         // Should only see org_b's 2 logs
-        assert_eq!(
-            logs_b.len(),
-            2,
-            "Org_b should have exactly 2 audit logs"
-        );
+        assert_eq!(logs_b.len(), 2, "Org_b should have exactly 2 audit logs");
         for log in logs_b {
-            assert_eq!(
-                log["org_id"], org_b.id,
-                "All logs should belong to org_b"
-            );
+            assert_eq!(log["org_id"], org_b.id, "All logs should belong to org_b");
             assert!(
                 log["action"].as_str().unwrap().starts_with("org_b_action"),
                 "All log actions should be from org_b"
@@ -868,8 +855,9 @@ mod resource_isolation {
         )
         .unwrap();
 
-        let (_, api_key) = queries::create_api_key(&conn, &user.id, "Multi-org key", None, true, None)
-            .expect("Failed to create API key");
+        let (_, api_key) =
+            queries::create_api_key(&conn, &user.id, "Multi-org key", None, true, None)
+                .expect("Failed to create API key");
 
         // Access org_a's license - should work
         let response_a = app

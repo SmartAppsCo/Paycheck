@@ -6,7 +6,7 @@ use axum_extra::{
 use serde::Serialize;
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::Json;
 use crate::jwt;
 
@@ -32,11 +32,11 @@ pub async fn deactivate_device(
 
     // Look up the product to get the project
     let product = queries::get_product_by_id(&conn, &unverified_claims.product_id)?
-        .ok_or_else(|| AppError::BadRequest("Invalid token: product not found".into()))?;
+        .ok_or_else(|| AppError::BadRequest(msg::INVALID_TOKEN_PRODUCT.into()))?;
 
     // Get the project to get the public key
     let project = queries::get_project_by_id(&conn, &product.project_id)?
-        .ok_or_else(|| AppError::Internal("Project not found".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::PROJECT_NOT_FOUND.into()))?;
 
     // Now verify the JWT signature with the project's public key
     // Also validates issuer ("paycheck")
@@ -45,18 +45,18 @@ pub async fn deactivate_device(
     // Extract JTI from verified claims
     let jti = verified_claims
         .jwt_id
-        .ok_or_else(|| AppError::BadRequest("Invalid token: missing jti".into()))?;
+        .ok_or_else(|| AppError::BadRequest(msg::INVALID_TOKEN_MISSING_JTI.into()))?;
 
     // Look up the device by JTI
     let device = queries::get_device_by_jti(&conn, &jti)?
-        .ok_or_else(|| AppError::NotFound("Device not found or already deactivated".into()))?;
+        .or_not_found(msg::DEVICE_NOT_FOUND_OR_DEACTIVATED)?;
 
     // Get the license to add revoked JTI
     let license = queries::get_license_by_id(&conn, &device.license_id)?
-        .ok_or_else(|| AppError::Internal("License not found".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::LICENSE_NOT_FOUND.into()))?;
 
     // Check if this JTI is already revoked
-    if queries::is_jti_revoked(&conn, &license.id, &jti)? {
+    if queries::is_jti_revoked(&conn, &jti)? {
         return Err(AppError::Forbidden(
             "This device has already been deactivated".into(),
         ));

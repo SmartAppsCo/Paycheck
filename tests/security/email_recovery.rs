@@ -54,7 +54,8 @@ mod email_hash_lookup {
                 payment_provider_subscription_id: None,
                 payment_provider_order_id: None,
             };
-            let _license = queries::create_license(&conn, &project.id, &product.id, &input).unwrap();
+            let _license =
+                queries::create_license(&conn, &project.id, &product.id, &input).unwrap();
 
             public_key = project.public_key.clone();
         }
@@ -124,7 +125,8 @@ mod email_hash_lookup {
                 payment_provider_subscription_id: None,
                 payment_provider_order_id: None,
             };
-            let _license = queries::create_license(&conn, &project.id, &product.id, &input).unwrap();
+            let _license =
+                queries::create_license(&conn, &project.id, &product.id, &input).unwrap();
 
             public_key = project.public_key.clone();
         }
@@ -275,7 +277,9 @@ mod email_hash_lookup {
 
         // Verify the stored email_hash is not the plaintext email
         let conn = state.db.get().unwrap();
-        let license = queries::get_license_by_id(&conn, &license_id).unwrap().unwrap();
+        let license = queries::get_license_by_id(&conn, &license_id)
+            .unwrap()
+            .unwrap();
 
         let stored_hash = license.email_hash.unwrap();
 
@@ -369,8 +373,12 @@ mod activation_code_lifecycle {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Create an activation code
             let activation_code =
@@ -380,8 +388,8 @@ mod activation_code_lifecycle {
             // Manually set the expiry to 31 minutes ago (past the 30 min TTL)
             const ACTIVATION_CODE_TTL_MINS: i64 = 30;
             conn.execute(
-                "UPDATE activation_codes SET expires_at = ?1 WHERE id = ?2",
-                rusqlite::params![now() - ((ACTIVATION_CODE_TTL_MINS + 1) * 60), &activation_code.id],
+                "UPDATE activation_codes SET expires_at = ?1 WHERE license_id = ?2",
+                rusqlite::params![now() - ((ACTIVATION_CODE_TTL_MINS + 1) * 60), &license.id],
             )
             .unwrap();
 
@@ -434,8 +442,12 @@ mod activation_code_lifecycle {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             let activation_code =
                 queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
@@ -444,8 +456,8 @@ mod activation_code_lifecycle {
             // Set expiry to 1 second in the future (still valid)
             const ONE_SECOND: i64 = 1;
             conn.execute(
-                "UPDATE activation_codes SET expires_at = ?1 WHERE id = ?2",
-                rusqlite::params![now() + ONE_SECOND, &activation_code.id],
+                "UPDATE activation_codes SET expires_at = ?1 WHERE license_id = ?2",
+                rusqlite::params![now() + ONE_SECOND, &license.id],
             )
             .unwrap();
 
@@ -500,8 +512,12 @@ mod activation_code_lifecycle {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Create first activation code
             let first_activation =
@@ -595,15 +611,19 @@ mod activation_code_lifecycle {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             let activation_code =
                 queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             // Mark the code as used
-            queries::mark_activation_code_used(&conn, &activation_code.id).unwrap();
+            queries::mark_activation_code_used(&conn, &activation_code.code).unwrap();
 
             public_key = project.public_key.clone();
             code = activation_code.code.clone();
@@ -651,8 +671,12 @@ mod activation_code_lifecycle {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             let before = now();
             let activation_code =
@@ -757,7 +781,8 @@ mod recovery_edge_cases {
         let project = queries::get_project_by_public_key(&conn, &public_key)
             .unwrap()
             .unwrap();
-        let licenses = queries::get_licenses_by_email_hash(&conn, &project.id, &email_hash).unwrap();
+        let licenses =
+            queries::get_licenses_by_email_hash(&conn, &project.id, &email_hash).unwrap();
         assert!(
             licenses.is_empty(),
             "Revoked license should not appear in recovery query"
@@ -832,7 +857,8 @@ mod recovery_edge_cases {
         let project = queries::get_project_by_public_key(&conn, &public_key)
             .unwrap()
             .unwrap();
-        let licenses = queries::get_licenses_by_email_hash(&conn, &project.id, &email_hash).unwrap();
+        let licenses =
+            queries::get_licenses_by_email_hash(&conn, &project.id, &email_hash).unwrap();
         assert!(
             licenses.is_empty(),
             "Deleted license should not appear in recovery query"
@@ -905,7 +931,8 @@ mod recovery_edge_cases {
         let project = queries::get_project_by_public_key(&conn, &public_key)
             .unwrap()
             .unwrap();
-        let licenses = queries::get_licenses_by_email_hash(&conn, &project.id, &email_hash).unwrap();
+        let licenses =
+            queries::get_licenses_by_email_hash(&conn, &project.id, &email_hash).unwrap();
         assert!(
             licenses.is_empty(),
             "Expired license should not appear in recovery query"
@@ -1176,8 +1203,12 @@ mod recovery_edge_cases {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Create activation code before revoking
             let activation_code =
@@ -1235,8 +1266,12 @@ mod recovery_edge_cases {
             let org = create_test_org(&conn, "Test Org");
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let license =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
 
             // Create activation code before deleting
             let activation_code =

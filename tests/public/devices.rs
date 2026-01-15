@@ -9,10 +9,10 @@ use tower::ServiceExt;
 #[path = "../common/mod.rs"]
 mod common;
 use common::{
+    Device, DeviceType, LICENSE_VALID_DAYS, ONE_YEAR, Product, Project, UPDATES_VALID_DAYS,
     create_test_app_state, create_test_device, create_test_license, create_test_org,
     create_test_product, create_test_project, future_timestamp, public_app, queries,
-    test_master_key, DeviceType, Device, Product, Project, LICENSE_VALID_DAYS, ONE_YEAR,
-    UPDATES_VALID_DAYS,
+    test_master_key,
 };
 
 use paycheck::jwt::{self, LicenseClaims};
@@ -170,7 +170,7 @@ async fn test_deactivate_adds_jti_to_revoked_list() {
     // Verify JTI was added to revoked list
     let conn = state.db.get().unwrap();
     assert!(
-        queries::is_jti_revoked(&conn, &license_id, &jti).unwrap(),
+        queries::is_jti_revoked(&conn, &jti).unwrap(),
         "JTI should be added to revoked list to prevent token reuse"
     );
 }

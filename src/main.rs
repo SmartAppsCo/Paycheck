@@ -812,7 +812,9 @@ async fn main() {
 
     // Initialize email hasher (stable HMAC key stored encrypted in DB)
     let email_hasher = {
-        let conn = db_pool.get().expect("Failed to get connection for email hasher init");
+        let conn = db_pool
+            .get()
+            .expect("Failed to get connection for email hasher init");
 
         // Try to load existing encrypted HMAC key
         match queries::get_system_config(&conn, EmailHasher::CONFIG_KEY) {

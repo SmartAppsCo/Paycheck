@@ -3,9 +3,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
-use common::{
-    *, ONE_YEAR, ONE_MONTH, ONE_WEEK, ONE_DAY, UPDATES_VALID_DAYS,
-};
+use common::{ONE_DAY, ONE_MONTH, ONE_WEEK, ONE_YEAR, UPDATES_VALID_DAYS, *};
 use paycheck::handlers::webhooks::common::{
     CheckoutData, process_cancellation, process_checkout, process_renewal,
 };
@@ -389,7 +387,9 @@ fn test_renewal_webhook_replay_prevented() {
     let updated_license = queries::get_license_by_id(&conn, &license.id)
         .expect("database query for license should succeed")
         .expect("license should exist in database");
-    let first_expiration = updated_license.expires_at.expect("license should have expiration timestamp");
+    let first_expiration = updated_license
+        .expires_at
+        .expect("license should have expiration timestamp");
     assert!(
         first_expiration > initial_expiration,
         "license expiration should be extended after first renewal"
@@ -424,7 +424,9 @@ fn test_renewal_webhook_replay_prevented() {
     let final_license = queries::get_license_by_id(&conn, &license.id)
         .expect("database query for license should succeed")
         .expect("license should exist in database");
-    let final_expiration = final_license.expires_at.expect("license should have expiration timestamp");
+    let final_expiration = final_license
+        .expires_at
+        .expect("license should have expiration timestamp");
 
     assert_eq!(
         first_expiration, final_expiration,
@@ -611,10 +613,7 @@ fn test_checkout_concurrent_webhooks_create_only_one_license() {
         StatusCode::OK,
         "first checkout call should return OK status"
     );
-    assert_eq!(
-        msg1, "OK",
-        "first checkout call should return OK message"
-    );
+    assert_eq!(msg1, "OK", "first checkout call should return OK message");
 
     // Second call with same session should be rejected
     let (status2, msg2) = process_checkout(
@@ -640,7 +639,9 @@ fn test_checkout_concurrent_webhooks_create_only_one_license() {
     let updated_session = queries::get_payment_session(&conn, &session.id)
         .expect("database query for payment session should succeed")
         .expect("payment session should exist in database");
-    let license_id = updated_session.license_id.expect("payment session should have license ID");
+    let license_id = updated_session
+        .license_id
+        .expect("payment session should have license ID");
 
     // Device creation is deferred to activation time (/redeem/key)
     // Verify NO device was created during checkout
@@ -712,7 +713,9 @@ fn test_checkout_creates_license_with_product_expirations() {
         .expect("license should exist in database");
 
     // License should expire in ~ONE_MONTH days
-    let license_exp = license.expires_at.expect("license should have expiration timestamp");
+    let license_exp = license
+        .expires_at
+        .expect("license should have expiration timestamp");
     assert!(
         license_exp >= before + (ONE_MONTH * 86400) - 5,
         "license expiration should be at least {} days from now",
@@ -725,7 +728,9 @@ fn test_checkout_creates_license_with_product_expirations() {
     );
 
     // Updates should expire in ~UPDATES_VALID_DAYS days
-    let updates_exp = license.updates_expires_at.expect("license should have updates expiration timestamp");
+    let updates_exp = license
+        .updates_expires_at
+        .expect("license should have updates expiration timestamp");
     assert!(
         updates_exp >= before + (UPDATES_VALID_DAYS * 86400) - 5,
         "updates expiration should be at least {} days from now",
@@ -839,7 +844,9 @@ fn test_renewal_extends_license_expiration() {
     let updated = queries::get_license_by_id(&conn, &license.id)
         .expect("database query for license should succeed")
         .expect("license should exist in database");
-    let new_exp = updated.expires_at.expect("license should have expiration timestamp");
+    let new_exp = updated
+        .expires_at
+        .expect("license should have expiration timestamp");
 
     // Product has ONE_YEAR day license_exp_days, so new exp should be ~ONE_YEAR days from now
     let expected_min = now() + (ONE_YEAR * 86400) - 10;
@@ -863,7 +870,12 @@ fn test_renewal_without_event_id_always_processes() {
     let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
 
-    let license = create_test_license(&conn, &project.id, &product.id, Some(now() + (ONE_DAY * 86400)));
+    let license = create_test_license(
+        &conn,
+        &project.id,
+        &product.id,
+        Some(now() + (ONE_DAY * 86400)),
+    );
 
     // First call without event_id
     let (status1, msg1) = process_renewal(
@@ -919,10 +931,7 @@ fn test_cancellation_returns_ok_without_modifying_license() {
         StatusCode::OK,
         "cancellation process should return OK status"
     );
-    assert_eq!(
-        msg, "OK",
-        "cancellation process should return OK message"
-    );
+    assert_eq!(msg, "OK", "cancellation process should return OK message");
 
     // Verify license was NOT modified
     let unchanged = queries::get_license_by_id(&conn, &license.id)
@@ -1276,7 +1285,9 @@ async fn test_stripe_webhook_invoice_paid_extends_license() {
     let license = queries::get_license_by_id(&conn, &license_id)
         .expect("database query for license should succeed")
         .expect("license should exist in database");
-    let new_exp = license.expires_at.expect("license should have expiration timestamp");
+    let new_exp = license
+        .expires_at
+        .expect("license should have expiration timestamp");
     assert!(
         new_exp > original_exp,
         "license should be extended from {} to {} after invoice.paid webhook",
@@ -1654,7 +1665,9 @@ async fn test_lemonsqueezy_webhook_subscription_payment_extends_license() {
     let license = queries::get_license_by_id(&conn, &license_id)
         .expect("database query for license should succeed")
         .expect("license should exist in database");
-    let new_exp = license.expires_at.expect("license should have expiration timestamp");
+    let new_exp = license
+        .expires_at
+        .expect("license should have expiration timestamp");
     assert!(
         new_exp > original_exp,
         "license should be extended after subscription_payment_success webhook"
@@ -1910,7 +1923,9 @@ mod webhook_security {
             "payment session should be marked as completed"
         );
 
-        let license_id = session.license_id.expect("payment session should have license ID");
+        let license_id = session
+            .license_id
+            .expect("payment session should have license ID");
         let licenses = queries::list_licenses_for_project(&conn, &project_id)
             .expect("database query for licenses should succeed");
         assert_eq!(
@@ -2066,7 +2081,9 @@ mod webhook_security {
         let license_after_first = queries::get_license_by_id(&conn, &license_id)
             .expect("database query for license should succeed")
             .expect("license should exist in database");
-        let first_exp = license_after_first.expires_at.expect("license should have expiration timestamp");
+        let first_exp = license_after_first
+            .expires_at
+            .expect("license should have expiration timestamp");
         assert!(
             first_exp > original_exp,
             "first renewal should extend license expiration"
@@ -2096,7 +2113,9 @@ mod webhook_security {
             .expect("database query for license should succeed")
             .expect("license should exist in database");
         assert_eq!(
-            license_after_second.expires_at.expect("license should have expiration timestamp"),
+            license_after_second
+                .expires_at
+                .expect("license should have expiration timestamp"),
             first_exp,
             "replay should not extend license expiration again"
         );
@@ -2261,7 +2280,9 @@ mod webhook_security {
         let license_after_first = queries::get_license_by_id(&conn, &license_id)
             .expect("database query for license should succeed")
             .expect("license should exist in database");
-        let first_exp = license_after_first.expires_at.expect("license should have expiration timestamp");
+        let first_exp = license_after_first
+            .expires_at
+            .expect("license should have expiration timestamp");
         assert!(
             first_exp > original_exp,
             "first renewal should extend license expiration"
@@ -2285,7 +2306,9 @@ mod webhook_security {
             .expect("database query for license should succeed")
             .expect("license should exist in database");
         assert_eq!(
-            license_after_replay.expires_at.expect("license should have expiration timestamp"),
+            license_after_replay
+                .expires_at
+                .expect("license should have expiration timestamp"),
             first_exp,
             "replay should not extend license expiration"
         );

@@ -144,10 +144,7 @@ impl JwksCache {
     }
 
     /// Fetch JWKS with retry and exponential backoff.
-    async fn fetch_jwks_with_retry(
-        &self,
-        url: &str,
-    ) -> Result<HashMap<String, RS256PublicKey>> {
+    async fn fetch_jwks_with_retry(&self, url: &str) -> Result<HashMap<String, RS256PublicKey>> {
         let mut last_error = None;
 
         for attempt in 0..FETCH_RETRY_ATTEMPTS {
@@ -271,8 +268,8 @@ struct Jwk {
 
 /// Parse an RSA public key from base64url-encoded n and e components.
 fn parse_rsa_public_key(n_b64: &str, e_b64: &str) -> Result<RS256PublicKey> {
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
     // Decode base64url components
     let n_bytes = URL_SAFE_NO_PAD

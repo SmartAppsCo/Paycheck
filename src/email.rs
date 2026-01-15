@@ -5,12 +5,17 @@
 //! 2. POST to webhook URL (for DIY email delivery)
 //! 3. Disabled (no email sent, log only)
 
+use std::time::Duration;
+
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
 use crate::models::Project;
+
+/// Retry delays in seconds (exponential backoff: 1s, 4s, 16s)
+const RETRY_DELAYS: &[u64] = &[1, 4, 16];
 
 const RESEND_API_URL: &str = "https://api.resend.com/emails";
 
@@ -206,7 +211,7 @@ impl EmailService {
         self.send_via_resend(api_key, from_email, &config).await
     }
 
-    /// Send email via Resend API.
+    /// Send email via Resend API with retry logic.
     async fn send_via_resend(
         &self,
         api_key: &str,
@@ -266,47 +271,139 @@ impl EmailService {
             html,
         };
 
+        self.send_request_with_retry(api_key, &request, config.to_email, &config.project.id)
+            .await
+    }
+
+    /// Send a request to Resend API with exponential backoff retry.
+    ///
+    /// Retries on transient errors (network issues, 5xx, 429 rate limit).
+    /// Fails immediately on non-transient errors (4xx except 429).
+    async fn send_request_with_retry(
+        &self,
+        api_key: &str,
+        request: &ResendEmailRequest<'_>,
+        to_email: &str,
+        project_id: &str,
+    ) -> Result<EmailSendResult> {
+        let mut last_error: Option<AppError> = None;
+
+        for (attempt, delay_secs) in std::iter::once(&0u64).chain(RETRY_DELAYS).enumerate() {
+            // Sleep before retry (skip on first attempt)
+            if *delay_secs > 0 {
+                tracing::warn!(
+                    attempt,
+                    delay_secs,
+                    "Retrying email send after transient failure"
+                );
+                tokio::time::sleep(Duration::from_secs(*delay_secs)).await;
+            }
+
+            match self.send_resend_request(api_key, request).await {
+                Ok(()) => {
+                    if attempt > 0 {
+                        tracing::info!(
+                            attempt,
+                            to = %to_email,
+                            project_id = %project_id,
+                            "Email sent successfully after retry"
+                        );
+                    } else {
+                        tracing::info!(
+                            to = %to_email,
+                            project_id = %project_id,
+                            "Activation code email sent via Resend"
+                        );
+                    }
+                    return Ok(EmailSendResult::Sent);
+                }
+                Err((error, is_transient)) => {
+                    if is_transient {
+                        last_error = Some(error);
+                        // Continue to next retry
+                    } else {
+                        // Non-transient error, fail immediately
+                        return Err(error);
+                    }
+                }
+            }
+        }
+
+        // All retries exhausted
+        tracing::error!(
+            to = %to_email,
+            project_id = %project_id,
+            attempts = RETRY_DELAYS.len() + 1,
+            "Email send failed after all retries"
+        );
+        Err(last_error.unwrap_or_else(|| {
+            AppError::Internal("Email service error: all retries exhausted".into())
+        }))
+    }
+
+    /// Send a single request to Resend API.
+    ///
+    /// Returns Ok(()) on success, or Err((AppError, is_transient)) on failure.
+    async fn send_resend_request(
+        &self,
+        api_key: &str,
+        request: &ResendEmailRequest<'_>,
+    ) -> std::result::Result<(), (AppError, bool)> {
         let response = self
             .http_client
             .post(RESEND_API_URL)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Content-Type", "application/json")
-            .json(&request)
+            .json(request)
             .send()
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to send request to Resend API");
-                AppError::Internal(format!("Email service error: {}", e))
+                // Network errors are transient
+                (
+                    AppError::Internal(format!("Email service error: {}", e)),
+                    true,
+                )
             })?;
 
-        if response.status().is_success() {
+        let status = response.status();
+
+        if status.is_success() {
             let _result: ResendEmailResponse = response.json().await.map_err(|e| {
                 tracing::error!(error = %e, "Failed to parse Resend API response");
-                AppError::Internal("Email service response error".into())
+                // Parse errors after success are weird but not transient
+                (AppError::Internal("Email service response error".into()), false)
             })?;
-
-            tracing::info!(
-                to = %config.to_email,
-                project_id = %config.project.id,
-                "Activation code email sent via Resend"
-            );
-            Ok(EmailSendResult::Sent)
+            Ok(())
         } else {
-            let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            tracing::error!(
-                status = %status,
-                body = %body,
-                "Resend API returned error"
-            );
-            Err(AppError::Internal(format!(
-                "Email service error: {} - {}",
-                status, body
-            )))
+
+            // Determine if error is transient (should retry)
+            let is_transient = status.as_u16() == 429 // Rate limited
+                || status.is_server_error(); // 5xx errors
+
+            if is_transient {
+                tracing::warn!(
+                    status = %status,
+                    body = %body,
+                    "Resend API returned transient error"
+                );
+            } else {
+                tracing::error!(
+                    status = %status,
+                    body = %body,
+                    "Resend API returned non-transient error"
+                );
+            }
+
+            Err((
+                AppError::Internal(format!("Email service error: {} - {}", status, body)),
+                is_transient,
+            ))
         }
     }
 
-    /// POST activation data to the project's webhook URL.
+    /// POST activation data to the project's webhook URL with retry logic.
     async fn call_webhook(
         &self,
         webhook_url: &str,
@@ -328,42 +425,140 @@ impl EmailService {
             trigger: config.trigger,
         };
 
+        self.call_webhook_with_retry(
+            webhook_url,
+            "activation_code_created",
+            &payload,
+            &config.project.id,
+        )
+        .await
+    }
+
+    /// Call a webhook URL with exponential backoff retry.
+    ///
+    /// Retries on transient errors (network issues, 5xx, 429 rate limit).
+    /// After all retries exhausted, returns success anyway (webhook errors
+    /// shouldn't block the user flow - the activation code is already created).
+    async fn call_webhook_with_retry<T: Serialize>(
+        &self,
+        webhook_url: &str,
+        event_name: &str,
+        payload: &T,
+        project_id: &str,
+    ) -> Result<EmailSendResult> {
+        for (attempt, delay_secs) in std::iter::once(&0u64).chain(RETRY_DELAYS).enumerate() {
+            // Sleep before retry (skip on first attempt)
+            if *delay_secs > 0 {
+                tracing::warn!(
+                    attempt,
+                    delay_secs,
+                    webhook_url = %webhook_url,
+                    "Retrying webhook call after transient failure"
+                );
+                tokio::time::sleep(Duration::from_secs(*delay_secs)).await;
+            }
+
+            match self
+                .send_webhook_request(webhook_url, event_name, payload)
+                .await
+            {
+                Ok(()) => {
+                    if attempt > 0 {
+                        tracing::info!(
+                            attempt,
+                            webhook_url = %webhook_url,
+                            project_id = %project_id,
+                            "Webhook called successfully after retry"
+                        );
+                    } else {
+                        tracing::info!(
+                            webhook_url = %webhook_url,
+                            project_id = %project_id,
+                            "Activation webhook called successfully"
+                        );
+                    }
+                    return Ok(EmailSendResult::WebhookCalled);
+                }
+                Err(is_transient) => {
+                    if !is_transient {
+                        // Non-transient error (4xx) - don't retry, but still return success
+                        // The dev's webhook rejected it, they can check their logs
+                        tracing::warn!(
+                            webhook_url = %webhook_url,
+                            project_id = %project_id,
+                            "Webhook returned non-transient error, not retrying"
+                        );
+                        return Ok(EmailSendResult::WebhookCalled);
+                    }
+                    // Transient error - continue to next retry
+                }
+            }
+        }
+
+        // All retries exhausted - still return success, but log prominently
+        tracing::error!(
+            webhook_url = %webhook_url,
+            project_id = %project_id,
+            attempts = RETRY_DELAYS.len() + 1,
+            "Webhook call failed after all retries - activation code created but webhook not delivered"
+        );
+        Ok(EmailSendResult::WebhookCalled)
+    }
+
+    /// Send a single webhook request.
+    ///
+    /// Returns Ok(()) on success, or Err(is_transient) on failure.
+    async fn send_webhook_request<T: Serialize>(
+        &self,
+        webhook_url: &str,
+        event_name: &str,
+        payload: &T,
+    ) -> std::result::Result<(), bool> {
         let response = self
             .http_client
             .post(webhook_url)
             .header("Content-Type", "application/json")
-            .header("X-Paycheck-Event", "activation_code_created")
-            .json(&payload)
+            .header("X-Paycheck-Event", event_name)
+            .json(payload)
             .send()
             .await
             .map_err(|e| {
                 tracing::error!(
                     error = %e,
                     webhook_url = %webhook_url,
-                    "Failed to call activation webhook"
+                    "Failed to send webhook request"
                 );
-                AppError::Internal(format!("Webhook call failed: {}", e))
+                // Network errors are transient
+                true
             })?;
 
-        if response.status().is_success() {
-            tracing::info!(
-                webhook_url = %webhook_url,
-                project_id = %config.project.id,
-                "Activation webhook called successfully"
-            );
-            Ok(EmailSendResult::WebhookCalled)
+        let status = response.status();
+
+        if status.is_success() {
+            Ok(())
         } else {
-            let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            tracing::error!(
-                status = %status,
-                body = %body,
-                webhook_url = %webhook_url,
-                "Activation webhook returned error"
-            );
-            // Still return success to caller - webhook errors shouldn't block the flow
-            // The dev can check their webhook logs
-            Ok(EmailSendResult::WebhookCalled)
+
+            // Determine if error is transient (should retry)
+            let is_transient = status.as_u16() == 429 || status.is_server_error();
+
+            if is_transient {
+                tracing::warn!(
+                    status = %status,
+                    body = %body,
+                    webhook_url = %webhook_url,
+                    "Webhook returned transient error"
+                );
+            } else {
+                tracing::error!(
+                    status = %status,
+                    body = %body,
+                    webhook_url = %webhook_url,
+                    "Webhook returned non-transient error"
+                );
+            }
+
+            Err(is_transient)
         }
     }
 
@@ -481,48 +676,11 @@ impl EmailService {
             html,
         };
 
-        let response = self
-            .http_client
-            .post(RESEND_API_URL)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .send()
+        self.send_request_with_retry(api_key, &request, config.to_email, &config.project.id)
             .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to send request to Resend API");
-                AppError::Internal(format!("Email service error: {}", e))
-            })?;
-
-        if response.status().is_success() {
-            let _result: ResendEmailResponse = response.json().await.map_err(|e| {
-                tracing::error!(error = %e, "Failed to parse Resend API response");
-                AppError::Internal("Email service response error".into())
-            })?;
-
-            tracing::info!(
-                to = %config.to_email,
-                project_id = %config.project.id,
-                license_count = config.licenses.len(),
-                "Multi-license activation code email sent via Resend"
-            );
-            Ok(EmailSendResult::Sent)
-        } else {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            tracing::error!(
-                status = %status,
-                body = %body,
-                "Resend API returned error"
-            );
-            Err(AppError::Internal(format!(
-                "Email service error: {} - {}",
-                status, body
-            )))
-        }
     }
 
-    /// POST multi-license activation data to the project's webhook URL.
+    /// POST multi-license activation data to the project's webhook URL with retry logic.
     async fn call_multi_license_webhook(
         &self,
         webhook_url: &str,
@@ -551,43 +709,13 @@ impl EmailService {
             trigger: config.trigger,
         };
 
-        let response = self
-            .http_client
-            .post(webhook_url)
-            .header("Content-Type", "application/json")
-            .header("X-Paycheck-Event", "activation_codes_created")
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    error = %e,
-                    webhook_url = %webhook_url,
-                    "Failed to call multi-license activation webhook"
-                );
-                AppError::Internal(format!("Webhook call failed: {}", e))
-            })?;
-
-        if response.status().is_success() {
-            tracing::info!(
-                webhook_url = %webhook_url,
-                project_id = %config.project.id,
-                license_count = config.licenses.len(),
-                "Multi-license activation webhook called successfully"
-            );
-            Ok(EmailSendResult::WebhookCalled)
-        } else {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            tracing::error!(
-                status = %status,
-                body = %body,
-                webhook_url = %webhook_url,
-                "Multi-license activation webhook returned error"
-            );
-            // Still return success to caller - webhook errors shouldn't block the flow
-            Ok(EmailSendResult::WebhookCalled)
-        }
+        self.call_webhook_with_retry(
+            webhook_url,
+            "activation_codes_created",
+            &payload,
+            &config.project.id,
+        )
+        .await
     }
 }
 
@@ -609,5 +737,16 @@ mod tests {
             serde_json::to_string(&EmailTrigger::AdminGenerated).unwrap(),
             "\"admin_generated\""
         );
+    }
+
+    #[test]
+    fn test_retry_delays_configuration() {
+        // Verify retry configuration is sensible
+        assert_eq!(RETRY_DELAYS.len(), 3, "Should have 3 retry attempts");
+        assert_eq!(RETRY_DELAYS, &[1, 4, 16], "Exponential backoff: 1s, 4s, 16s");
+
+        // Total max wait time should be reasonable (21 seconds)
+        let total_delay: u64 = RETRY_DELAYS.iter().sum();
+        assert_eq!(total_delay, 21);
     }
 }

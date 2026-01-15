@@ -5,7 +5,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path, RestoreRequest};
 use crate::middleware::OrgMemberContext;
 use crate::models::{ActorType, AuditAction, CreateLicense, Device, LicenseWithProduct};
@@ -164,7 +164,7 @@ pub async fn create_license(
     Json(body): Json<CreateLicenseBody>,
 ) -> Result<Json<CreateLicenseResponse>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
     // Validate count
@@ -175,19 +175,19 @@ pub async fn create_license(
     }
 
     // Validate expiration days are non-negative (prevents creating already-expired licenses)
-    if let Some(Some(days)) = body.license_exp_days {
-        if days < 0 {
-            return Err(AppError::BadRequest(
-                "license_exp_days must be non-negative".into(),
-            ));
-        }
+    if let Some(Some(days)) = body.license_exp_days
+        && days < 0
+    {
+        return Err(AppError::BadRequest(
+            "license_exp_days must be non-negative".into(),
+        ));
     }
-    if let Some(Some(days)) = body.updates_exp_days {
-        if days < 0 {
-            return Err(AppError::BadRequest(
-                "updates_exp_days must be non-negative".into(),
-            ));
-        }
+    if let Some(Some(days)) = body.updates_exp_days
+        && days < 0
+    {
+        return Err(AppError::BadRequest(
+            "updates_exp_days must be non-negative".into(),
+        ));
     }
 
     let conn = state.db.get()?;
@@ -195,7 +195,7 @@ pub async fn create_license(
 
     // Verify product exists and belongs to this project
     let product = queries::get_product_by_id(&conn, &body.product_id)?
-        .ok_or_else(|| AppError::NotFound("Product not found".into()))?;
+        .or_not_found(msg::PRODUCT_NOT_FOUND)?;
 
     if product.project_id != path.project_id {
         return Err(AppError::NotFound(
@@ -205,7 +205,7 @@ pub async fn create_license(
 
     // Get project for activation code prefix
     let project = queries::get_project_by_id(&conn, &path.project_id)?
-        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+        .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
     // Compute email hash if email provided
     let email_hash = body.email.as_ref().map(|e| state.email_hasher.hash(e));
@@ -302,7 +302,7 @@ pub async fn update_license(
     Json(body): Json<UpdateLicenseBody>,
 ) -> Result<Json<UpdateLicenseResponse>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
     let conn = state.db.get()?;
@@ -310,19 +310,19 @@ pub async fn update_license(
 
     // Get the license
     let license = queries::get_license_by_id(&conn, &path.license_id)?
-        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+        .or_not_found(msg::LICENSE_NOT_FOUND)?;
 
     // Verify license belongs to a product in this project
     let product = queries::get_product_by_id(&conn, &license.product_id)?
-        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+        .or_not_found(msg::LICENSE_NOT_FOUND)?;
 
     if product.project_id != path.project_id {
-        return Err(AppError::NotFound("License not found".into()));
+        return Err(AppError::NotFound(msg::LICENSE_NOT_FOUND.into()));
     }
 
     // Fetch project for audit log context
     let project = queries::get_project_by_id(&conn, &path.project_id)?
-        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+        .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
     // Update email hash if provided
     if let Some(ref email) = body.email {
@@ -353,7 +353,7 @@ pub async fn update_license(
 
     // Fetch the updated license
     let updated_license = queries::get_license_by_id(&conn, &path.license_id)?
-        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+        .or_not_found(msg::LICENSE_NOT_FOUND)?;
 
     Ok(Json(UpdateLicenseResponse {
         license: LicenseWithProduct {
@@ -371,14 +371,14 @@ pub async fn get_license(
     let conn = state.db.get()?;
 
     let license = queries::get_license_by_id(&conn, &path.license_id)?
-        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+        .or_not_found(msg::LICENSE_NOT_FOUND)?;
 
     // Verify license belongs to a product in this project
     let product = queries::get_product_by_id(&conn, &license.product_id)?
-        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+        .or_not_found(msg::LICENSE_NOT_FOUND)?;
 
     if product.project_id != path.project_id {
-        return Err(AppError::NotFound("License not found".into()));
+        return Err(AppError::NotFound(msg::LICENSE_NOT_FOUND.into()));
     }
 
     let devices = queries::list_devices_for_license(&conn, &license.id)?;
@@ -399,30 +399,30 @@ pub async fn revoke_license(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     let license = queries::get_license_by_id(&conn, &path.license_id)?
-        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+        .or_not_found(msg::LICENSE_NOT_FOUND)?;
 
     // Verify license belongs to a product in this project
     let product = queries::get_product_by_id(&conn, &license.product_id)?
-        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+        .or_not_found(msg::LICENSE_NOT_FOUND)?;
 
     if product.project_id != path.project_id {
-        return Err(AppError::NotFound("License not found".into()));
+        return Err(AppError::NotFound(msg::LICENSE_NOT_FOUND.into()));
     }
 
     if license.revoked {
-        return Err(AppError::BadRequest("License is already revoked".into()));
+        return Err(AppError::BadRequest(msg::LICENSE_ALREADY_REVOKED.into()));
     }
 
     // Fetch project for audit log context
     let project = queries::get_project_by_id(&conn, &path.project_id)?
-        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+        .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
     queries::revoke_license(&conn, &license.id)?;
 
@@ -454,30 +454,30 @@ pub async fn send_activation_code(
     headers: HeaderMap,
 ) -> Result<Json<SendActivationCodeResponse>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     let license = queries::get_license_by_id(&conn, &path.license_id)?
-        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+        .or_not_found(msg::LICENSE_NOT_FOUND)?;
 
     // Verify license belongs to a product in this project
     let product = queries::get_product_by_id(&conn, &license.product_id)?
-        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+        .or_not_found(msg::LICENSE_NOT_FOUND)?;
 
     if product.project_id != path.project_id {
-        return Err(AppError::NotFound("License not found".into()));
+        return Err(AppError::NotFound(msg::LICENSE_NOT_FOUND.into()));
     }
 
     if license.revoked {
-        return Err(AppError::BadRequest("License is revoked".into()));
+        return Err(AppError::BadRequest(msg::LICENSE_REVOKED.into()));
     }
 
     // Get project for activation code prefix
     let project = queries::get_project_by_id(&conn, &path.project_id)?
-        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+        .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
     // Create activation code
     let code = queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)?;
@@ -515,7 +515,7 @@ pub async fn deactivate_device_admin(
     headers: HeaderMap,
 ) -> Result<Json<DeactivateDeviceResponse>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
     let conn = state.db.get()?;
@@ -523,19 +523,19 @@ pub async fn deactivate_device_admin(
 
     // Get the license
     let license = queries::get_license_by_id(&conn, &path.license_id)?
-        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+        .or_not_found(msg::LICENSE_NOT_FOUND)?;
 
     // Verify license belongs to a product in this project
     let product = queries::get_product_by_id(&conn, &license.product_id)?
-        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+        .or_not_found(msg::LICENSE_NOT_FOUND)?;
 
     if product.project_id != path.project_id {
-        return Err(AppError::NotFound("License not found".into()));
+        return Err(AppError::NotFound(msg::LICENSE_NOT_FOUND.into()));
     }
 
     // Find the device
     let device = queries::get_device_for_license(&conn, &license.id, &path.device_id)?
-        .ok_or_else(|| AppError::NotFound("Device not found".into()))?;
+        .or_not_found(msg::DEVICE_NOT_FOUND)?;
 
     // Add the device's JTI to revoked list so the token can't be used anymore
     let details = format!("admin remote deactivation by user {}", ctx.member.user_id);
@@ -582,29 +582,28 @@ pub async fn restore_license(
     Json(input): Json<RestoreRequest>,
 ) -> Result<Json<LicenseWithDevices>> {
     if !ctx.can_write_project() {
-        return Err(AppError::Forbidden("Insufficient permissions".into()));
+        return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     let existing = queries::get_deleted_license_by_id(&conn, &path.license_id)?
-        .ok_or_else(|| AppError::NotFound("Deleted license not found".into()))?;
+        .or_not_found(msg::DELETED_LICENSE_NOT_FOUND)?;
 
     // Verify it belongs to a product in this project
-    let product = queries::get_product_by_id(&conn, &existing.product_id)?.ok_or_else(|| {
-        AppError::NotFound("Deleted license not found (product not found)".into())
-    })?;
+    let product = queries::get_product_by_id(&conn, &existing.product_id)?
+        .ok_or_else(|| AppError::NotFound(msg::DELETED_LICENSE_PRODUCT_NOT_FOUND.into()))?;
 
     if product.project_id != path.project_id {
-        return Err(AppError::NotFound("Deleted license not found".into()));
+        return Err(AppError::NotFound(msg::DELETED_LICENSE_NOT_FOUND.into()));
     }
 
     queries::restore_license(&conn, &path.license_id, input.force)?;
 
     // Build LicenseWithDevices response
     let license = queries::get_license_by_id(&conn, &path.license_id)?
-        .ok_or_else(|| AppError::Internal("License not found after restore".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::LICENSE_NOT_FOUND_AFTER_RESTORE.into()))?;
     let devices = queries::list_devices_for_license(&conn, &license.id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)

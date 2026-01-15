@@ -4,7 +4,7 @@ use axum::{
 };
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path};
 use crate::middleware::OperatorContext;
 use crate::models::{
@@ -27,7 +27,7 @@ pub async fn create_operator(
 
     // Verify the user exists
     let user = queries::get_user_by_id(&conn, &input.user_id)?
-        .ok_or_else(|| AppError::BadRequest("User not found".into()))?;
+        .ok_or_else(|| AppError::BadRequest(msg::USER_NOT_FOUND.into()))?;
 
     let operator = queries::create_operator(&conn, &input)?;
 
@@ -66,7 +66,7 @@ pub async fn get_operator(
 ) -> Result<Json<OperatorWithUser>> {
     let conn = state.db.get()?;
     let operator = queries::get_operator_with_user_by_user_id(&conn, &user_id)?
-        .ok_or_else(|| AppError::NotFound("User is not an operator".into()))?;
+        .or_not_found(msg::NOT_OPERATOR)?;
     Ok(Json(operator))
 }
 
@@ -82,11 +82,11 @@ pub async fn update_operator(
 
     // Prevent self-demotion
     if user_id == ctx.user.id && input.role.is_some() {
-        return Err(AppError::BadRequest("Cannot change your own role".into()));
+        return Err(AppError::BadRequest(msg::CANNOT_CHANGE_OWN_ROLE.into()));
     }
 
     let existing = queries::get_operator_with_user_by_user_id(&conn, &user_id)?
-        .ok_or_else(|| AppError::NotFound("User is not an operator".into()))?;
+        .or_not_found(msg::NOT_OPERATOR)?;
 
     queries::update_operator(&conn, &existing.id, &input)?;
 
@@ -103,7 +103,7 @@ pub async fn update_operator(
         .save()?;
 
     let operator = queries::get_operator_with_user_by_user_id(&conn, &user_id)?
-        .ok_or_else(|| AppError::NotFound("User is not an operator".into()))?;
+        .or_not_found(msg::NOT_OPERATOR)?;
 
     Ok(Json(operator))
 }
@@ -119,11 +119,11 @@ pub async fn delete_operator(
 
     // Prevent self-deletion
     if user_id == ctx.user.id {
-        return Err(AppError::BadRequest("Cannot delete yourself".into()));
+        return Err(AppError::BadRequest(msg::CANNOT_DELETE_SELF.into()));
     }
 
     let existing = queries::get_operator_with_user_by_user_id(&conn, &user_id)?
-        .ok_or_else(|| AppError::NotFound("User is not an operator".into()))?;
+        .or_not_found(msg::NOT_OPERATOR)?;
 
     queries::soft_delete_operator(&conn, &existing.id)?;
 

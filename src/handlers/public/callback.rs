@@ -2,7 +2,7 @@ use axum::{extract::State, response::Redirect};
 use serde::Deserialize;
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::Query;
 
 #[derive(Debug, Deserialize)]
@@ -30,15 +30,15 @@ pub async fn payment_callback(
 
     // Get payment session
     let session = queries::get_payment_session(&conn, &query.session)?
-        .ok_or_else(|| AppError::NotFound("Session not found".into()))?;
+        .or_not_found(msg::SESSION_NOT_FOUND)?;
 
     // Get the product to find project
     let product = queries::get_product_by_id(&conn, &session.product_id)?
-        .ok_or_else(|| AppError::Internal("Product not found".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::PRODUCT_NOT_FOUND.into()))?;
 
     // Get project for redirect URL and activation code prefix
     let project = queries::get_project_by_id(&conn, &product.project_id)?
-        .ok_or_else(|| AppError::Internal("Project not found".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::PROJECT_NOT_FOUND.into()))?;
 
     // Determine base redirect URL (from project config or fallback to Paycheck success page)
     let base_redirect = project
@@ -57,12 +57,12 @@ pub async fn payment_callback(
     }
 
     // Get license directly via stored ID (set by webhook when license was created)
-    let license_id = session.license_id.ok_or_else(|| {
-        AppError::Internal("License not found - payment may still be processing".into())
-    })?;
+    let license_id = session
+        .license_id
+        .ok_or_else(|| AppError::Internal(msg::LICENSE_PAYMENT_PROCESSING.into()))?;
 
     let license = queries::get_license_by_id(&conn, &license_id)?
-        .ok_or_else(|| AppError::Internal("License not found".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::LICENSE_NOT_FOUND.into()))?;
 
     // Create a short-lived activation code (PREFIX-XXXX-XXXX-XXXX-XXXX format)
     let activation_code =

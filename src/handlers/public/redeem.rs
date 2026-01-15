@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::crypto::MasterKey;
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::Json;
 use crate::jwt::{self, LicenseClaims};
 use crate::models::DeviceType;
@@ -46,7 +46,7 @@ impl RedeemRequest {
             )));
         }
         if self.device_id.is_empty() {
-            return Err(AppError::BadRequest("device_id cannot be empty".into()));
+            return Err(AppError::BadRequest(msg::DEVICE_ID_EMPTY.into()));
         }
         if self.device_id.len() > MAX_DEVICE_ID_LEN {
             return Err(AppError::BadRequest(format!(
@@ -94,22 +94,24 @@ pub async fn redeem_with_code(
 
     // Look up project by public key
     let project = queries::get_project_by_public_key(&conn, &req.public_key)?
-        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+        .or_not_found(msg::PROJECT_NOT_FOUND)?;
     let project_id = project.id;
 
     // Validate device type
-    let device_type = req.device_type.parse::<DeviceType>().ok().ok_or_else(|| {
-        AppError::BadRequest("Invalid device_type. Must be 'uuid' or 'machine'".into())
-    })?;
+    let device_type = req
+        .device_type
+        .parse::<DeviceType>()
+        .ok()
+        .ok_or_else(|| AppError::BadRequest(msg::INVALID_DEVICE_TYPE.into()))?;
 
     // Atomically claim the activation code (prevents race conditions where multiple
     // concurrent requests could use the same code to create multiple devices)
     let activation_code = queries::try_claim_activation_code(&conn, &req.code)?
-        .ok_or_else(|| AppError::Forbidden("Cannot be redeemed".into()))?;
+        .ok_or_else(|| AppError::Forbidden(msg::CANNOT_BE_REDEEMED.into()))?;
 
     // Get the license
     let license = queries::get_license_by_id(&conn, &activation_code.license_id)?
-        .ok_or_else(|| AppError::Internal("License not found".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::LICENSE_NOT_FOUND.into()))?;
 
     // Proceed with normal redemption logic
     redeem_license_internal(
@@ -138,21 +140,21 @@ fn redeem_license_internal(
         .expires_at
         .is_some_and(|exp| Utc::now().timestamp() > exp);
     if license.revoked || is_expired {
-        return Err(AppError::Forbidden("Cannot be redeemed".into()));
+        return Err(AppError::Forbidden(msg::CANNOT_BE_REDEEMED.into()));
     }
 
     // Get the product
     let product = queries::get_product_by_id(conn, &license.product_id)?
-        .ok_or_else(|| AppError::Internal("Product not found".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::PRODUCT_NOT_FOUND.into()))?;
 
     // Verify project matches
     if product.project_id != project_id {
-        return Err(AppError::NotFound("License not found".into()));
+        return Err(AppError::NotFound(msg::LICENSE_NOT_FOUND.into()));
     }
 
     // Get the project for signing
     let project = queries::get_project_by_id(conn, project_id)?
-        .ok_or_else(|| AppError::Internal("Project not found".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::PROJECT_NOT_FOUND.into()))?;
 
     // Generate JTI for the new token
     let jti = Uuid::new_v4().to_string();

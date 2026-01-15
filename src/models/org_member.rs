@@ -28,6 +28,7 @@ pub struct OrgMember {
     pub org_id: String,
     pub role: OrgMemberRole,
     pub created_at: i64,
+    pub updated_at: i64,
     /// Soft delete timestamp (None = active, Some = deleted at this time)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<i64>,
@@ -48,6 +49,7 @@ pub struct OrgMemberWithUser {
     pub org_id: String,
     pub role: OrgMemberRole,
     pub created_at: i64,
+    pub updated_at: i64,
     /// Soft delete timestamp (None = active, Some = deleted at this time)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_at: Option<i64>,

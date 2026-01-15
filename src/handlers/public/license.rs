@@ -6,7 +6,7 @@ use axum_extra::{
 use serde::{Deserialize, Serialize};
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Query};
 use crate::jwt;
 
@@ -59,7 +59,7 @@ pub async fn get_license_info(
 
     // Look up project by public key (validates project exists)
     let _project = queries::get_project_by_public_key(&conn, &query.public_key)?
-        .ok_or_else(|| AppError::NotFound("Project not found".into()))?;
+        .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
     // Verify JWT signature (allow expired JWTs - we just need identity)
     let claims = jwt::verify_token_allow_expired(token, &query.public_key)?;
@@ -67,24 +67,23 @@ pub async fn get_license_info(
     // Extract JTI from verified token
     let jti = claims
         .jwt_id
-        .ok_or_else(|| AppError::BadRequest("Token missing JTI".into()))?;
+        .ok_or_else(|| AppError::BadRequest(msg::TOKEN_MISSING_JTI.into()))?;
 
     // Look up device by JTI
-    let device = queries::get_device_by_jti(&conn, &jti)?
-        .ok_or_else(|| AppError::NotFound("Device not found".into()))?;
+    let device = queries::get_device_by_jti(&conn, &jti)?.or_not_found(msg::DEVICE_NOT_FOUND)?;
 
     // Get license from device
     let license = queries::get_license_by_id(&conn, &device.license_id)?
-        .ok_or_else(|| AppError::NotFound("License not found".into()))?;
+        .or_not_found(msg::LICENSE_NOT_FOUND)?;
 
     // Check if this JTI is revoked
-    if queries::is_jti_revoked(&conn, &license.id, &jti)? {
-        return Err(AppError::Forbidden("Device has been deactivated".into()));
+    if queries::is_jti_revoked(&conn, &jti)? {
+        return Err(AppError::Forbidden(msg::DEVICE_DEACTIVATED.into()));
     }
 
     // Get the product for limits
     let product = queries::get_product_by_id(&conn, &license.product_id)?
-        .ok_or_else(|| AppError::Internal("Product not found".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::PRODUCT_NOT_FOUND.into()))?;
 
     // Determine status
     let now = chrono::Utc::now().timestamp();

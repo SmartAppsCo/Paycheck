@@ -15,13 +15,30 @@ fn test_create_license() {
     let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
 
-    let license = create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+    let license = create_test_license(
+        &conn,
+        &project.id,
+        &product.id,
+        Some(future_timestamp(ONE_YEAR)),
+    );
 
     assert!(!license.id.is_empty(), "license should have a generated ID");
-    assert!(license.email_hash.is_some(), "license should have an email hash set");
-    assert_eq!(license.product_id, product.id, "license product_id should match the created product");
-    assert_eq!(license.project_id, project.id, "license project_id should match the created project");
-    assert_eq!(license.activation_count, 0, "new license should have zero activations");
+    assert!(
+        license.email_hash.is_some(),
+        "license should have an email hash set"
+    );
+    assert_eq!(
+        license.product_id, product.id,
+        "license product_id should match the created product"
+    );
+    assert_eq!(
+        license.project_id, project.id,
+        "license project_id should match the created project"
+    );
+    assert_eq!(
+        license.activation_count, 0,
+        "new license should have zero activations"
+    );
     assert!(!license.revoked, "new license should not be revoked");
 }
 
@@ -47,7 +64,10 @@ fn test_create_license_without_identifier_fails() {
 
     let result = queries::create_license(&conn, &project.id, &product.id, &input);
 
-    assert!(result.is_err(), "creating license without any identifier should fail");
+    assert!(
+        result.is_err(),
+        "creating license without any identifier should fail"
+    );
     let err = result.unwrap_err();
     assert!(
         err.to_string().contains("at least one identifier"),
@@ -79,7 +99,10 @@ fn test_create_license_with_only_order_id_succeeds() {
     let license = queries::create_license(&conn, &project.id, &product.id, &input)
         .expect("Should succeed with order_id as identifier");
 
-    assert!(license.email_hash.is_none(), "license should have no email hash when created with only order_id");
+    assert!(
+        license.email_hash.is_none(),
+        "license should have no email hash when created with only order_id"
+    );
     assert_eq!(
         license.payment_provider_order_id,
         Some("cs_test_123".to_string()),
@@ -109,7 +132,11 @@ fn test_create_license_with_customer_id() {
     let license = queries::create_license(&conn, &project.id, &product.id, &input)
         .expect("Failed to create license");
 
-    assert_eq!(license.customer_id, Some("cust_12345".to_string()), "license should store the customer ID");
+    assert_eq!(
+        license.customer_id,
+        Some("cust_12345".to_string()),
+        "license should store the customer ID"
+    );
 }
 
 #[test]
@@ -134,7 +161,11 @@ fn test_create_license_with_payment_provider() {
     let license = queries::create_license(&conn, &project.id, &product.id, &input)
         .expect("Failed to create license");
 
-    assert_eq!(license.payment_provider, Some("stripe".to_string()), "license should store the payment provider");
+    assert_eq!(
+        license.payment_provider,
+        Some("stripe".to_string()),
+        "license should store the payment provider"
+    );
     assert_eq!(
         license.payment_provider_customer_id,
         Some("cus_xxx".to_string()),
@@ -156,14 +187,25 @@ fn test_get_license_by_id() {
     let org = create_test_org(&conn, "Test Org");
     let project = create_test_project(&conn, &org.id, "My App", &master_key);
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
-    let created = create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_YEAR)));
+    let created = create_test_license(
+        &conn,
+        &project.id,
+        &product.id,
+        Some(future_timestamp(ONE_YEAR)),
+    );
 
     let fetched = queries::get_license_by_id(&conn, &created.id)
         .expect("Query failed")
         .expect("License not found");
 
-    assert_eq!(fetched.id, created.id, "fetched license ID should match created license ID");
-    assert_eq!(fetched.product_id, created.product_id, "fetched license product_id should match created license");
+    assert_eq!(
+        fetched.id, created.id,
+        "fetched license ID should match created license ID"
+    );
+    assert_eq!(
+        fetched.product_id, created.product_id,
+        "fetched license product_id should match created license"
+    );
 }
 
 #[test]
@@ -195,7 +237,10 @@ fn test_get_license_by_email_hash() {
         .expect("Query failed")
         .expect("License not found");
 
-    assert_eq!(fetched.id, created.id, "license looked up by email hash should match created license");
+    assert_eq!(
+        fetched.id, created.id,
+        "license looked up by email hash should match created license"
+    );
 }
 
 #[test]
@@ -224,7 +269,10 @@ fn test_get_license_by_subscription() {
         .expect("Query failed")
         .expect("License not found");
 
-    assert_eq!(fetched.id, created.id, "license looked up by subscription ID should match created license");
+    assert_eq!(
+        fetched.id, created.id,
+        "license looked up by subscription ID should match created license"
+    );
 }
 
 #[test]
@@ -253,7 +301,10 @@ fn test_get_license_by_subscription_wrong_provider() {
     let result = queries::get_license_by_subscription(&conn, "lemonsqueezy", "sub_id")
         .expect("Query failed");
 
-    assert!(result.is_none(), "subscription lookup with wrong provider should return None");
+    assert!(
+        result.is_none(),
+        "subscription lookup with wrong provider should return None"
+    );
 }
 
 #[test]
@@ -272,10 +323,20 @@ fn test_list_licenses_for_project() {
 
     let licenses = queries::list_licenses_for_project(&conn, &project.id).expect("Query failed");
 
-    assert_eq!(licenses.len(), 3, "should list all 3 licenses for the project");
+    assert_eq!(
+        licenses.len(),
+        3,
+        "should list all 3 licenses for the project"
+    );
     // Verify the product name is included
-    assert!(licenses.iter().any(|l| l.product_name == "Free"), "license list should include Free tier license");
-    assert!(licenses.iter().any(|l| l.product_name == "Pro"), "license list should include Pro tier license");
+    assert!(
+        licenses.iter().any(|l| l.product_name == "Free"),
+        "license list should include Free tier license"
+    );
+    assert!(
+        licenses.iter().any(|l| l.product_name == "Pro"),
+        "license list should include Pro tier license"
+    );
 }
 
 // ============ License Operations Tests ============
@@ -289,7 +350,10 @@ fn test_increment_activation_count() {
     let product = create_test_product(&conn, &project.id, "Pro", "pro");
     let license = create_test_license(&conn, &project.id, &product.id, None);
 
-    assert_eq!(license.activation_count, 0, "new license should start with zero activations");
+    assert_eq!(
+        license.activation_count, 0,
+        "new license should start with zero activations"
+    );
 
     queries::increment_activation_count(&conn, &license.id).expect("Increment failed");
     queries::increment_activation_count(&conn, &license.id).expect("Increment failed");
@@ -299,7 +363,10 @@ fn test_increment_activation_count() {
         .expect("Query failed")
         .expect("License not found");
 
-    assert_eq!(updated.activation_count, 3, "activation count should be 3 after 3 increments");
+    assert_eq!(
+        updated.activation_count, 3,
+        "activation count should be 3 after 3 increments"
+    );
 }
 
 #[test]
@@ -319,7 +386,10 @@ fn test_revoke_license() {
         .expect("Query failed")
         .expect("License not found");
 
-    assert!(revoked.revoked, "license should be revoked after calling revoke_license");
+    assert!(
+        revoked.revoked,
+        "license should be revoked after calling revoke_license"
+    );
 }
 
 #[test]
@@ -332,16 +402,28 @@ fn test_add_revoked_jti_marks_jti_as_revoked() {
     let license = create_test_license(&conn, &project.id, &product.id, None);
 
     // Initially no JTIs are revoked
-    assert!(!queries::is_jti_revoked(&conn, &license.id, "jti_1").unwrap(), "jti_1 should not be revoked initially");
-    assert!(!queries::is_jti_revoked(&conn, &license.id, "jti_2").unwrap(), "jti_2 should not be revoked initially");
+    assert!(
+        !queries::is_jti_revoked(&conn, "jti_1").unwrap(),
+        "jti_1 should not be revoked initially"
+    );
+    assert!(
+        !queries::is_jti_revoked(&conn, "jti_2").unwrap(),
+        "jti_2 should not be revoked initially"
+    );
 
     queries::add_revoked_jti(&conn, &license.id, "jti_1", Some("test revocation"))
         .expect("Add JTI failed");
     queries::add_revoked_jti(&conn, &license.id, "jti_2", None).expect("Add JTI failed");
 
     // Now both should be revoked
-    assert!(queries::is_jti_revoked(&conn, &license.id, "jti_1").unwrap(), "jti_1 should be revoked after adding");
-    assert!(queries::is_jti_revoked(&conn, &license.id, "jti_2").unwrap(), "jti_2 should be revoked after adding");
+    assert!(
+        queries::is_jti_revoked(&conn, "jti_1").unwrap(),
+        "jti_1 should be revoked after adding"
+    );
+    assert!(
+        queries::is_jti_revoked(&conn, "jti_2").unwrap(),
+        "jti_2 should be revoked after adding"
+    );
 
     // Adding same JTI again should be idempotent (INSERT OR IGNORE)
     queries::add_revoked_jti(&conn, &license.id, "jti_1", None)
@@ -367,8 +449,16 @@ fn test_extend_license_expiration() {
         .expect("Query failed")
         .expect("License not found");
 
-    assert_eq!(updated.expires_at, Some(new_exp), "license expires_at should be extended to new date");
-    assert_eq!(updated.updates_expires_at, Some(new_exp), "license updates_expires_at should be extended to new date");
+    assert_eq!(
+        updated.expires_at,
+        Some(new_exp),
+        "license expires_at should be extended to new date"
+    );
+    assert_eq!(
+        updated.updates_expires_at,
+        Some(new_exp),
+        "license updates_expires_at should be extended to new date"
+    );
 }
 
 // ============ Activation Code Tests ============
@@ -385,11 +475,26 @@ fn test_create_activation_code() {
     let code = queries::create_activation_code(&conn, &license.id, "TEST")
         .expect("Failed to create activation code");
 
-    assert!(!code.id.is_empty(), "activation code should have a generated ID");
-    assert!(code.code.starts_with("TEST-"), "activation code should start with PREFIX-"); // PREFIX-XXXX-XXXX-XXXX-XXXX format
-    assert_eq!(code.license_id, license.id, "activation code should be linked to the license");
-    assert!(!code.used, "new activation code should not be marked as used");
-    assert!(code.expires_at > now(), "activation code should expire in the future"); // Expires in the future
+    assert!(
+        !code.code.is_empty(),
+        "activation code should have a generated code"
+    );
+    assert!(
+        code.code.starts_with("TEST-"),
+        "activation code should start with PREFIX-"
+    ); // PREFIX-XXXX-XXXX-XXXX-XXXX format
+    assert_eq!(
+        code.license_id, license.id,
+        "activation code should be linked to the license"
+    );
+    assert!(
+        !code.used,
+        "new activation code should not be marked as used"
+    );
+    assert!(
+        code.expires_at > now(),
+        "activation code should expire in the future"
+    ); // Expires in the future
 }
 
 #[test]
@@ -405,9 +510,16 @@ fn test_activation_code_format() {
         .expect("Failed to create activation code");
 
     // Format should be PREFIX-XXXX-XXXX-XXXX-XXXX
-    assert!(code.code.starts_with("MYAPP-"), "code should start with the specified prefix");
+    assert!(
+        code.code.starts_with("MYAPP-"),
+        "code should start with the specified prefix"
+    );
     let parts: Vec<&str> = code.code.split('-').collect();
-    assert_eq!(parts.len(), 5, "code should have 5 parts separated by dashes");
+    assert_eq!(
+        parts.len(),
+        5,
+        "code should have 5 parts separated by dashes"
+    );
     assert_eq!(parts[0], "MYAPP", "first part should be the prefix");
     for (i, part) in parts[1..].iter().enumerate() {
         assert_eq!(part.len(), 4, "part {} should be 4 characters", i + 1);
@@ -429,8 +541,14 @@ fn test_get_activation_code_by_code() {
         .expect("Query failed")
         .expect("Code not found");
 
-    assert_eq!(fetched.id, created.id, "fetched activation code ID should match created code ID");
-    assert_eq!(fetched.license_id, license.id, "fetched activation code should be linked to the correct license");
+    assert_eq!(
+        fetched.license_id, created.license_id,
+        "fetched activation code license_id should match created code"
+    );
+    assert_eq!(
+        fetched.license_id, license.id,
+        "fetched activation code should be linked to the correct license"
+    );
 }
 
 #[test]
@@ -444,15 +562,21 @@ fn test_mark_activation_code_used() {
     let code = queries::create_activation_code(&conn, &license.id, "TEST")
         .expect("Failed to create activation code");
 
-    assert!(!code.used, "new activation code should not be marked as used");
+    assert!(
+        !code.used,
+        "new activation code should not be marked as used"
+    );
 
-    queries::mark_activation_code_used(&conn, &code.id).expect("Mark used failed");
+    queries::mark_activation_code_used(&conn, &code.code).expect("Mark used failed");
 
     let updated = queries::get_activation_code_by_code(&conn, &code.code)
         .expect("Query failed")
         .expect("Code not found");
 
-    assert!(updated.used, "activation code should be marked as used after calling mark_activation_code_used");
+    assert!(
+        updated.used,
+        "activation code should be marked as used after calling mark_activation_code_used"
+    );
 }
 
 // ============ Email Hash Tests ============
@@ -462,7 +586,10 @@ fn test_email_hash_consistency() {
     // Same email should always produce the same hash
     let hash1 = test_email_hasher().hash("test@example.com");
     let hash2 = test_email_hasher().hash("test@example.com");
-    assert_eq!(hash1, hash2, "same email should always produce the same hash");
+    assert_eq!(
+        hash1, hash2,
+        "same email should always produce the same hash"
+    );
 }
 
 #[test]
@@ -478,7 +605,10 @@ fn test_email_hash_trims_whitespace() {
     // Email hashing should trim whitespace
     let hash1 = test_email_hasher().hash("  test@example.com  ");
     let hash2 = test_email_hasher().hash("test@example.com");
-    assert_eq!(hash1, hash2, "email hashing should trim leading and trailing whitespace");
+    assert_eq!(
+        hash1, hash2,
+        "email hashing should trim leading and trailing whitespace"
+    );
 }
 
 #[test]
@@ -529,7 +659,11 @@ fn test_license_with_expiration() {
     let exp = future_timestamp(ONE_YEAR);
     let license = create_test_license(&conn, &project.id, &product.id, Some(exp));
 
-    assert_eq!(license.expires_at, Some(exp), "license should have the specified expiration date");
+    assert_eq!(
+        license.expires_at,
+        Some(exp),
+        "license should have the specified expiration date"
+    );
 }
 
 #[test]
@@ -542,7 +676,10 @@ fn test_license_without_expiration() {
 
     let license = create_test_license(&conn, &project.id, &product.id, None);
 
-    assert!(license.expires_at.is_none(), "perpetual license should have no expiration date"); // Perpetual license
+    assert!(
+        license.expires_at.is_none(),
+        "perpetual license should have no expiration date"
+    ); // Perpetual license
 }
 
 // ============ Cascade Delete Tests ============
@@ -559,7 +696,10 @@ fn test_delete_product_cascades_to_licenses() {
     queries::delete_product(&conn, &product.id).expect("Delete failed");
 
     let result = queries::get_license_by_id(&conn, &license.id).expect("Query failed");
-    assert!(result.is_none(), "license should be deleted when parent product is deleted");
+    assert!(
+        result.is_none(),
+        "license should be deleted when parent product is deleted"
+    );
 }
 
 #[test]
@@ -577,5 +717,8 @@ fn test_delete_license_cascades_to_activation_codes() {
     queries::delete_product(&conn, &product.id).expect("Delete failed");
 
     let result = queries::get_activation_code_by_code(&conn, &code.code).expect("Query failed");
-    assert!(result.is_none(), "activation code should be deleted when parent license is deleted");
+    assert!(
+        result.is_none(),
+        "activation code should be deleted when parent license is deleted"
+    );
 }

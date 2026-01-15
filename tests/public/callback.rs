@@ -9,12 +9,12 @@ use tower::ServiceExt;
 
 #[path = "../common/mod.rs"]
 mod common;
-use common::{
-    complete_payment_session, create_test_license, create_test_org, create_test_payment_session,
-    create_test_product, create_test_project, future_timestamp, public_app, queries,
-    test_master_key, CreateProject, LICENSE_VALID_DAYS,
-};
 use common::create_test_app_state;
+use common::{
+    CreateProject, LICENSE_VALID_DAYS, complete_payment_session, create_test_license,
+    create_test_org, create_test_payment_session, create_test_product, create_test_project,
+    future_timestamp, public_app, queries, test_master_key,
+};
 
 #[tokio::test]
 async fn test_callback_session_not_found_returns_error() {

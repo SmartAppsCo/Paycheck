@@ -20,7 +20,7 @@ use tower::ServiceExt;
 
 #[path = "../common/mod.rs"]
 mod common;
-use common::{*, ONE_MONTH, ONE_YEAR};
+use common::{ONE_MONTH, ONE_YEAR, *};
 
 use paycheck::db::AppState;
 use paycheck::handlers;
@@ -364,8 +364,12 @@ mod sql_injection {
             let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&conn, &project.id, "Pro", "pro");
             // Create a real license to ensure the endpoint works
-            let _ =
-                create_test_license(&conn, &project.id, &product.id, Some(future_timestamp(ONE_MONTH)));
+            let _ = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_MONTH)),
+            );
 
             org_id = org.id;
             project_id = project.id;
@@ -1232,7 +1236,10 @@ mod special_characters {
                 // The name should be exactly what we sent (or sanitized)
                 // Most importantly, this is a JSON API so XSS isn't really a concern
                 // unless the client renders it unsafely
-                assert!(json.get("id").is_some(), "XSS payload accepted: response should contain product ID to confirm successful creation");
+                assert!(
+                    json.get("id").is_some(),
+                    "XSS payload accepted: response should contain product ID to confirm successful creation"
+                );
             }
         }
     }

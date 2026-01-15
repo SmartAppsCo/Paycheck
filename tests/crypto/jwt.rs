@@ -186,7 +186,10 @@ fn test_decode_unverified_extracts_claims() {
         decoded.product_id, "product-abc",
         "Decoded token should have correct product_id"
     );
-    assert_eq!(decoded.tier, "pro", "Decoded token should have correct tier");
+    assert_eq!(
+        decoded.tier, "pro",
+        "Decoded token should have correct tier"
+    );
 }
 
 #[test]

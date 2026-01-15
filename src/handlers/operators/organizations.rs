@@ -5,7 +5,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path};
 use crate::middleware::OperatorContext;
 use crate::models::{
@@ -40,7 +40,7 @@ pub async fn create_organization(
     // No API key is created - owner uses Console (impersonation) or creates a key later
     let (owner, audit_details) = if let Some(owner_user_id) = &input.owner_user_id {
         let user = queries::get_user_by_id(&conn, owner_user_id)?
-            .ok_or_else(|| AppError::BadRequest("Owner user not found".into()))?;
+            .ok_or_else(|| AppError::BadRequest(msg::OWNER_USER_NOT_FOUND.into()))?;
 
         let member = queries::create_org_member(
             &conn,
@@ -126,8 +126,8 @@ pub async fn get_organization(
     Path(id): Path<String>,
 ) -> Result<Json<Organization>> {
     let conn = state.db.get()?;
-    let organization = queries::get_organization_by_id(&conn, &id)?
-        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+    let organization =
+        queries::get_organization_by_id(&conn, &id)?.or_not_found(msg::ORG_NOT_FOUND)?;
     Ok(Json(organization))
 }
 
@@ -144,14 +144,13 @@ pub async fn update_organization(
     let audit_conn = state.audit.get()?;
 
     // Verify organization exists
-    let existing = queries::get_organization_by_id(&conn, &id)?
-        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+    let existing = queries::get_organization_by_id(&conn, &id)?.or_not_found(msg::ORG_NOT_FOUND)?;
 
     queries::update_organization(&conn, &id, &input, &state.master_key)?;
 
     // Fetch updated organization
     let organization = queries::get_organization_by_id(&conn, &id)?
-        .ok_or_else(|| AppError::Internal("Organization not found after update".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::ORG_NOT_FOUND_AFTER_UPDATE.into()))?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.user.id))
@@ -174,8 +173,7 @@ pub async fn delete_organization(
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
-    let existing = queries::get_organization_by_id(&conn, &id)?
-        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+    let existing = queries::get_organization_by_id(&conn, &id)?.or_not_found(msg::ORG_NOT_FOUND)?;
 
     queries::soft_delete_organization(&conn, &id)?;
 
@@ -203,14 +201,14 @@ pub async fn restore_organization(
 
     // Get the deleted organization (need to check it exists and was deleted)
     let existing = queries::get_deleted_organization_by_id(&conn, &id)?
-        .ok_or_else(|| AppError::NotFound("Deleted organization not found".into()))?;
+        .or_not_found(msg::DELETED_ORG_NOT_FOUND)?;
 
     // Restore the organization and cascade-deleted children
     queries::restore_organization(&conn, &id)?;
 
     // Get the restored organization
     let organization = queries::get_organization_by_id(&conn, &id)?
-        .ok_or_else(|| AppError::Internal("Organization not found after restore".into()))?;
+        .ok_or_else(|| AppError::Internal(msg::ORG_NOT_FOUND_AFTER_RESTORE.into()))?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.user.id))
@@ -245,7 +243,7 @@ pub async fn hard_delete_organization(
                 .ok()
                 .flatten()
         })
-        .ok_or_else(|| AppError::NotFound("Organization not found".into()))?;
+        .or_not_found(msg::ORG_NOT_FOUND)?;
 
     // Perform hard delete (CASCADE removes all related data)
     queries::delete_organization(&conn, &id)?;
