@@ -431,7 +431,7 @@ mod sql_injection {
 
         {
             let conn = state.db.get().unwrap();
-            let (_, _, key) = create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+            let (_, key) = create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
             api_key = key;
         }
 
@@ -792,7 +792,7 @@ mod input_size_limits {
 
         {
             let conn = state.db.get().unwrap();
-            let (_, _, key) = create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+            let (_, key) = create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
             api_key = key;
         }
 

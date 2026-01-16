@@ -10,20 +10,16 @@ use common::*;
 #[test]
 fn test_create_operator() {
     let conn = setup_test_db();
-    let (user, operator, api_key) =
-        create_test_operator(&conn, "test@example.com", OperatorRole::Admin);
+    let (user, api_key) = create_test_operator(&conn, "test@example.com", OperatorRole::Admin);
 
-    assert!(
-        !operator.id.is_empty(),
-        "operator should have a generated ID"
-    );
+    assert!(!user.id.is_empty(), "user should have a generated ID");
     assert_eq!(
         user.email, "test@example.com",
         "user email should match input"
     );
     assert_eq!(
-        operator.role,
-        OperatorRole::Admin,
+        user.operator_role,
+        Some(OperatorRole::Admin),
         "operator role should match input"
     );
     assert!(!api_key.is_empty(), "API key should be generated");
@@ -31,20 +27,20 @@ fn test_create_operator() {
 }
 
 #[test]
-fn test_get_operator_by_id() {
+fn test_get_operator_by_user_id() {
     let conn = setup_test_db();
-    let (_user, created, _) = create_test_operator(&conn, "test@example.com", OperatorRole::Owner);
+    let (created, _) = create_test_operator(&conn, "test@example.com", OperatorRole::Owner);
 
-    let fetched = queries::get_operator_by_id(&conn, &created.id)
+    let fetched = queries::get_user_by_id(&conn, &created.id)
         .expect("Query failed")
-        .expect("Operator not found");
+        .expect("User not found");
 
     assert_eq!(
         fetched.id, created.id,
-        "fetched operator ID should match created"
+        "fetched user ID should match created"
     );
     assert_eq!(
-        fetched.role, created.role,
+        fetched.operator_role, created.operator_role,
         "fetched operator role should match created"
     );
 }
@@ -52,7 +48,7 @@ fn test_get_operator_by_id() {
 #[test]
 fn test_get_user_by_api_key() {
     let conn = setup_test_db();
-    let (created_user, _operator, api_key) =
+    let (created_user, api_key) =
         create_test_operator(&conn, "test@example.com", OperatorRole::View);
 
     let (fetched_user, _api_key) = queries::get_user_by_api_key(&conn, &api_key)
@@ -88,36 +84,35 @@ fn test_list_operators() {
 }
 
 #[test]
-fn test_update_operator() {
+fn test_update_operator_role() {
     let conn = setup_test_db();
-    let (_user, operator, _) = create_test_operator(&conn, "test@example.com", OperatorRole::View);
+    let (user, _) = create_test_operator(&conn, "test@example.com", OperatorRole::View);
 
-    let update = UpdateOperator {
-        role: Some(OperatorRole::Admin),
-    };
-    queries::update_operator(&conn, &operator.id, &update).expect("Update failed");
-
-    let updated = queries::get_operator_by_id(&conn, &operator.id)
-        .expect("Query failed")
-        .expect("Operator not found");
+    let updated =
+        queries::update_operator_role(&conn, &user.id, OperatorRole::Admin).expect("Update failed");
 
     assert_eq!(
-        updated.role,
-        OperatorRole::Admin,
+        updated.operator_role,
+        Some(OperatorRole::Admin),
         "operator role should be updated to Admin"
     );
 }
 
 #[test]
-fn test_delete_operator() {
+fn test_revoke_operator_role() {
     let conn = setup_test_db();
-    let (_user, operator, _) = create_test_operator(&conn, "test@example.com", OperatorRole::Admin);
+    let (user, _) = create_test_operator(&conn, "test@example.com", OperatorRole::Admin);
 
-    let deleted = queries::delete_operator(&conn, &operator.id).expect("Delete failed");
-    assert!(deleted, "delete should return true for existing operator");
+    let revoked = queries::revoke_operator_role(&conn, &user.id).expect("Revoke failed");
+    assert!(revoked, "revoke should return true for existing operator");
 
-    let result = queries::get_operator_by_id(&conn, &operator.id).expect("Query failed");
-    assert!(result.is_none(), "deleted operator should not be found");
+    let result = queries::get_user_by_id(&conn, &user.id)
+        .expect("Query failed")
+        .expect("User should still exist");
+    assert!(
+        result.operator_role.is_none(),
+        "operator role should be None after revoke"
+    );
 }
 
 // ============ Organization Tests ============

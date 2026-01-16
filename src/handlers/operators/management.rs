@@ -7,13 +7,11 @@ use crate::db::{AppState, queries};
 use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path};
 use crate::middleware::OperatorContext;
-use crate::models::{
-    ActorType, AuditAction, CreateOperator, Operator, OperatorWithUser, UpdateOperator,
-};
+use crate::models::{ActorType, AuditAction, CreateOperator, UpdateOperator, User};
 use crate::pagination::{Paginated, PaginationQuery};
 use crate::util::AuditLogBuilder;
 
-/// Create an operator (link a user to operator role).
+/// Grant operator role to a user.
 /// The user must already exist in the users table.
 /// No API key is created - use Console or create one separately.
 pub async fn create_operator(
@@ -21,20 +19,24 @@ pub async fn create_operator(
     Extension(ctx): Extension<OperatorContext>,
     headers: HeaderMap,
     Json(input): Json<CreateOperator>,
-) -> Result<Json<Operator>> {
+) -> Result<Json<User>> {
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
-    // Verify the user exists
+    // Verify the user exists and doesn't already have an operator role
     let user = queries::get_user_by_id(&conn, &input.user_id)?
         .ok_or_else(|| AppError::BadRequest(msg::USER_NOT_FOUND.into()))?;
 
-    let operator = queries::create_operator(&conn, &input)?;
+    if user.operator_role.is_some() {
+        return Err(AppError::BadRequest("User is already an operator".into()));
+    }
+
+    let updated_user = queries::grant_operator_role(&conn, &input.user_id, input.role)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.user.id))
         .action(AuditAction::CreateOperator)
-        .resource("operator", &operator.id)
+        .resource("operator", &input.user_id)
         .details(&serde_json::json!({
             "user_id": input.user_id,
             "email": user.email,
@@ -44,14 +46,14 @@ pub async fn create_operator(
         .auth_method(&ctx.auth_method)
         .save()?;
 
-    Ok(Json(operator))
+    Ok(Json(updated_user))
 }
 
-/// List operators with user details
+/// List operators (users with operator_role set)
 pub async fn list_operators(
     State(state): State<AppState>,
     Query(pagination): Query<PaginationQuery>,
-) -> Result<Json<Paginated<OperatorWithUser>>> {
+) -> Result<Json<Paginated<User>>> {
     let conn = state.db.get()?;
     let limit = pagination.limit();
     let offset = pagination.offset();
@@ -59,15 +61,20 @@ pub async fn list_operators(
     Ok(Json(Paginated::new(operators, total, limit, offset)))
 }
 
-/// Get an operator with user details by user_id
+/// Get an operator by user_id
 pub async fn get_operator(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
-) -> Result<Json<OperatorWithUser>> {
+) -> Result<Json<User>> {
     let conn = state.db.get()?;
-    let operator = queries::get_operator_with_user_by_user_id(&conn, &user_id)?
-        .or_not_found(msg::NOT_OPERATOR)?;
-    Ok(Json(operator))
+    let user = queries::get_user_by_id(&conn, &user_id)?
+        .or_not_found(msg::USER_NOT_FOUND)?;
+
+    if user.operator_role.is_none() {
+        return Err(AppError::NotFound(msg::NOT_OPERATOR.into()));
+    }
+
+    Ok(Json(user))
 }
 
 pub async fn update_operator(
@@ -76,7 +83,7 @@ pub async fn update_operator(
     headers: HeaderMap,
     Path(user_id): Path<String>,
     Json(input): Json<UpdateOperator>,
-) -> Result<Json<OperatorWithUser>> {
+) -> Result<Json<User>> {
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
@@ -85,15 +92,23 @@ pub async fn update_operator(
         return Err(AppError::BadRequest(msg::CANNOT_CHANGE_OWN_ROLE.into()));
     }
 
-    let existing = queries::get_operator_with_user_by_user_id(&conn, &user_id)?
-        .or_not_found(msg::NOT_OPERATOR)?;
+    let existing = queries::get_user_by_id(&conn, &user_id)?
+        .or_not_found(msg::USER_NOT_FOUND)?;
 
-    queries::update_operator(&conn, &existing.id, &input)?;
+    if existing.operator_role.is_none() {
+        return Err(AppError::NotFound(msg::NOT_OPERATOR.into()));
+    }
+
+    let updated_user = if let Some(role) = input.role {
+        queries::update_operator_role(&conn, &user_id, role)?
+    } else {
+        existing.clone()
+    };
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.user.id))
         .action(AuditAction::UpdateOperator)
-        .resource("operator", &existing.id)
+        .resource("operator", &user_id)
         .details(&serde_json::json!({ "role": input.role }))
         .names(
             &ctx.audit_names()
@@ -102,10 +117,7 @@ pub async fn update_operator(
         .auth_method(&ctx.auth_method)
         .save()?;
 
-    let operator = queries::get_operator_with_user_by_user_id(&conn, &user_id)?
-        .or_not_found(msg::NOT_OPERATOR)?;
-
-    Ok(Json(operator))
+    Ok(Json(updated_user))
 }
 
 pub async fn delete_operator(
@@ -122,15 +134,19 @@ pub async fn delete_operator(
         return Err(AppError::BadRequest(msg::CANNOT_DELETE_SELF.into()));
     }
 
-    let existing = queries::get_operator_with_user_by_user_id(&conn, &user_id)?
-        .or_not_found(msg::NOT_OPERATOR)?;
+    let existing = queries::get_user_by_id(&conn, &user_id)?
+        .or_not_found(msg::USER_NOT_FOUND)?;
 
-    queries::soft_delete_operator(&conn, &existing.id)?;
+    if existing.operator_role.is_none() {
+        return Err(AppError::NotFound(msg::NOT_OPERATOR.into()));
+    }
+
+    queries::revoke_operator_role(&conn, &user_id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.user.id))
         .action(AuditAction::DeleteOperator)
-        .resource("operator", &existing.id)
+        .resource("operator", &user_id)
         .details(&serde_json::json!({
             "user_id": user_id,
             "email": existing.email

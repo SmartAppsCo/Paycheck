@@ -82,7 +82,7 @@ async fn view_role_cannot_access_operator_list() {
     let (app, state) = operator_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _view_op, view_key) =
+    let (_user, view_key) =
         create_test_operator(&conn, "view@test.com", OperatorRole::View);
 
     let response = app
@@ -109,7 +109,7 @@ async fn admin_role_cannot_access_operator_list() {
     let (app, state) = operator_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _admin_op, admin_key) =
+    let (_user, admin_key) =
         create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
 
     let response = app
@@ -136,7 +136,7 @@ async fn owner_role_can_access_operator_list() {
     let (app, state) = operator_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _owner_op, owner_key) =
+    let (_user, owner_key) =
         create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
 
     let response = app
@@ -163,7 +163,7 @@ async fn admin_cannot_create_operator() {
     let (app, state) = operator_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _admin_op, admin_key) =
+    let (_user, admin_key) =
         create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
 
     // Create a user to add as operator
@@ -197,7 +197,7 @@ async fn owner_can_create_operator() {
     let (app, state) = operator_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _owner_op, owner_key) =
+    let (_user, owner_key) =
         create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
 
     // Create a user to add as operator
@@ -235,7 +235,7 @@ async fn view_role_cannot_list_organizations() {
     let (app, state) = operator_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _view_op, view_key) =
+    let (_user, view_key) =
         create_test_operator(&conn, "view@test.com", OperatorRole::View);
 
     let response = app
@@ -262,7 +262,7 @@ async fn admin_role_can_list_organizations() {
     let (app, state) = operator_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _admin_op, admin_key) =
+    let (_user, admin_key) =
         create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
 
     let response = app
@@ -289,7 +289,7 @@ async fn owner_role_can_list_organizations() {
     let (app, state) = operator_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _owner_op, owner_key) =
+    let (_user, owner_key) =
         create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
 
     let response = app
@@ -316,7 +316,7 @@ async fn view_cannot_create_organization() {
     let (app, state) = operator_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _view_op, view_key) =
+    let (_user, view_key) =
         create_test_operator(&conn, "view@test.com", OperatorRole::View);
 
     let response = app
@@ -344,7 +344,7 @@ async fn admin_can_create_organization() {
     let (app, state) = operator_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _admin_op, admin_key) =
+    let (_user, admin_key) =
         create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
 
     let response = app
@@ -376,7 +376,7 @@ async fn view_role_can_access_audit_logs() {
     let (app, state) = operator_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _view_op, view_key) =
+    let (_user, view_key) =
         create_test_operator(&conn, "view@test.com", OperatorRole::View);
 
     let response = app
@@ -403,7 +403,7 @@ async fn admin_role_can_access_audit_logs() {
     let (app, state) = operator_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _admin_op, admin_key) =
+    let (_user, admin_key) =
         create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
 
     let response = app

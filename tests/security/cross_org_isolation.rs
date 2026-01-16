@@ -945,7 +945,7 @@ mod operator_isolation {
         let conn = state.db.get().unwrap();
 
         // Create an admin operator
-        let (_op_user, _operator, operator_key) =
+        let (_op_user, operator_key) =
             create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
         // Create two orgs with different projects
@@ -1032,7 +1032,7 @@ mod operator_isolation {
         let conn = state.db.get().unwrap();
 
         // Create a view-only operator
-        let (_op_user, _operator, operator_key) =
+        let (_op_user, operator_key) =
             create_test_operator(&conn, "viewer@platform.com", OperatorRole::View);
 
         let org = create_test_org(&conn, "Test Org");
@@ -1072,9 +1072,9 @@ mod api_key_visibility_isolation {
         let conn = state.db.get().unwrap();
 
         // Create two users with API keys
-        let (user_a, _op_a, key_a) =
+        let (user_a, key_a) =
             create_test_operator(&conn, "usera@platform.com", OperatorRole::Admin);
-        let (_user_b, _op_b, _key_b) =
+        let (_user_b, _key_b) =
             create_test_operator(&conn, "userb@platform.com", OperatorRole::Admin);
 
         // Create additional API keys for both users with distinctive names
@@ -1132,11 +1132,11 @@ mod api_key_visibility_isolation {
         let conn = state.db.get().unwrap();
 
         // Create admin operator (user A)
-        let (_user_a, _op_a, key_a) =
+        let (_user_a, key_a) =
             create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
         // Create another user (user B) with an API key
-        let (user_b, _op_b, _key_b) =
+        let (user_b, _key_b) =
             create_test_operator(&conn, "userb@platform.com", OperatorRole::View);
 
         // Admin tries to view user B's API keys

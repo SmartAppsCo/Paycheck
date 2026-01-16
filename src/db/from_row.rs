@@ -54,12 +54,7 @@ pub fn query_all<T: FromRow>(
 // ============ SQL SELECT Constants ============
 
 pub const USER_COLS: &str =
-    "id, email, name, created_at, updated_at, deleted_at, deleted_cascade_depth";
-
-pub const OPERATOR_COLS: &str =
-    "id, user_id, role, created_at, updated_at, deleted_at, deleted_cascade_depth";
-
-pub const OPERATOR_WITH_USER_COLS: &str = "o.id, o.user_id, u.email, u.name, o.role, o.created_at, o.updated_at, o.deleted_at, o.deleted_cascade_depth";
+    "id, email, name, operator_role, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
 pub const ORGANIZATION_COLS: &str = "id, name, stripe_config, ls_config, resend_api_key, payment_provider, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
@@ -95,44 +90,19 @@ pub const ACTIVATION_CODE_COLS: &str = "code_hash, license_id, expires_at, used,
 
 impl FromRow for User {
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        // operator_role is optional - parse it if present
+        let operator_role: Option<OperatorRole> = row
+            .get::<_, Option<String>>(3)?
+            .and_then(|s| s.parse().ok());
         Ok(User {
             id: row.get(0)?,
             email: row.get(1)?,
             name: row.get(2)?,
-            created_at: row.get(3)?,
-            updated_at: row.get(4)?,
-            deleted_at: row.get(5)?,
-            deleted_cascade_depth: row.get(6)?,
-        })
-    }
-}
-
-impl FromRow for Operator {
-    fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        Ok(Operator {
-            id: row.get(0)?,
-            user_id: row.get(1)?,
-            role: parse_enum(row, 2, "role")?,
-            created_at: row.get(3)?,
-            updated_at: row.get(4)?,
-            deleted_at: row.get(5)?,
-            deleted_cascade_depth: row.get(6)?,
-        })
-    }
-}
-
-impl FromRow for OperatorWithUser {
-    fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        Ok(OperatorWithUser {
-            id: row.get(0)?,
-            user_id: row.get(1)?,
-            email: row.get(2)?,
-            name: row.get(3)?,
-            role: parse_enum(row, 4, "role")?,
-            created_at: row.get(5)?,
-            updated_at: row.get(6)?,
-            deleted_at: row.get(7)?,
-            deleted_cascade_depth: row.get(8)?,
+            operator_role,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+            deleted_at: row.get(6)?,
+            deleted_cascade_depth: row.get(7)?,
         })
     }
 }

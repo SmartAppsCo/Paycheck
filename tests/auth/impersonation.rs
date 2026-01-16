@@ -6,7 +6,7 @@ async fn admin_operator_can_impersonate_org_member() {
     let conn = state.db.get().unwrap();
 
     // Create an operator with admin role
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org and member
@@ -40,7 +40,7 @@ async fn owner_operator_can_impersonate_org_member() {
     let (app, state) = org_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "owner@platform.com", OperatorRole::Owner);
 
     let org = create_test_org(&conn, "Test Org");
@@ -72,7 +72,7 @@ async fn view_operator_cannot_impersonate() {
     let (app, state) = org_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "view@platform.com", OperatorRole::View);
 
     let org = create_test_org(&conn, "Test Org");
@@ -104,7 +104,7 @@ async fn operator_can_access_org_endpoints_directly() {
     let (app, state) = org_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     let org = create_test_org(&conn, "Test Org");
@@ -138,7 +138,7 @@ async fn view_operator_cannot_access_org_endpoints_directly() {
     let conn = state.db.get().unwrap();
 
     // View-only operator should NOT be able to access org endpoints
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "viewer@platform.com", OperatorRole::View);
 
     let org = create_test_org(&conn, "Test Org");
@@ -167,7 +167,7 @@ async fn cannot_impersonate_member_from_different_org() {
     let (app, state) = org_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     let org1 = create_test_org(&conn, "Org 1");
@@ -204,7 +204,7 @@ async fn impersonation_respects_member_permissions() {
     let (app, state) = org_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     let org = create_test_org(&conn, "Test Org");
@@ -246,7 +246,7 @@ async fn impersonating_nonexistent_member_returns_not_found() {
     let (app, state) = org_app();
     let conn = state.db.get().unwrap();
 
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     let org = create_test_org(&conn, "Test Org");
@@ -279,9 +279,9 @@ async fn operator_cannot_impersonate_another_operator() {
     let conn = state.db.get().unwrap();
 
     // Create two operators - one admin and one owner
-    let (_user1, target_operator, _target_key) =
+    let (target_user, _target_key) =
         create_test_operator(&conn, "owner@platform.com", OperatorRole::Owner);
-    let (_user2, _admin_operator, admin_key) =
+    let (_user2, admin_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Admin tries to access owner-only endpoint by "impersonating" the owner
@@ -292,7 +292,7 @@ async fn operator_cannot_impersonate_another_operator() {
                 .method("GET")
                 .uri("/operators")
                 .header("Authorization", format!("Bearer {}", admin_key))
-                .header("X-On-Behalf-Of", &target_operator.id)
+                .header("X-On-Behalf-Of", &target_user.id)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -319,7 +319,7 @@ async fn test_operator_cannot_impersonate_deleted_member() {
     let conn = state.db.get().unwrap();
 
     // Create an admin operator
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org and member
@@ -361,7 +361,7 @@ async fn test_operator_can_impersonate_self_as_org_member() {
     let conn = state.db.get().unwrap();
 
     // Create an admin operator
-    let (op_user, _operator, operator_key) =
+    let (op_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org and add the operator as a member
@@ -402,7 +402,7 @@ async fn test_operator_cannot_impersonate_user_not_in_any_org() {
     let conn = state.db.get().unwrap();
 
     // Create an admin operator
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create a user with no org memberships
@@ -440,7 +440,7 @@ async fn test_impersonation_header_case_insensitive() {
     let conn = state.db.get().unwrap();
 
     // Create an admin operator
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org and member
@@ -477,7 +477,7 @@ async fn test_impersonation_with_invalid_user_id_format() {
     let conn = state.db.get().unwrap();
 
     // Create an admin operator
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org
@@ -516,7 +516,7 @@ async fn test_impersonation_respects_target_member_role() {
     let conn = state.db.get().unwrap();
 
     // Create an admin operator
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org with a member-role user (not owner)
@@ -562,7 +562,7 @@ async fn test_operator_can_impersonate_as_owner() {
     let conn = state.db.get().unwrap();
 
     // Create an admin operator
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org with an owner
@@ -613,7 +613,7 @@ async fn test_impersonation_with_scoped_api_key_bypasses_scope() {
     let conn = state.db.get().unwrap();
 
     // Create an admin operator (with default full-access key)
-    let (op_user, _operator, _full_key) =
+    let (op_user, _full_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create two orgs
@@ -687,7 +687,7 @@ async fn test_scoped_api_key_restricts_synthetic_access() {
     let conn = state.db.get().unwrap();
 
     // Create an admin operator
-    let (op_user, _operator, _full_key) =
+    let (op_user, _full_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create two orgs
@@ -753,7 +753,7 @@ async fn test_cannot_impersonate_member_then_access_different_org() {
     let conn = state.db.get().unwrap();
 
     // Create an admin operator
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create two orgs
@@ -794,7 +794,7 @@ async fn test_impersonation_requires_member_in_requested_org() {
     let conn = state.db.get().unwrap();
 
     // Create an admin operator
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create org_a with the member
@@ -839,7 +839,7 @@ async fn test_synthetic_access_blocked_when_impersonation_header_present() {
     let conn = state.db.get().unwrap();
 
     // Create an admin operator (would normally get synthetic access)
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org
@@ -879,7 +879,7 @@ async fn test_view_operator_no_synthetic_access() {
     let conn = state.db.get().unwrap();
 
     // Create a view-only operator
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "viewer@platform.com", OperatorRole::View);
 
     // Create an org
@@ -913,7 +913,7 @@ async fn test_synthetic_access_grants_owner_permissions() {
     let conn = state.db.get().unwrap();
 
     // Create an admin operator (NOT a member of any org)
-    let (_user, _operator, operator_key) =
+    let (_user, operator_key) =
         create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org (operator is NOT a member)

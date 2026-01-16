@@ -484,7 +484,7 @@ mod user_enumeration_prevention {
         let conn = state.db.get().unwrap();
 
         // Create an admin operator
-        let (_, _, api_key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+        let (_, api_key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
 
         // Create a real user
         let _real_user = create_test_user(&conn, "real@example.com", "Real User");

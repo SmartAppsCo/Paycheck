@@ -7,10 +7,12 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         -- Users (identity - source of truth for name/email)
         -- Soft delete: deleted_at = timestamp when deleted, NULL = active
         -- deleted_cascade_depth: 0 = directly deleted, >0 = cascaded from parent
+        -- operator_role: NULL = not an operator, otherwise 'owner'/'admin'/'view'
         CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,
             email TEXT NOT NULL UNIQUE,
             name TEXT NOT NULL,
+            operator_role TEXT CHECK (operator_role IS NULL OR operator_role IN ('owner', 'admin', 'view')),
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             deleted_at INTEGER,
@@ -18,19 +20,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
         CREATE INDEX IF NOT EXISTS idx_users_active ON users(id) WHERE deleted_at IS NULL;
-
-        -- Operators (Paycheck ops team - references users for identity)
-        CREATE TABLE IF NOT EXISTS operators (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-            role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'view')),
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            deleted_at INTEGER,
-            deleted_cascade_depth INTEGER
-        );
-        CREATE INDEX IF NOT EXISTS idx_operators_user ON operators(user_id);
-        CREATE INDEX IF NOT EXISTS idx_operators_active ON operators(id) WHERE deleted_at IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_users_operators ON users(id) WHERE operator_role IS NOT NULL AND deleted_at IS NULL;
 
         -- API keys (unified, tied to user identity)
         CREATE TABLE IF NOT EXISTS api_keys (

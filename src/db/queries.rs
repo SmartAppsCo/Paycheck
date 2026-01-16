@@ -8,9 +8,9 @@ use crate::models::*;
 
 use super::from_row::{
     ACTIVATION_CODE_COLS, API_KEY_COLS, API_KEY_SCOPE_COLS, DEVICE_COLS, LICENSE_COLS,
-    OPERATOR_COLS, OPERATOR_WITH_USER_COLS, ORG_MEMBER_COLS, ORG_MEMBER_WITH_USER_COLS,
-    ORGANIZATION_COLS, PAYMENT_CONFIG_COLS, PAYMENT_SESSION_COLS, PRODUCT_COLS, PROJECT_COLS,
-    PROJECT_MEMBER_COLS, USER_COLS, query_all, query_one,
+    ORG_MEMBER_COLS, ORG_MEMBER_WITH_USER_COLS, ORGANIZATION_COLS, PAYMENT_CONFIG_COLS,
+    PAYMENT_SESSION_COLS, PRODUCT_COLS, PROJECT_COLS, PROJECT_MEMBER_COLS, USER_COLS, query_all,
+    query_one,
 };
 
 fn now() -> i64 {
@@ -105,6 +105,7 @@ pub fn create_user(conn: &Connection, input: &CreateUser) -> Result<User> {
         id,
         email,
         name: input.name.clone(),
+        operator_role: None,
         created_at: now,
         updated_at: now,
         deleted_at: None,
@@ -187,7 +188,7 @@ pub fn delete_user(conn: &Connection, id: &str) -> Result<bool> {
     Ok(deleted > 0)
 }
 
-/// Soft delete a user and cascade to operators and org_members.
+/// Soft delete a user and cascade to org_members.
 /// Returns true if the user was found and soft deleted.
 pub fn soft_delete_user(conn: &Connection, id: &str) -> Result<bool> {
     use super::soft_delete::{cascade_delete_direct, soft_delete_entity};
@@ -197,9 +198,8 @@ pub fn soft_delete_user(conn: &Connection, id: &str) -> Result<bool> {
         return Ok(false);
     }
 
-    // Cascade to operators and org_members (depth 1)
+    // Cascade to org_members (depth 1)
     // Note: org_members cascade will further cascade to project_members
-    cascade_delete_direct(conn, "operators", "user_id", id, result.deleted_at, 1)?;
     cascade_delete_direct(conn, "org_members", "user_id", id, result.deleted_at, 1)?;
     // Cascade to project_members (depth 2 - via org_members)
     conn.execute(
@@ -237,8 +237,7 @@ pub fn restore_user(conn: &Connection, id: &str, force: bool) -> Result<bool> {
 
     let deleted_at = user.deleted_at.unwrap();
 
-    // Restore cascaded children first (operators, org_members)
-    restore_cascaded_direct(conn, "operators", "user_id", id, deleted_at)?;
+    // Restore cascaded children (org_members)
     restore_cascaded_direct(conn, "org_members", "user_id", id, deleted_at)?;
 
     // Restore the user
@@ -259,13 +258,6 @@ pub fn get_user_with_roles(conn: &Connection, id: &str) -> Result<Option<UserWit
     let Some(user) = user else {
         return Ok(None);
     };
-
-    // Get operator role if any
-    let operator: Option<Operator> = query_one(
-        conn,
-        &format!("SELECT {} FROM operators WHERE user_id = ?1", OPERATOR_COLS),
-        &[&id],
-    )?;
 
     // Get org memberships with org names
     let memberships: Vec<(String, String, String, OrgMemberRole)> = {
@@ -293,10 +285,7 @@ pub fn get_user_with_roles(conn: &Connection, id: &str) -> Result<Option<UserWit
         name: user.name,
         created_at: user.created_at,
         updated_at: user.updated_at,
-        operator: operator.map(|o| UserOperatorRole {
-            id: o.id,
-            role: o.role,
-        }),
+        operator_role: user.operator_role,
         memberships: memberships
             .into_iter()
             .map(|(id, org_id, org_name, role)| UserOrgMembership {
@@ -336,16 +325,9 @@ pub fn list_users_with_roles_paginated(
         params![limit, offset],
     )?;
 
-    // For each user, fetch their roles
+    // For each user, fetch their org memberships
     let mut results = Vec::with_capacity(users.len());
     for user in users {
-        // Get operator role if any
-        let operator: Option<Operator> = query_one(
-            conn,
-            &format!("SELECT {} FROM operators WHERE user_id = ?1", OPERATOR_COLS),
-            &[&user.id],
-        )?;
-
         // Get org memberships with org names
         let memberships: Vec<(String, String, String, OrgMemberRole)> = {
             let mut stmt = conn.prepare(
@@ -372,10 +354,7 @@ pub fn list_users_with_roles_paginated(
             name: user.name,
             created_at: user.created_at,
             updated_at: user.updated_at,
-            operator: operator.map(|o| UserOperatorRole {
-                id: o.id,
-                role: o.role,
-            }),
+            operator_role: user.operator_role,
             memberships: memberships
                 .into_iter()
                 .map(|(id, org_id, org_name, role)| UserOrgMembership {
@@ -393,159 +372,95 @@ pub fn list_users_with_roles_paginated(
 
 // ============ Operators ============
 
-/// Create an operator (user must already exist).
-pub fn create_operator(conn: &Connection, input: &CreateOperator) -> Result<Operator> {
-    let id = gen_id();
-    let now = now();
-
-    conn.execute(
-        "INSERT INTO operators (id, user_id, role, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![&id, &input.user_id, input.role.as_ref(), now, now],
-    )?;
-
-    Ok(Operator {
-        id,
-        user_id: input.user_id.clone(),
-        role: input.role,
-        created_at: now,
-        updated_at: now,
-        deleted_at: None,
-        deleted_cascade_depth: None,
-    })
-}
-
-pub fn get_operator_by_id(conn: &Connection, id: &str) -> Result<Option<Operator>> {
-    query_one(
-        conn,
-        &format!(
-            "SELECT {} FROM operators WHERE id = ?1 AND deleted_at IS NULL",
-            OPERATOR_COLS
-        ),
-        &[&id],
-    )
-}
-
-pub fn get_operator_with_user_by_id(
-    conn: &Connection,
-    id: &str,
-) -> Result<Option<OperatorWithUser>> {
-    query_one(
-        conn,
-        &format!(
-            "SELECT {} FROM operators o JOIN users u ON o.user_id = u.id WHERE o.id = ?1 AND o.deleted_at IS NULL AND u.deleted_at IS NULL",
-            OPERATOR_WITH_USER_COLS
-        ),
-        &[&id],
-    )
-}
-
-pub fn get_operator_by_user_id(conn: &Connection, user_id: &str) -> Result<Option<Operator>> {
-    query_one(
-        conn,
-        &format!(
-            "SELECT {} FROM operators WHERE user_id = ?1 AND deleted_at IS NULL",
-            OPERATOR_COLS
-        ),
-        &[&user_id],
-    )
-}
-
-pub fn get_operator_with_user_by_user_id(
+/// Grant operator role to a user. Returns the updated user.
+pub fn grant_operator_role(
     conn: &Connection,
     user_id: &str,
-) -> Result<Option<OperatorWithUser>> {
-    query_one(
-        conn,
-        &format!(
-            "SELECT {} FROM operators o JOIN users u ON o.user_id = u.id WHERE o.user_id = ?1 AND o.deleted_at IS NULL AND u.deleted_at IS NULL",
-            OPERATOR_WITH_USER_COLS
-        ),
-        &[&user_id],
-    )
+    role: OperatorRole,
+) -> Result<User> {
+    let affected = conn.execute(
+        "UPDATE users SET operator_role = ?1, updated_at = ?2 WHERE id = ?3 AND deleted_at IS NULL",
+        params![role.as_ref(), now(), user_id],
+    )?;
+
+    if affected == 0 {
+        return Err(AppError::NotFound("User not found".into()));
+    }
+
+    get_user_by_id(conn, user_id)?
+        .ok_or_else(|| AppError::NotFound("User not found".into()))
 }
 
-pub fn list_operators(conn: &Connection) -> Result<Vec<OperatorWithUser>> {
+/// Revoke operator role from a user. Returns true if the user was found.
+pub fn revoke_operator_role(conn: &Connection, user_id: &str) -> Result<bool> {
+    let affected = conn.execute(
+        "UPDATE users SET operator_role = NULL, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+        params![now(), user_id],
+    )?;
+    Ok(affected > 0)
+}
+
+/// Update a user's operator role. Returns the updated user.
+pub fn update_operator_role(
+    conn: &Connection,
+    user_id: &str,
+    role: OperatorRole,
+) -> Result<User> {
+    let affected = conn.execute(
+        "UPDATE users SET operator_role = ?1, updated_at = ?2 WHERE id = ?3 AND operator_role IS NOT NULL AND deleted_at IS NULL",
+        params![role.as_ref(), now(), user_id],
+    )?;
+
+    if affected == 0 {
+        return Err(AppError::NotFound("Operator not found".into()));
+    }
+
+    get_user_by_id(conn, user_id)?
+        .ok_or_else(|| AppError::NotFound("User not found".into()))
+}
+
+/// List all operators (users with operator_role set).
+pub fn list_operators(conn: &Connection) -> Result<Vec<User>> {
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM operators o JOIN users u ON o.user_id = u.id WHERE o.deleted_at IS NULL AND u.deleted_at IS NULL ORDER BY o.created_at DESC",
-            OPERATOR_WITH_USER_COLS
+            "SELECT {} FROM users WHERE operator_role IN ('owner', 'admin', 'view') AND deleted_at IS NULL ORDER BY created_at DESC",
+            USER_COLS
         ),
         &[],
     )
 }
 
+/// List operators with pagination.
 pub fn list_operators_paginated(
     conn: &Connection,
     limit: i64,
     offset: i64,
-) -> Result<(Vec<OperatorWithUser>, i64)> {
+) -> Result<(Vec<User>, i64)> {
     let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM operators WHERE deleted_at IS NULL",
+        "SELECT COUNT(*) FROM users WHERE operator_role IN ('owner', 'admin', 'view') AND deleted_at IS NULL",
         [],
         |row| row.get(0),
     )?;
     let items = query_all(
         conn,
         &format!(
-            "SELECT {} FROM operators o JOIN users u ON o.user_id = u.id WHERE o.deleted_at IS NULL AND u.deleted_at IS NULL ORDER BY o.created_at DESC LIMIT ?1 OFFSET ?2",
-            OPERATOR_WITH_USER_COLS
+            "SELECT {} FROM users WHERE operator_role IN ('owner', 'admin', 'view') AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+            USER_COLS
         ),
         params![limit, offset],
     )?;
     Ok((items, total))
 }
 
-pub fn update_operator(conn: &Connection, id: &str, input: &UpdateOperator) -> Result<()> {
-    UpdateBuilder::new("operators", id)
-        .with_updated_at()
-        .set_opt("role", input.role.map(|r| r.as_ref().to_string()))
-        .execute(conn)?;
-    Ok(())
-}
-
-pub fn delete_operator(conn: &Connection, id: &str) -> Result<bool> {
-    let deleted = conn.execute("DELETE FROM operators WHERE id = ?1", params![id])?;
-    Ok(deleted > 0)
-}
-
-/// Soft delete an operator. No cascade needed (leaf entity).
-pub fn soft_delete_operator(conn: &Connection, id: &str) -> Result<bool> {
-    use super::soft_delete::soft_delete_entity;
-    Ok(soft_delete_entity(conn, "operators", id)?.deleted)
-}
-
-/// Get a soft-deleted operator by ID (for restore operations).
-pub fn get_deleted_operator_by_id(conn: &Connection, id: &str) -> Result<Option<Operator>> {
-    query_one(
-        conn,
-        &format!(
-            "SELECT {} FROM operators WHERE id = ?1 AND deleted_at IS NOT NULL",
-            OPERATOR_COLS
-        ),
-        &[&id],
-    )
-}
-
-/// Restore a soft-deleted operator.
-/// Returns Err if depth > 0 and force=false (was cascaded from user delete).
-pub fn restore_operator(conn: &Connection, id: &str, force: bool) -> Result<bool> {
-    use super::soft_delete::{check_restore_allowed, restore_entity};
-
-    let Some(operator) = get_deleted_operator_by_id(conn, id)? else {
-        return Ok(false);
-    };
-
-    check_restore_allowed(operator.deleted_cascade_depth, force, "Operator")?;
-    restore_entity(conn, "operators", id)?;
-
-    Ok(true)
-}
-
+/// Count operators.
 pub fn count_operators(conn: &Connection) -> Result<i64> {
-    conn.query_row("SELECT COUNT(*) FROM operators", [], |row| row.get(0))
-        .map_err(Into::into)
+    conn.query_row(
+        "SELECT COUNT(*) FROM users WHERE operator_role IN ('owner', 'admin', 'view') AND deleted_at IS NULL",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
 }
 
 // ============ API Keys (Unified) ============
@@ -625,7 +540,7 @@ pub fn create_api_key(
 
             let is_admin_operator: bool = conn
                 .query_row(
-                    "SELECT 1 FROM operators WHERE user_id = ?1 AND role IN ('admin', 'owner') AND deleted_at IS NULL",
+                    "SELECT 1 FROM users WHERE id = ?1 AND operator_role IN ('admin', 'owner') AND deleted_at IS NULL",
                     params![user_id],
                     |_| Ok(true),
                 )
@@ -1727,10 +1642,9 @@ pub fn get_org_modifiers(conn: &Connection, org_id: &str) -> Result<Vec<OrgModif
          AND m.deleted_at IS NULL AND u.deleted_at IS NULL
          UNION
          SELECT u.id, u.email, u.name, 'operator' as access_type
-         FROM operators o
-         JOIN users u ON o.user_id = u.id
-         WHERE o.role IN ('owner', 'admin')
-         AND o.deleted_at IS NULL AND u.deleted_at IS NULL
+         FROM users u
+         WHERE u.operator_role IN ('owner', 'admin')
+         AND u.deleted_at IS NULL
          ORDER BY access_type, email",
     )?;
 
@@ -1767,8 +1681,8 @@ pub fn can_user_modify_org(conn: &Connection, user_id: &str, org_id: &str) -> Re
 
     // Check if user is an admin+ operator
     let operator_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM operators
-         WHERE user_id = ?1 AND role IN ('owner', 'admin') AND deleted_at IS NULL",
+        "SELECT COUNT(*) FROM users
+         WHERE id = ?1 AND operator_role IN ('owner', 'admin') AND deleted_at IS NULL",
         params![user_id],
         |row| row.get(0),
     )?;
@@ -3495,7 +3409,6 @@ pub fn purge_old_public_audit_logs(conn: &Connection, retention_days: i64) -> Re
 #[derive(Debug, Default)]
 pub struct PurgeResult {
     pub users: usize,
-    pub operators: usize,
     pub organizations: usize,
     pub org_members: usize,
     pub projects: usize,
@@ -3506,7 +3419,6 @@ pub struct PurgeResult {
 impl PurgeResult {
     pub fn total(&self) -> usize {
         self.users
-            + self.operators
             + self.organizations
             + self.org_members
             + self.projects
@@ -3533,7 +3445,6 @@ pub fn purge_soft_deleted_records(conn: &Connection, retention_days: i64) -> Res
         projects: purge_table(conn, "projects", cutoff)?,
         org_members: purge_table(conn, "org_members", cutoff)?,
         organizations: purge_table(conn, "organizations", cutoff)?,
-        operators: purge_table(conn, "operators", cutoff)?,
         users: purge_table(conn, "users", cutoff)?,
     })
 }

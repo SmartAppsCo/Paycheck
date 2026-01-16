@@ -13,8 +13,8 @@ use paycheck::email::EmailService;
 use paycheck::handlers;
 use paycheck::jwt::{self, JwksCache};
 use paycheck::models::{
-    self, ActorType, AuditAction, AuditLogNames, CreateOperator, CreateOrgMember,
-    CreatePaymentConfig, CreateProduct, CreateProject, CreateUser, OperatorRole, OrgMemberRole,
+    self, ActorType, AuditAction, AuditLogNames, CreateOrgMember, CreatePaymentConfig,
+    CreateProduct, CreateProject, CreateUser, OperatorRole, OrgMemberRole,
 };
 use paycheck::rate_limit::ActivationRateLimiter;
 
@@ -69,15 +69,9 @@ fn bootstrap_first_operator(state: &AppState, email: &str) {
     )
     .expect("Failed to create bootstrap user");
 
-    // Create operator linked to user
-    let operator = queries::create_operator(
-        &conn,
-        &CreateOperator {
-            user_id: user.id.clone(),
-            role: OperatorRole::Owner,
-        },
-    )
-    .expect("Failed to create bootstrap operator");
+    // Grant operator role to user
+    let user = queries::grant_operator_role(&conn, &user.id, OperatorRole::Owner)
+        .expect("Failed to grant operator role");
 
     // Create API key for the operator's user
     let (_api_key_record, api_key) =
@@ -91,7 +85,7 @@ fn bootstrap_first_operator(state: &AppState, email: &str) {
         None, // user_id
         AuditAction::BootstrapOperator.as_ref(),
         "operator",
-        &operator.id,
+        &user.id,
         Some(&serde_json::json!({
             "email": email,
             "role": "owner",
@@ -135,7 +129,7 @@ fn seed_dev_data(state: &AppState) {
         return;
     }
 
-    // 1. Create operator user and operator
+    // 1. Create operator user and grant operator role
     let operator_user = queries::create_user(
         &conn,
         &CreateUser {
@@ -145,14 +139,8 @@ fn seed_dev_data(state: &AppState) {
     )
     .expect("Failed to create operator user");
 
-    let operator = queries::create_operator(
-        &conn,
-        &CreateOperator {
-            user_id: operator_user.id.clone(),
-            role: OperatorRole::Owner,
-        },
-    )
-    .expect("Failed to create dev operator");
+    let operator_user = queries::grant_operator_role(&conn, &operator_user.id, OperatorRole::Owner)
+        .expect("Failed to grant operator role");
 
     // Create API key for operator
     let (_, operator_api_key) =
@@ -166,7 +154,7 @@ fn seed_dev_data(state: &AppState) {
         None, // user_id
         AuditAction::SeedOperator.as_ref(),
         "operator",
-        &operator.id,
+        &operator_user.id,
         None,
         None,
         None,
@@ -904,11 +892,10 @@ async fn main() {
         match queries::purge_soft_deleted_records(&conn, config.soft_delete_retention_days) {
             Ok(result) if result.total() > 0 => {
                 tracing::info!(
-                    "Purged {} soft-deleted records older than {} days (users: {}, operators: {}, orgs: {}, members: {}, projects: {}, products: {}, licenses: {})",
+                    "Purged {} soft-deleted records older than {} days (users: {}, orgs: {}, members: {}, projects: {}, products: {}, licenses: {})",
                     result.total(),
                     config.soft_delete_retention_days,
                     result.users,
-                    result.operators,
                     result.organizations,
                     result.org_members,
                     result.projects,

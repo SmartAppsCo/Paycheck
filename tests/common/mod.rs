@@ -79,27 +79,20 @@ pub fn create_test_user(conn: &Connection, email: &str, name: &str) -> User {
     queries::create_user(conn, &input).expect("Failed to create test user")
 }
 
-/// Create a test operator with default values (returns User, Operator, and API key)
-pub fn create_test_operator(
-    conn: &Connection,
-    email: &str,
-    role: OperatorRole,
-) -> (User, Operator, String) {
+/// Create a test operator with default values (returns User with operator_role and API key)
+pub fn create_test_operator(conn: &Connection, email: &str, role: OperatorRole) -> (User, String) {
     // Create user first
     let user = create_test_user(conn, email, &format!("Test Operator {}", email));
 
-    // Create operator linked to user
-    let input = CreateOperator {
-        user_id: user.id.clone(),
-        role,
-    };
-    let operator = queries::create_operator(conn, &input).expect("Failed to create test operator");
+    // Grant operator role to user
+    let user = queries::grant_operator_role(conn, &user.id, role)
+        .expect("Failed to grant operator role");
 
     // Create API key for the user
     let (_, api_key) = queries::create_api_key(conn, &user.id, "Default", None, true, None)
         .expect("Failed to create test operator API key");
 
-    (user, operator, api_key)
+    (user, api_key)
 }
 
 /// Create a test organization

@@ -732,7 +732,7 @@ mod admin_cors {
 
         // Create test operator
         let conn = state.db.get().unwrap();
-        let (_user, _operator, api_key) =
+        let (_user, api_key) =
             create_test_operator(&conn, "admin@paycheck.dev", OperatorRole::Admin);
         drop(conn);
 

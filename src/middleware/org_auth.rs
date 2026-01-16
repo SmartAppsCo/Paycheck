@@ -217,24 +217,21 @@ fn try_operator_impersonation(
         None => return Ok(None), // No impersonation header - not an impersonation attempt
     };
 
-    let conn = state
-        .db
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
     // Check if user is an operator with admin+ role
-    let operator = queries::get_operator_by_user_id(&conn, &user.id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let operator = match operator {
-        Some(op) => op,
+    let operator_role = match user.operator_role {
+        Some(role) => role,
         None => return Err(StatusCode::FORBIDDEN), // Has impersonation header but not an operator
     };
 
     // Only admin+ operators can impersonate
-    if !matches!(operator.role, OperatorRole::Owner | OperatorRole::Admin) {
+    if !matches!(operator_role, OperatorRole::Owner | OperatorRole::Admin) {
         return Err(StatusCode::FORBIDDEN);
     }
+
+    let conn = state
+        .db
+        .get()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Load the target org member by user_id and org_id
     let member = queries::get_org_member_with_user_by_user_and_org(&conn, target_user_id, org_id)
@@ -445,22 +442,20 @@ pub async fn org_member_auth(
     }
 
     // Not an org member - check if they're an operator with admin+ role
-    let operator = queries::get_operator_by_user_id(&conn, &user.id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    if let Some(operator) = operator
-        && matches!(operator.role, OperatorRole::Owner | OperatorRole::Admin)
-    {
+    if matches!(
+        user.operator_role,
+        Some(OperatorRole::Owner) | Some(OperatorRole::Admin)
+    ) {
         // Operator with admin+ role gets synthetic owner access
         let synthetic_member = OrgMemberWithUser {
-            id: format!("operator:{}", operator.id),
+            id: format!("operator:{}", user.id),
             user_id: user.id.clone(),
             email: user.email.clone(),
             name: user.name.clone(),
             org_id: org_id.to_string(),
             role: OrgMemberRole::Owner, // Operators get owner-level access
-            created_at: operator.created_at,
-            updated_at: operator.updated_at,
+            created_at: user.created_at,
+            updated_at: user.updated_at,
             deleted_at: None,
             deleted_cascade_depth: None,
         };
@@ -572,28 +567,24 @@ pub async fn org_member_project_auth(
             (member, None, api_key_access)
         } else {
             // Not an org member - check if they're an operator with admin+ role
-            let operator = queries::get_operator_by_user_id(&conn, &user.id)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-            if let Some(operator) = operator {
-                if matches!(operator.role, OperatorRole::Owner | OperatorRole::Admin) {
-                    // Operator with admin+ role gets synthetic owner access
-                    let synthetic_member = OrgMemberWithUser {
-                        id: format!("operator:{}", operator.id),
-                        user_id: user.id.clone(),
-                        email: user.email.clone(),
-                        name: user.name.clone(),
-                        org_id: org_id.to_string(),
-                        role: OrgMemberRole::Owner,
-                        created_at: operator.created_at,
-                        updated_at: operator.updated_at,
-                        deleted_at: None,
-                        deleted_cascade_depth: None,
-                    };
-                    (synthetic_member, None, None) // Operators bypass scope checks
-                } else {
-                    return Err(StatusCode::FORBIDDEN);
-                }
+            if matches!(
+                user.operator_role,
+                Some(OperatorRole::Owner) | Some(OperatorRole::Admin)
+            ) {
+                // Operator with admin+ role gets synthetic owner access
+                let synthetic_member = OrgMemberWithUser {
+                    id: format!("operator:{}", user.id),
+                    user_id: user.id.clone(),
+                    email: user.email.clone(),
+                    name: user.name.clone(),
+                    org_id: org_id.to_string(),
+                    role: OrgMemberRole::Owner,
+                    created_at: user.created_at,
+                    updated_at: user.updated_at,
+                    deleted_at: None,
+                    deleted_cascade_depth: None,
+                };
+                (synthetic_member, None, None) // Operators bypass scope checks
             } else {
                 return Err(StatusCode::FORBIDDEN);
             }

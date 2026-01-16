@@ -1259,7 +1259,7 @@ mod impersonation_logging {
                 create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
 
             // Create operator who will impersonate
-            let (operator_user, _, op_key) =
+            let (operator_user, op_key) =
                 create_test_operator(&conn, "operator@admin.com", OperatorRole::Admin);
 
             // Create a user to add as org member
@@ -1380,7 +1380,7 @@ mod impersonation_logging {
             let org = create_test_org(&conn, "Test Org");
 
             // Create operator with admin role
-            let (_, _, op_key) =
+            let (_, op_key) =
                 create_test_operator(&conn, "operator@admin.com", OperatorRole::Admin);
 
             // Create a user to add as org member

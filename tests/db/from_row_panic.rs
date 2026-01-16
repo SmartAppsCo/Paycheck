@@ -29,18 +29,9 @@ fn setup_test_db_no_check_constraints() -> Connection {
             id TEXT PRIMARY KEY,
             email TEXT NOT NULL UNIQUE,
             name TEXT NOT NULL,
+            operator_role TEXT,  -- No CHECK constraint!
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
-            deleted_at INTEGER,
-            deleted_cascade_depth INTEGER
-        );
-
-        -- Operators WITHOUT CHECK constraint on role
-        CREATE TABLE operators (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL UNIQUE REFERENCES users(id),
-            role TEXT NOT NULL,  -- No CHECK constraint!
-            created_at INTEGER NOT NULL,
             deleted_at INTEGER,
             deleted_cascade_depth INTEGER
         );
@@ -171,30 +162,27 @@ fn setup_test_db_no_check_constraints() -> Connection {
     conn
 }
 
-/// Test that invalid OperatorRole in DB causes proper error (not panic)
+/// Test that invalid OperatorRole in DB is handled gracefully (treated as None, not panic)
+/// Note: operator_role is optional, so invalid values are safely ignored rather than erroring
 #[test]
-fn test_invalid_operator_role_returns_error() {
+fn test_invalid_operator_role_treated_as_none() {
     let conn = setup_test_db_no_check_constraints();
     let now = now();
 
-    // Insert user and operator with INVALID role directly via SQL
+    // Insert user with INVALID operator_role directly via SQL
     conn.execute(
-        "INSERT INTO users (id, email, name, created_at, updated_at) VALUES ('u1', 'test@example.com', 'Test', ?1, ?1)",
+        "INSERT INTO users (id, email, name, operator_role, created_at, updated_at) VALUES ('u1', 'test@example.com', 'Test', 'invalid_role', ?1, ?1)",
         [now],
     ).unwrap();
 
-    conn.execute(
-        "INSERT INTO operators (id, user_id, role, created_at) VALUES ('op1', 'u1', 'invalid_role', ?1)",
-        [now],
-    ).unwrap();
+    // Attempt to read the user - should succeed but treat invalid role as None
+    let result = queries::get_user_by_id(&conn, "u1");
 
-    // Attempt to read the operator - this should return an error, not panic
-    let result = queries::get_operator_by_id(&conn, "op1");
-
-    // After fix: should be Err, not panic
+    // Should not panic, and should treat invalid role as None (not an operator)
+    let user = result.expect("Should not panic on invalid operator_role").expect("User should be found");
     assert!(
-        result.is_err(),
-        "reading operator with invalid role should return error, not panic"
+        user.operator_role.is_none(),
+        "invalid operator_role should be treated as None (not an operator)"
     );
 }
 
@@ -334,63 +322,37 @@ fn test_invalid_device_type_returns_error() {
     );
 }
 
-/// Test that list operations also handle invalid enum values gracefully
+/// Test that list operations handle invalid enum values gracefully
+/// Note: Since operator_role is optional and invalid values are treated as None,
+/// users with invalid operator_role won't appear in operator listings
 #[test]
-fn test_list_operators_with_invalid_role_returns_error() {
+fn test_list_operators_filters_invalid_roles() {
     let conn = setup_test_db_no_check_constraints();
     let now = now();
 
-    // Insert users and operators, one with invalid role
+    // Insert users with operator_role, one with invalid role
     conn.execute(
-        "INSERT INTO users (id, email, name, created_at, updated_at) VALUES ('u1', 'valid@example.com', 'Valid', ?1, ?1)",
+        "INSERT INTO users (id, email, name, operator_role, created_at, updated_at) VALUES ('u1', 'valid@example.com', 'Valid', 'admin', ?1, ?1)",
         [now],
     ).unwrap();
     conn.execute(
-        "INSERT INTO users (id, email, name, created_at, updated_at) VALUES ('u2', 'bad@example.com', 'Bad', ?1, ?1)",
+        "INSERT INTO users (id, email, name, operator_role, created_at, updated_at) VALUES ('u2', 'bad@example.com', 'Bad', 'hacker', ?1, ?1)",
         [now],
     ).unwrap();
-    conn.execute(
-        "INSERT INTO operators (id, user_id, role, created_at) VALUES ('op1', 'u1', 'admin', ?1)",
-        [now],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO operators (id, user_id, role, created_at) VALUES ('op2', 'u2', 'hacker', ?1)",
-        [now],
-    )
-    .unwrap();
 
-    // List should return error when it encounters the bad record
+    // List should succeed - users with invalid roles are filtered out (only valid operators appear)
+    // Note: list_operators queries WHERE operator_role IN ('owner', 'admin', 'view'),
+    // so users with invalid roles like 'hacker' won't be returned
     let result = queries::list_operators(&conn);
-    assert!(
-        result.is_err(),
-        "listing operators with invalid role should return error, not panic"
-    );
+    let operators = result.expect("list_operators should not panic");
+
+    // Only the valid admin should appear
+    assert_eq!(operators.len(), 1, "Only users with valid operator_role should be listed");
+    assert_eq!(operators[0].email, "valid@example.com");
 }
 
-/// Test that OperatorWithUser handles invalid role gracefully
-#[test]
-fn test_operator_with_user_invalid_role_returns_error() {
-    let conn = setup_test_db_no_check_constraints();
-    let now = now();
-
-    // Insert user and operator with invalid role
-    conn.execute(
-        "INSERT INTO users (id, email, name, created_at, updated_at) VALUES ('u1', 'test@example.com', 'Test', ?1, ?1)",
-        [now],
-    ).unwrap();
-    conn.execute(
-        "INSERT INTO operators (id, user_id, role, created_at) VALUES ('op1', 'u1', 'supreme_leader', ?1)",
-        [now],
-    ).unwrap();
-
-    // Get by user_id uses OperatorWithUser
-    let result = queries::get_operator_by_user_id(&conn, "u1");
-    assert!(
-        result.is_err(),
-        "reading OperatorWithUser with invalid role should return error, not panic"
-    );
-}
+// Note: test_operator_with_user_invalid_role_returns_error removed - OperatorWithUser
+// no longer exists; operators are now just users with operator_role set
 
 /// Test that OrgMemberWithUser handles invalid role gracefully
 #[test]

@@ -212,38 +212,8 @@ mod user_cascade {
         );
     }
 
-    /// Delete user -> cascades to operators (if user is operator).
-    #[test]
-    fn test_delete_user_cascades_to_operators() {
-        let conn = setup_test_db();
-        let (user, operator, _api_key) =
-            create_test_operator(&conn, "operator@test.com", OperatorRole::Admin);
-
-        // Soft delete the user
-        queries::soft_delete_user(&conn, &user.id).expect("Soft delete failed");
-
-        // Operator should not be found via normal query
-        let result = queries::get_operator_by_id(&conn, &operator.id).expect("Query failed");
-        assert!(
-            result.is_none(),
-            "Operator record should be excluded from normal queries after parent user is soft deleted"
-        );
-
-        // Operator should be found via deleted query with depth 1
-        let deleted = queries::get_deleted_operator_by_id(&conn, &operator.id)
-            .expect("Query failed")
-            .expect("Deleted operator should be found");
-
-        assert!(
-            deleted.deleted_at.is_some(),
-            "Operator deleted_at timestamp should be set after cascade delete from user"
-        );
-        assert_eq!(
-            deleted.deleted_cascade_depth,
-            Some(1),
-            "Operator cascade depth should be 1 when deleted via user cascade"
-        );
-    }
+    // Note: test_delete_user_cascades_to_operators removed - operators are now just
+    // users with operator_role set, not a separate entity that cascades
 
     /// Delete user -> operator API key stops working.
     #[tokio::test]
@@ -252,7 +222,7 @@ mod user_cascade {
         let conn = state.db.get().unwrap();
 
         // Create operator with API key
-        let (admin_user, _admin_op, admin_key) =
+        let (admin_user, admin_key) =
             create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
 
         // Create another operator to query (so we have something to list)
@@ -702,7 +672,8 @@ mod project_cascade {
 mod restore_cascade {
     use super::*;
 
-    /// Restore user -> restores cascaded operators and org_members.
+    /// Restore user -> restores cascaded org_members.
+    /// Note: Operators are now just users with operator_role, not a separate entity that cascades.
     #[test]
     fn test_restore_user_restores_cascaded_children() {
         let conn = setup_test_db();
@@ -710,25 +681,14 @@ mod restore_cascade {
         let (user, member, _api_key) =
             create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
 
-        // Also make user an operator
-        let operator = {
-            let input = paycheck::models::CreateOperator {
-                user_id: user.id.clone(),
-                role: OperatorRole::View,
-            };
-            queries::create_operator(&conn, &input).expect("Failed to create operator")
-        };
+        // Also grant operator role to user
+        queries::grant_operator_role(&conn, &user.id, OperatorRole::View)
+            .expect("Failed to grant operator role");
 
-        // Soft delete the user (cascades to operator and org_member)
+        // Soft delete the user (cascades to org_member, operator_role stays on user)
         queries::soft_delete_user(&conn, &user.id).expect("Soft delete failed");
 
-        // Verify both are deleted
-        assert!(
-            queries::get_operator_by_id(&conn, &operator.id)
-                .unwrap()
-                .is_none(),
-            "Operator should be excluded from normal queries after user soft delete"
-        );
+        // Verify org_member is deleted
         assert!(
             queries::get_org_member_by_id(&conn, &member.id)
                 .unwrap()
@@ -739,18 +699,21 @@ mod restore_cascade {
         // Restore the user
         queries::restore_user(&conn, &user.id, false).expect("Restore failed");
 
-        // Both should be restored
-        assert!(
-            queries::get_operator_by_id(&conn, &operator.id)
-                .unwrap()
-                .is_some(),
-            "Operator should be restored"
-        );
+        // Org member should be restored
         assert!(
             queries::get_org_member_by_id(&conn, &member.id)
                 .unwrap()
                 .is_some(),
             "Org member should be restored"
+        );
+
+        // User's operator_role should still be set
+        let user = queries::get_user_by_id(&conn, &user.id)
+            .unwrap()
+            .expect("User should exist");
+        assert!(
+            user.operator_role.is_some(),
+            "User's operator_role should remain after restore"
         );
     }
 
@@ -842,39 +805,9 @@ mod restore_cascade {
         );
     }
 
-    /// Force restore of cascade-deleted item works.
-    #[test]
-    fn test_force_restore_cascade_deleted_item() {
-        let conn = setup_test_db();
-        let (user, operator, _api_key) =
-            create_test_operator(&conn, "operator@test.com", OperatorRole::Admin);
-
-        // Soft delete the user (cascades to operator with depth 1)
-        queries::soft_delete_user(&conn, &user.id).expect("Soft delete failed");
-
-        // Restore operator without force should fail (depth > 0)
-        let result = queries::restore_operator(&conn, &operator.id, false);
-        assert!(
-            result.is_err(),
-            "Restore without force should fail for cascade-deleted operator (depth > 0)"
-        );
-
-        // Restore operator with force should succeed
-        let result = queries::restore_operator(&conn, &operator.id, true);
-        assert!(
-            result.is_ok(),
-            "Restore with force=true should succeed even for cascade-deleted items"
-        );
-
-        // Operator should be found again (but user is still deleted)
-        let restored = queries::get_operator_by_id(&conn, &operator.id)
-            .expect("Query failed")
-            .expect("Restored operator should be found");
-        assert!(
-            restored.deleted_at.is_none(),
-            "Restored operator's deleted_at should be cleared"
-        );
-    }
+    // Note: test_force_restore_cascade_deleted_item (for operators) removed -
+    // operators are now just users with operator_role set, not a separate entity that cascades.
+    // Force restore of cascade-deleted items is still tested via org member/project cascades.
 
     /// Restore project -> restores products and licenses.
     #[test]
@@ -1246,7 +1179,7 @@ mod list_query_filtering {
     fn test_deleted_users_excluded_from_list() {
         let conn = setup_test_db();
         create_test_operator(&conn, "active1@example.com", OperatorRole::Admin);
-        let (user_to_delete, _op, _key) =
+        let (user_to_delete, _key) =
             create_test_operator(&conn, "deleted@example.com", OperatorRole::Admin);
         create_test_operator(&conn, "active2@example.com", OperatorRole::Admin);
 
@@ -1427,7 +1360,7 @@ mod list_query_filtering {
     fn test_include_deleted_shows_deleted_users() {
         let conn = setup_test_db();
         create_test_operator(&conn, "active@example.com", OperatorRole::Admin);
-        let (user_to_delete, _op, _key) =
+        let (user_to_delete, _key) =
             create_test_operator(&conn, "deleted@example.com", OperatorRole::Admin);
 
         // Soft delete one user
@@ -1505,22 +1438,14 @@ mod cascade_depth_tracking {
         );
     }
 
-    /// Cascade from user sets depth correctly (operators and org_members at depth 1).
+    /// Cascade from user sets depth correctly (org_members at depth 1).
+    /// Note: Operators are now just users with operator_role, not a separate entity that cascades.
     #[test]
     fn test_user_cascade_depth() {
         let conn = setup_test_db();
         let org = create_test_org(&conn, "Test Org");
         let (user, member, _api_key) =
             create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
-
-        // Also make user an operator
-        let operator = {
-            let input = paycheck::models::CreateOperator {
-                user_id: user.id.clone(),
-                role: OperatorRole::View,
-            };
-            queries::create_operator(&conn, &input).expect("Failed to create operator")
-        };
 
         queries::soft_delete_user(&conn, &user.id).expect("Soft delete failed");
 
@@ -1532,16 +1457,6 @@ mod cascade_depth_tracking {
             deleted_user.deleted_cascade_depth,
             Some(0),
             "Directly deleted user should have cascade depth 0"
-        );
-
-        // Operator at depth 1
-        let deleted_operator = queries::get_deleted_operator_by_id(&conn, &operator.id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            deleted_operator.deleted_cascade_depth,
-            Some(1),
-            "Operator cascade depth should be 1 when deleted via user cascade"
         );
 
         // Org member at depth 1
