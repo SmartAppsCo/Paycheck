@@ -4,6 +4,8 @@
 //! This enables activation on new devices without needing a permanent license key.
 //! If the user has multiple licenses, all codes are sent in a single email.
 
+use std::collections::HashMap;
+
 use axum::extract::State;
 use serde::{Deserialize, Serialize};
 
@@ -88,18 +90,27 @@ pub async fn request_activation_code(
         .and_then(|o| o.decrypt_resend_api_key(&state.master_key).ok())
         .flatten();
 
-    // Create activation codes for all licenses and gather product info
+    // Batch fetch all products for the licenses (avoids N+1 queries)
+    let product_ids: Vec<&str> = active_licenses
+        .iter()
+        .map(|l| l.product_id.as_str())
+        .collect();
+    let products = queries::get_products_by_ids(&conn, &product_ids)?;
+    let product_names: HashMap<&str, &str> = products
+        .iter()
+        .map(|p| (p.id.as_str(), p.name.as_str()))
+        .collect();
+
+    // Create activation codes for all licenses
     let mut license_codes: Vec<LicenseCodeInfo> = Vec::with_capacity(active_licenses.len());
 
     for license in &active_licenses {
-        // Create activation code
         let code =
             queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)?;
 
-        // Get product for product name
-        let product = queries::get_product_by_id(&conn, &license.product_id)?;
-        let product_name = product
-            .map(|p| p.name)
+        let product_name = product_names
+            .get(license.product_id.as_str())
+            .map(|s| s.to_string())
             .unwrap_or_else(|| "Your Product".to_string());
 
         license_codes.push(LicenseCodeInfo {

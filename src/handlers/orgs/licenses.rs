@@ -302,7 +302,7 @@ pub async fn update_license(
     let audit_conn = state.audit.get()?;
 
     // Get the license
-    let license = queries::get_license_by_id(&conn, &path.license_id)?
+    let mut license = queries::get_license_by_id(&conn, &path.license_id)?
         .or_not_found(msg::LICENSE_NOT_FOUND)?;
 
     // Verify license belongs to a product in this project
@@ -320,7 +320,11 @@ pub async fn update_license(
     // Update email hash if provided
     if let Some(ref email) = body.email {
         let new_email_hash = state.email_hasher.hash(email);
+        let old_email_hash = license.email_hash.clone();
         queries::update_license_email_hash(&conn, &license.id, &new_email_hash)?;
+
+        // Apply change in memory to avoid re-fetching
+        license.email_hash = Some(new_email_hash);
 
         // Audit log the email change (log old hash for investigation, not new email for privacy)
         AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
@@ -328,7 +332,7 @@ pub async fn update_license(
             .action(AuditAction::UpdateLicenseEmail)
             .resource("license", &license.id)
             .details(&serde_json::json!({
-                "old_email_hash": license.email_hash,
+                "old_email_hash": old_email_hash,
                 "reason": "email_correction"
             }))
             .org(&path.org_id)
@@ -344,12 +348,8 @@ pub async fn update_license(
         );
     }
 
-    // Fetch the updated license
-    let updated_license = queries::get_license_by_id(&conn, &path.license_id)?
-        .or_not_found(msg::LICENSE_NOT_FOUND)?;
-
     Ok(Json(LicenseWithProduct {
-        license: updated_license,
+        license,
         product_name: product.name,
     }))
 }

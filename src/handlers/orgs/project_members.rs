@@ -123,8 +123,7 @@ pub async fn update_project_member(
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
-    // Fetch member first for audit log (before update)
-    let existing = queries::get_project_member_by_user_and_project(
+    let mut member = queries::get_project_member_by_user_and_project(
         &conn,
         &path.user_id,
         &path.org_id,
@@ -132,31 +131,26 @@ pub async fn update_project_member(
     )?
     .or_not_found(msg::NOT_PROJECT_MEMBER)?;
 
-    queries::update_project_member(&conn, &existing.id, &path.project_id, &input)?
+    let updated = queries::update_project_member(&conn, &member.id, &path.project_id, &input)?
         .or_not_found(msg::NOT_PROJECT_MEMBER)?;
+
+    // Apply known changes to avoid re-fetching
+    member.role = updated.role;
+    member.updated_at = updated.updated_at;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::UpdateProjectMember)
-        .resource("project_member", &existing.id)
+        .resource("project_member", &member.id)
         .details(&serde_json::json!({ "role": input.role }))
         .org(&path.org_id)
         .project(&path.project_id)
         .names(
             &ctx.audit_names()
-                .resource_user(&existing.name, &existing.email),
+                .resource_user(&member.name, &member.email),
         )
         .auth_method(&ctx.auth_method)
         .save()?;
-
-    // Return the updated member with details (enriched with user info)
-    let member = queries::get_project_member_by_user_and_project(
-        &conn,
-        &path.user_id,
-        &path.org_id,
-        &path.project_id,
-    )?
-    .ok_or_else(|| AppError::Internal(msg::MEMBER_NOT_FOUND_AFTER_UPDATE.into()))?;
 
     Ok(Json(member))
 }

@@ -2217,6 +2217,21 @@ pub fn get_product_by_id(conn: &Connection, id: &str) -> Result<Option<Product>>
     )
 }
 
+/// Batch fetch products by IDs. Returns all found products (missing IDs are silently skipped).
+pub fn get_products_by_ids(conn: &Connection, ids: &[&str]) -> Result<Vec<Product>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders: Vec<String> = (1..=ids.len()).map(|i| format!("?{}", i)).collect();
+    let sql = format!(
+        "SELECT {} FROM products WHERE id IN ({}) AND deleted_at IS NULL",
+        PRODUCT_COLS,
+        placeholders.join(", ")
+    );
+    let params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+    query_all(conn, &sql, &params)
+}
+
 pub fn list_products_for_project(conn: &Connection, project_id: &str) -> Result<Vec<Product>> {
     query_all(
         conn,

@@ -107,17 +107,21 @@ pub async fn update_org_member(
         return Err(AppError::BadRequest(msg::CANNOT_CHANGE_OWN_ROLE.into()));
     }
 
-    let existing =
+    let mut member =
         queries::get_org_member_with_user_by_user_and_org(&conn, &path.user_id, &path.org_id)?
             .or_not_found(msg::NOT_ORG_MEMBER)?;
 
-    queries::update_org_member(&conn, &existing.id, &input)?
+    let updated = queries::update_org_member(&conn, &member.id, &input)?
         .or_not_found(msg::NOT_ORG_MEMBER)?;
+
+    // Apply known changes to avoid re-fetching
+    member.role = updated.role;
+    member.updated_at = updated.updated_at;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::UpdateOrgMember)
-        .resource("org_member", &existing.id)
+        .resource("org_member", &member.id)
         .details(&serde_json::json!({
             "role": input.role,
             "impersonator": ctx.impersonator_json()
@@ -125,14 +129,10 @@ pub async fn update_org_member(
         .org(&path.org_id)
         .names(
             &ctx.audit_names()
-                .resource_user(&existing.name, &existing.email),
+                .resource_user(&member.name, &member.email),
         )
         .auth_method(&ctx.auth_method)
         .save()?;
-
-    let member =
-        queries::get_org_member_with_user_by_user_and_org(&conn, &path.user_id, &path.org_id)?
-            .or_not_found(msg::NOT_ORG_MEMBER)?;
 
     Ok(Json(member))
 }
