@@ -101,6 +101,7 @@ pub async fn update_operator(
 
     let updated_user = if let Some(role) = input.role {
         queries::update_operator_role(&conn, &user_id, role)?
+            .ok_or_else(|| AppError::Internal(msg::USER_NOT_FOUND_AFTER_UPDATE.into()))?
     } else {
         existing.clone()
     };

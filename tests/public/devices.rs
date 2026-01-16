@@ -60,17 +60,17 @@ async fn test_deactivate_with_valid_jwt_removes_device() {
     let license_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(future_timestamp(LICENSE_VALID_DAYS)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
         license_id = license.id.clone();
         token = create_test_jwt(&state, &project, &product, &license.id, &device);
@@ -111,8 +111,8 @@ async fn test_deactivate_with_valid_jwt_removes_device() {
     );
 
     // Verify device was actually removed
-    let conn = state.db.get().unwrap();
-    let devices = queries::list_devices_for_license(&conn, &license_id).unwrap();
+    let mut conn = state.db.get().unwrap();
+    let devices = queries::list_devices_for_license(&mut conn, &license_id).unwrap();
     assert_eq!(
         devices.len(),
         0,
@@ -130,17 +130,17 @@ async fn test_deactivate_adds_jti_to_revoked_list() {
     let jti: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(future_timestamp(LICENSE_VALID_DAYS)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
         license_id = license.id.clone();
         jti = device.jti.clone();
@@ -168,9 +168,9 @@ async fn test_deactivate_adds_jti_to_revoked_list() {
     );
 
     // Verify JTI was added to revoked list
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
     assert!(
-        queries::is_jti_revoked(&conn, &jti).unwrap(),
+        queries::is_jti_revoked(&mut conn, &jti).unwrap(),
         "JTI should be added to revoked list to prevent token reuse"
     );
 }
@@ -183,10 +183,10 @@ async fn test_deactivate_returns_remaining_device_count() {
     let token: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -195,9 +195,9 @@ async fn test_deactivate_returns_remaining_device_count() {
         );
 
         // Create multiple devices
-        let device1 = create_test_device(&conn, &license.id, "device-1", DeviceType::Uuid);
-        let _device2 = create_test_device(&conn, &license.id, "device-2", DeviceType::Uuid);
-        let _device3 = create_test_device(&conn, &license.id, "device-3", DeviceType::Uuid);
+        let device1 = create_test_device(&mut conn, &license.id, "device-1", DeviceType::Uuid);
+        let _device2 = create_test_device(&mut conn, &license.id, "device-2", DeviceType::Uuid);
+        let _device3 = create_test_device(&mut conn, &license.id, "device-3", DeviceType::Uuid);
 
         // We'll deactivate device1
         token = create_test_jwt(&state, &project, &product, &license.id, &device1);
@@ -295,17 +295,17 @@ async fn test_deactivate_invalid_signature_returns_error() {
     let master_key = test_master_key();
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(future_timestamp(LICENSE_VALID_DAYS)),
         );
-        let _device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
+        let _device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
     }
 
     let app = public_app(state);
@@ -343,22 +343,22 @@ async fn test_deactivate_device_not_found_returns_error() {
     let token: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(future_timestamp(LICENSE_VALID_DAYS)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
         token = create_test_jwt(&state, &project, &product, &license.id, &device);
 
         // Delete the device before trying to deactivate
-        queries::delete_device(&conn, &device.id).unwrap();
+        queries::delete_device(&mut conn, &device.id).unwrap();
     }
 
     let app = public_app(state);
@@ -390,22 +390,22 @@ async fn test_deactivate_already_revoked_jti_returns_forbidden() {
     let token: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(future_timestamp(LICENSE_VALID_DAYS)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
         token = create_test_jwt(&state, &project, &product, &license.id, &device);
 
         // Pre-revoke the JTI (but keep the device record)
-        queries::add_revoked_jti(&conn, &license.id, &device.jti, Some("test pre-revocation"))
+        queries::add_revoked_jti(&mut conn, &license.id, &device.jti, Some("test pre-revocation"))
             .unwrap();
     }
 
@@ -438,10 +438,10 @@ async fn test_deactivate_machine_type_device() {
     let token: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -449,7 +449,7 @@ async fn test_deactivate_machine_type_device() {
             Some(future_timestamp(LICENSE_VALID_DAYS)),
         );
         // Create a machine-type device
-        let device = create_test_device(&conn, &license.id, "machine-id-hash", DeviceType::Machine);
+        let device = create_test_device(&mut conn, &license.id, "machine-id-hash", DeviceType::Machine);
 
         // Create JWT with machine device type
         let claims = LicenseClaims {

@@ -352,17 +352,17 @@ fn test_renewal_webhook_replay_prevented() {
     use axum::http::StatusCode;
     use paycheck::handlers::webhooks::common::process_renewal;
 
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
 
     // Create test hierarchy
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
     // Create license with short expiration (7 days from now)
     let initial_expiration = now() + (ONE_WEEK * 86400);
-    let license = create_test_license(&conn, &project.id, &product.id, Some(initial_expiration));
+    let license = create_test_license(&mut conn, &project.id, &product.id, Some(initial_expiration));
 
     // Simulate a renewal webhook with a unique event ID
     let event_id = "invoice_12345";
@@ -384,7 +384,7 @@ fn test_renewal_webhook_replay_prevented() {
     );
 
     // Check license was extended (product has ONE_YEAR day license_exp_days)
-    let updated_license = queries::get_license_by_id(&conn, &license.id)
+    let updated_license = queries::get_license_by_id(&mut conn, &license.id)
         .expect("database query for license should succeed")
         .expect("license should exist in database");
     let first_expiration = updated_license
@@ -421,7 +421,7 @@ fn test_renewal_webhook_replay_prevented() {
     );
 
     // Verify license expiration was NOT extended again
-    let final_license = queries::get_license_by_id(&conn, &license.id)
+    let final_license = queries::get_license_by_id(&mut conn, &license.id)
         .expect("database query for license should succeed")
         .expect("license should exist in database");
     let final_expiration = final_license
@@ -439,16 +439,16 @@ fn test_renewal_webhook_replay_prevented() {
 fn test_different_renewal_events_both_processed() {
     use axum::http::StatusCode;
 
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
 
     // Create test hierarchy
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
     let initial_expiration = now() + (ONE_WEEK * 86400);
-    let license = create_test_license(&conn, &project.id, &product.id, Some(initial_expiration));
+    let license = create_test_license(&mut conn, &project.id, &product.id, Some(initial_expiration));
 
     let subscription_id = "sub_test_123";
 
@@ -497,12 +497,12 @@ fn test_checkout_creates_license_and_device() {
     let master_key = test_master_key();
     let email_hasher = test_email_hasher();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
     // Create payment session (no device info - that's at activation time)
-    let session = create_test_payment_session(&conn, &product.id, Some("cust_test"));
+    let session = create_test_payment_session(&mut conn, &product.id, Some("cust_test"));
 
     let checkout_data = CheckoutData {
         session_id: session.id.clone(),
@@ -531,7 +531,7 @@ fn test_checkout_creates_license_and_device() {
     assert_eq!(msg, "OK", "checkout process should return OK message");
 
     // Verify license was created
-    let updated_session = queries::get_payment_session(&conn, &session.id)
+    let updated_session = queries::get_payment_session(&mut conn, &session.id)
         .expect("database query for payment session should succeed")
         .expect("payment session should exist in database");
     assert!(
@@ -545,7 +545,7 @@ fn test_checkout_creates_license_and_device() {
 
     // Verify license has correct metadata
     let license_id = updated_session.license_id.unwrap();
-    let license = queries::get_license_by_id(&conn, &license_id)
+    let license = queries::get_license_by_id(&mut conn, &license_id)
         .expect("database query for license should succeed")
         .expect("license should exist in database");
     assert_eq!(
@@ -566,7 +566,7 @@ fn test_checkout_creates_license_and_device() {
 
     // Device creation is deferred to activation time (/redeem/key)
     // Verify NO device was created during checkout
-    let devices = queries::list_devices_for_license(&conn, &license_id)
+    let devices = queries::list_devices_for_license(&mut conn, &license_id)
         .expect("database query for devices should succeed");
     assert_eq!(
         devices.len(),
@@ -583,11 +583,11 @@ fn test_checkout_concurrent_webhooks_create_only_one_license() {
     let master_key = test_master_key();
     let email_hasher = test_email_hasher();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
-    let session = create_test_payment_session(&conn, &product.id, None);
+    let session = create_test_payment_session(&mut conn, &product.id, None);
 
     let checkout_data = CheckoutData {
         session_id: session.id.clone(),
@@ -636,7 +636,7 @@ fn test_checkout_concurrent_webhooks_create_only_one_license() {
     );
 
     // Verify only one license exists for the session
-    let updated_session = queries::get_payment_session(&conn, &session.id)
+    let updated_session = queries::get_payment_session(&mut conn, &session.id)
         .expect("database query for payment session should succeed")
         .expect("payment session should exist in database");
     let license_id = updated_session
@@ -645,7 +645,7 @@ fn test_checkout_concurrent_webhooks_create_only_one_license() {
 
     // Device creation is deferred to activation time (/redeem/key)
     // Verify NO device was created during checkout
-    let devices = queries::list_devices_for_license(&conn, &license_id)
+    let devices = queries::list_devices_for_license(&mut conn, &license_id)
         .expect("database query for devices should succeed");
     assert_eq!(
         devices.len(),
@@ -662,8 +662,8 @@ fn test_checkout_creates_license_with_product_expirations() {
     let master_key = test_master_key();
     let email_hasher = test_email_hasher();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
     // Create product with specific expirations
     let input = CreateProduct {
@@ -675,10 +675,10 @@ fn test_checkout_creates_license_with_product_expirations() {
         device_limit: 3,
         features: vec![],
     };
-    let product = queries::create_product(&conn, &project.id, &input)
+    let product = queries::create_product(&mut conn, &project.id, &input)
         .expect("product creation should succeed");
 
-    let session = create_test_payment_session(&conn, &product.id, None);
+    let session = create_test_payment_session(&mut conn, &product.id, None);
 
     let checkout_data = CheckoutData {
         session_id: session.id.clone(),
@@ -705,10 +705,10 @@ fn test_checkout_creates_license_with_product_expirations() {
         "checkout process should return OK status"
     );
 
-    let updated_session = queries::get_payment_session(&conn, &session.id)
+    let updated_session = queries::get_payment_session(&mut conn, &session.id)
         .expect("database query for payment session should succeed")
         .expect("payment session should exist in database");
-    let license = queries::get_license_by_id(&conn, &updated_session.license_id.unwrap())
+    let license = queries::get_license_by_id(&mut conn, &updated_session.license_id.unwrap())
         .expect("database query for license should succeed")
         .expect("license should exist in database");
 
@@ -751,8 +751,8 @@ fn test_checkout_perpetual_license() {
     let master_key = test_master_key();
     let email_hasher = test_email_hasher();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
     // Create product with no expiration (perpetual)
     let input = CreateProduct {
@@ -764,10 +764,10 @@ fn test_checkout_perpetual_license() {
         device_limit: 3,
         features: vec![],
     };
-    let product = queries::create_product(&conn, &project.id, &input)
+    let product = queries::create_product(&mut conn, &project.id, &input)
         .expect("product creation should succeed");
 
-    let session = create_test_payment_session(&conn, &product.id, None);
+    let session = create_test_payment_session(&mut conn, &product.id, None);
 
     let checkout_data = CheckoutData {
         session_id: session.id.clone(),
@@ -793,10 +793,10 @@ fn test_checkout_perpetual_license() {
         "checkout process should return OK status for perpetual license"
     );
 
-    let updated_session = queries::get_payment_session(&conn, &session.id)
+    let updated_session = queries::get_payment_session(&mut conn, &session.id)
         .expect("database query for payment session should succeed")
         .expect("payment session should exist in database");
-    let license = queries::get_license_by_id(&conn, &updated_session.license_id.unwrap())
+    let license = queries::get_license_by_id(&mut conn, &updated_session.license_id.unwrap())
         .expect("database query for license should succeed")
         .expect("license should exist in database");
 
@@ -816,16 +816,16 @@ fn test_checkout_perpetual_license() {
 fn test_renewal_extends_license_expiration() {
     use axum::http::StatusCode;
 
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
     // Create license expiring soon
     let initial_exp = now() + (ONE_WEEK * 86400); // 7 days from now
-    let license = create_test_license(&conn, &project.id, &product.id, Some(initial_exp));
+    let license = create_test_license(&mut conn, &project.id, &product.id, Some(initial_exp));
 
     let (status, _) = process_renewal(
         &conn,
@@ -841,7 +841,7 @@ fn test_renewal_extends_license_expiration() {
         "renewal process should return OK status"
     );
 
-    let updated = queries::get_license_by_id(&conn, &license.id)
+    let updated = queries::get_license_by_id(&mut conn, &license.id)
         .expect("database query for license should succeed")
         .expect("license should exist in database");
     let new_exp = updated
@@ -863,12 +863,12 @@ fn test_renewal_extends_license_expiration() {
 fn test_renewal_without_event_id_always_processes() {
     use axum::http::StatusCode;
 
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
     let license = create_test_license(
         &conn,
@@ -897,7 +897,7 @@ fn test_renewal_without_event_id_always_processes() {
     );
 
     // Second call also processes (no replay prevention)
-    let (status2, msg2) = process_renewal(&conn, "stripe", &product, &license.id, "sub_123", None);
+    let (status2, msg2) = process_renewal(&mut conn, "stripe", &product, &license.id, "sub_123", None);
     assert_eq!(
         status2,
         StatusCode::OK,
@@ -915,15 +915,15 @@ fn test_renewal_without_event_id_always_processes() {
 fn test_cancellation_returns_ok_without_modifying_license() {
     use axum::http::StatusCode;
 
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
     let original_exp = now() + (ONE_MONTH * 86400);
-    let license = create_test_license(&conn, &project.id, &product.id, Some(original_exp));
+    let license = create_test_license(&mut conn, &project.id, &product.id, Some(original_exp));
 
     let (status, msg) = process_cancellation("stripe", &license.id, license.expires_at, "sub_123");
     assert_eq!(
@@ -934,7 +934,7 @@ fn test_cancellation_returns_ok_without_modifying_license() {
     assert_eq!(msg, "OK", "cancellation process should return OK message");
 
     // Verify license was NOT modified
-    let unchanged = queries::get_license_by_id(&conn, &license.id)
+    let unchanged = queries::get_license_by_id(&mut conn, &license.id)
         .expect("database query for license should succeed")
         .expect("license should exist in database");
     assert_eq!(
@@ -971,14 +971,14 @@ async fn test_stripe_webhook_checkout_completed_creates_license() {
     let project_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        setup_stripe_config(&conn, &org.id, &master_key);
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        setup_stripe_config(&mut conn, &org.id, &master_key);
 
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
-        let session = create_test_payment_session(&conn, &product.id, None);
+        let session = create_test_payment_session(&mut conn, &product.id, None);
 
         session_id = session.id.clone();
         project_id = project.id.clone();
@@ -1026,8 +1026,8 @@ async fn test_stripe_webhook_checkout_completed_creates_license() {
     );
 
     // Verify license was created
-    let conn = state.db.get().unwrap();
-    let session = queries::get_payment_session(&conn, &session_id)
+    let mut conn = state.db.get().unwrap();
+    let session = queries::get_payment_session(&mut conn, &session_id)
         .expect("database query for payment session should succeed")
         .expect("payment session should exist in database");
     assert!(
@@ -1039,7 +1039,7 @@ async fn test_stripe_webhook_checkout_completed_creates_license() {
         "payment session should have associated license ID after webhook"
     );
 
-    let license = queries::get_license_by_id(&conn, &session.license_id.unwrap())
+    let license = queries::get_license_by_id(&mut conn, &session.license_id.unwrap())
         .expect("database query for license should succeed")
         .expect("license should exist in database");
     assert_eq!(
@@ -1094,12 +1094,12 @@ async fn test_stripe_webhook_invalid_signature_returns_unauthorized() {
     let project_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        setup_stripe_config(&conn, &org.id, &master_key);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let session = create_test_payment_session(&conn, &product.id, None);
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        setup_stripe_config(&mut conn, &org.id, &master_key);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+        let session = create_test_payment_session(&mut conn, &product.id, None);
         session_id = session.id.clone();
         project_id = project.id.clone();
     }
@@ -1154,12 +1154,12 @@ async fn test_stripe_webhook_unpaid_checkout_ignored() {
     let project_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        setup_stripe_config(&conn, &org.id, &master_key);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let session = create_test_payment_session(&conn, &product.id, None);
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        setup_stripe_config(&mut conn, &org.id, &master_key);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+        let session = create_test_payment_session(&mut conn, &product.id, None);
         session_id = session.id.clone();
         project_id = project.id.clone();
     }
@@ -1205,8 +1205,8 @@ async fn test_stripe_webhook_unpaid_checkout_ignored() {
     );
 
     // Session should NOT be completed
-    let conn = state.db.get().unwrap();
-    let session = queries::get_payment_session(&conn, &session_id)
+    let mut conn = state.db.get().unwrap();
+    let session = queries::get_payment_session(&mut conn, &session_id)
         .expect("database query for payment session should succeed")
         .expect("payment session should exist in database");
     assert!(
@@ -1224,11 +1224,11 @@ async fn test_stripe_webhook_invoice_paid_extends_license() {
     let original_exp: i64;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        setup_stripe_config(&conn, &org.id, &master_key);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        setup_stripe_config(&mut conn, &org.id, &master_key);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         // Create license with subscription
         original_exp = now() + (ONE_WEEK * 86400);
@@ -1281,8 +1281,8 @@ async fn test_stripe_webhook_invoice_paid_extends_license() {
     );
 
     // Verify license was extended
-    let conn = state.db.get().unwrap();
-    let license = queries::get_license_by_id(&conn, &license_id)
+    let mut conn = state.db.get().unwrap();
+    let license = queries::get_license_by_id(&mut conn, &license_id)
         .expect("database query for license should succeed")
         .expect("license should exist in database");
     let new_exp = license
@@ -1305,11 +1305,11 @@ async fn test_stripe_webhook_subscription_deleted_returns_ok() {
     let original_exp: i64;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        setup_stripe_config(&conn, &org.id, &master_key);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        setup_stripe_config(&mut conn, &org.id, &master_key);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         original_exp = now() + (ONE_MONTH * 86400);
         let license = create_test_license_with_subscription(
@@ -1360,8 +1360,8 @@ async fn test_stripe_webhook_subscription_deleted_returns_ok() {
     );
 
     // License should be unchanged (expires naturally)
-    let conn = state.db.get().unwrap();
-    let license = queries::get_license_by_id(&conn, &license_id)
+    let mut conn = state.db.get().unwrap();
+    let license = queries::get_license_by_id(&mut conn, &license_id)
         .expect("database query for license should succeed")
         .expect("license should exist in database");
     assert_eq!(
@@ -1381,9 +1381,9 @@ async fn test_stripe_webhook_unknown_event_ignored() {
     let master_key = test_master_key();
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        setup_stripe_config(&conn, &org.id, &master_key);
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        setup_stripe_config(&mut conn, &org.id, &master_key);
     }
 
     let payload = json!({
@@ -1429,14 +1429,14 @@ async fn test_lemonsqueezy_webhook_order_created_creates_license() {
     let project_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        setup_lemonsqueezy_config(&conn, &org.id, &master_key);
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        setup_lemonsqueezy_config(&mut conn, &org.id, &master_key);
 
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
-        let session = create_test_payment_session(&conn, &product.id, None);
+        let session = create_test_payment_session(&mut conn, &product.id, None);
 
         session_id = session.id.clone();
         project_id = project.id.clone();
@@ -1486,8 +1486,8 @@ async fn test_lemonsqueezy_webhook_order_created_creates_license() {
     );
 
     // Verify license was created
-    let conn = state.db.get().unwrap();
-    let session = queries::get_payment_session(&conn, &session_id)
+    let mut conn = state.db.get().unwrap();
+    let session = queries::get_payment_session(&mut conn, &session_id)
         .expect("database query for payment session should succeed")
         .expect("payment session should exist in database");
     assert!(
@@ -1499,7 +1499,7 @@ async fn test_lemonsqueezy_webhook_order_created_creates_license() {
         "payment session should have associated license ID after webhook"
     );
 
-    let license = queries::get_license_by_id(&conn, &session.license_id.unwrap())
+    let license = queries::get_license_by_id(&mut conn, &session.license_id.unwrap())
         .expect("database query for license should succeed")
         .expect("license should exist in database");
     assert_eq!(
@@ -1546,12 +1546,12 @@ async fn test_lemonsqueezy_webhook_invalid_signature_returns_unauthorized() {
     let master_key = test_master_key();
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        setup_lemonsqueezy_config(&conn, &org.id, &master_key);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let session = create_test_payment_session(&conn, &product.id, None);
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        setup_lemonsqueezy_config(&mut conn, &org.id, &master_key);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+        let session = create_test_payment_session(&mut conn, &product.id, None);
 
         // Use session_id and project_id in payload
         let payload = json!({
@@ -1605,11 +1605,11 @@ async fn test_lemonsqueezy_webhook_subscription_payment_extends_license() {
     let original_exp: i64;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        setup_lemonsqueezy_config(&conn, &org.id, &master_key);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        setup_lemonsqueezy_config(&mut conn, &org.id, &master_key);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         original_exp = now() + (ONE_WEEK * 86400);
         let license = create_test_license_with_subscription(
@@ -1661,8 +1661,8 @@ async fn test_lemonsqueezy_webhook_subscription_payment_extends_license() {
     );
 
     // Verify license was extended
-    let conn = state.db.get().unwrap();
-    let license = queries::get_license_by_id(&conn, &license_id)
+    let mut conn = state.db.get().unwrap();
+    let license = queries::get_license_by_id(&mut conn, &license_id)
         .expect("database query for license should succeed")
         .expect("license should exist in database");
     let new_exp = license
@@ -1683,11 +1683,11 @@ async fn test_lemonsqueezy_webhook_subscription_cancelled_returns_ok() {
     let original_exp: i64;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        setup_lemonsqueezy_config(&conn, &org.id, &master_key);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        setup_lemonsqueezy_config(&mut conn, &org.id, &master_key);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         original_exp = now() + (ONE_MONTH * 86400);
         let license = create_test_license_with_subscription(
@@ -1738,8 +1738,8 @@ async fn test_lemonsqueezy_webhook_subscription_cancelled_returns_ok() {
     );
 
     // License should be unchanged
-    let conn = state.db.get().unwrap();
-    let license = queries::get_license_by_id(&conn, &license_id)
+    let mut conn = state.db.get().unwrap();
+    let license = queries::get_license_by_id(&mut conn, &license_id)
         .expect("database query for license should succeed")
         .expect("license should exist in database");
     assert_eq!(
@@ -1758,12 +1758,12 @@ async fn test_webhook_provider_not_configured_returns_ok() {
     let project_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         // NO payment config set!
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let session = create_test_payment_session(&conn, &product.id, None);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+        let session = create_test_payment_session(&mut conn, &product.id, None);
         session_id = session.id.clone();
         project_id = project.id.clone();
     }
@@ -1809,8 +1809,8 @@ async fn test_webhook_provider_not_configured_returns_ok() {
     );
 
     // Session should NOT be completed
-    let conn = state.db.get().unwrap();
-    let session = queries::get_payment_session(&conn, &session_id)
+    let mut conn = state.db.get().unwrap();
+    let session = queries::get_payment_session(&mut conn, &session_id)
         .expect("database query for payment session should succeed")
         .expect("payment session should exist in database");
     assert!(
@@ -1840,12 +1840,12 @@ mod webhook_security {
         let project_id: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            setup_stripe_config(&conn, &org.id, &master_key);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let session = create_test_payment_session(&conn, &product.id, None);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_stripe_config(&mut conn, &org.id, &master_key);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+            let session = create_test_payment_session(&mut conn, &product.id, None);
             session_id = session.id.clone();
             project_id = project.id.clone();
         }
@@ -1914,8 +1914,8 @@ mod webhook_security {
         );
 
         // Verify only one license was created
-        let conn = state.db.get().unwrap();
-        let session = queries::get_payment_session(&conn, &session_id)
+        let mut conn = state.db.get().unwrap();
+        let session = queries::get_payment_session(&mut conn, &session_id)
             .expect("database query for payment session should succeed")
             .expect("payment session should exist in database");
         assert!(
@@ -1926,7 +1926,7 @@ mod webhook_security {
         let license_id = session
             .license_id
             .expect("payment session should have license ID");
-        let licenses = queries::list_licenses_for_project(&conn, &project_id)
+        let licenses = queries::list_licenses_for_project(&mut conn, &project_id)
             .expect("database query for licenses should succeed");
         assert_eq!(
             licenses.len(),
@@ -1949,12 +1949,12 @@ mod webhook_security {
         let project_id: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            setup_stripe_config(&conn, &org.id, &master_key);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let session = create_test_payment_session(&conn, &product.id, None);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_stripe_config(&mut conn, &org.id, &master_key);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+            let session = create_test_payment_session(&mut conn, &product.id, None);
             session_id = session.id.clone();
             project_id = project.id.clone();
         }
@@ -2000,8 +2000,8 @@ mod webhook_security {
         let _ = send_webhook(app, payload_bytes, signature_header).await;
 
         // Verify only one license
-        let conn = state.db.get().unwrap();
-        let licenses = queries::list_licenses_for_project(&conn, &project_id)
+        let mut conn = state.db.get().unwrap();
+        let licenses = queries::list_licenses_for_project(&mut conn, &project_id)
             .expect("database query for licenses should succeed");
         assert_eq!(
             licenses.len(),
@@ -2020,11 +2020,11 @@ mod webhook_security {
         let original_exp: i64;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            setup_stripe_config(&conn, &org.id, &master_key);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_stripe_config(&mut conn, &org.id, &master_key);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
             original_exp = now() + (ONE_WEEK * 86400);
             let license = create_test_license_with_subscription(
@@ -2077,8 +2077,8 @@ mod webhook_security {
             "first invoice.paid webhook should return OK status"
         );
 
-        let conn = state.db.get().unwrap();
-        let license_after_first = queries::get_license_by_id(&conn, &license_id)
+        let mut conn = state.db.get().unwrap();
+        let license_after_first = queries::get_license_by_id(&mut conn, &license_id)
             .expect("database query for license should succeed")
             .expect("license should exist in database");
         let first_exp = license_after_first
@@ -2109,7 +2109,7 @@ mod webhook_security {
         );
 
         // Verify expiration was not extended again
-        let license_after_second = queries::get_license_by_id(&conn, &license_id)
+        let license_after_second = queries::get_license_by_id(&mut conn, &license_id)
             .expect("database query for license should succeed")
             .expect("license should exist in database");
         assert_eq!(
@@ -2133,12 +2133,12 @@ mod webhook_security {
         let project_id: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            setup_lemonsqueezy_config(&conn, &org.id, &master_key);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let session = create_test_payment_session(&conn, &product.id, None);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_lemonsqueezy_config(&mut conn, &org.id, &master_key);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+            let session = create_test_payment_session(&mut conn, &product.id, None);
             session_id = session.id.clone();
             project_id = project.id.clone();
         }
@@ -2204,8 +2204,8 @@ mod webhook_security {
         );
 
         // Verify only one license
-        let conn = state.db.get().unwrap();
-        let licenses = queries::list_licenses_for_project(&conn, &project_id)
+        let mut conn = state.db.get().unwrap();
+        let licenses = queries::list_licenses_for_project(&mut conn, &project_id)
             .expect("database query for licenses should succeed");
         assert_eq!(
             licenses.len(),
@@ -2224,11 +2224,11 @@ mod webhook_security {
         let original_exp: i64;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            setup_lemonsqueezy_config(&conn, &org.id, &master_key);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_lemonsqueezy_config(&mut conn, &org.id, &master_key);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
             original_exp = now() + (ONE_WEEK * 86400);
             let license = create_test_license_with_subscription(
@@ -2276,8 +2276,8 @@ mod webhook_security {
             .await
             .unwrap();
 
-        let conn = state.db.get().unwrap();
-        let license_after_first = queries::get_license_by_id(&conn, &license_id)
+        let mut conn = state.db.get().unwrap();
+        let license_after_first = queries::get_license_by_id(&mut conn, &license_id)
             .expect("database query for license should succeed")
             .expect("license should exist in database");
         let first_exp = license_after_first
@@ -2302,7 +2302,7 @@ mod webhook_security {
             .await
             .unwrap();
 
-        let license_after_replay = queries::get_license_by_id(&conn, &license_id)
+        let license_after_replay = queries::get_license_by_id(&mut conn, &license_id)
             .expect("database query for license should succeed")
             .expect("license should exist in database");
         assert_eq!(
@@ -2327,12 +2327,12 @@ mod webhook_security {
         let project_id: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            setup_stripe_config(&conn, &org.id, &master_key);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let session = create_test_payment_session(&conn, &product.id, None);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_stripe_config(&mut conn, &org.id, &master_key);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+            let session = create_test_payment_session(&mut conn, &product.id, None);
             session_id = session.id.clone();
             project_id = project.id.clone();
         }
@@ -2394,12 +2394,12 @@ mod webhook_security {
         let project_id: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            setup_stripe_config(&conn, &org.id, &master_key);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let session = create_test_payment_session(&conn, &product.id, None);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_stripe_config(&mut conn, &org.id, &master_key);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+            let session = create_test_payment_session(&mut conn, &product.id, None);
             session_id = session.id.clone();
             project_id = project.id.clone();
         }
@@ -2462,12 +2462,12 @@ mod webhook_security {
         let project_id: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            setup_stripe_config(&conn, &org.id, &master_key);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let session = create_test_payment_session(&conn, &product.id, None);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_stripe_config(&mut conn, &org.id, &master_key);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+            let session = create_test_payment_session(&mut conn, &product.id, None);
             session_id = session.id.clone();
             project_id = project.id.clone();
         }
@@ -2541,12 +2541,12 @@ mod webhook_security {
         let project_id: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            setup_stripe_config(&conn, &org.id, &master_key);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let session = create_test_payment_session(&conn, &product.id, None);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_stripe_config(&mut conn, &org.id, &master_key);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+            let session = create_test_payment_session(&mut conn, &product.id, None);
             session_id = session.id.clone();
             project_id = project.id.clone();
         }
@@ -2619,11 +2619,11 @@ mod webhook_security {
         let master_key = test_master_key();
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            setup_stripe_config(&conn, &org.id, &master_key);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_stripe_config(&mut conn, &org.id, &master_key);
             // Project exists but no product or session
-            let _project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+            let _project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
         }
 
         let payload = json!({
@@ -2674,9 +2674,9 @@ mod webhook_security {
         let master_key = test_master_key();
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            setup_stripe_config(&conn, &org.id, &master_key);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_stripe_config(&mut conn, &org.id, &master_key);
         }
 
         let payload = json!({
@@ -2733,12 +2733,12 @@ mod webhook_security {
         let project_id: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            setup_stripe_config(&conn, &org.id, &master_key);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let session = create_test_payment_session(&conn, &product.id, None);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_stripe_config(&mut conn, &org.id, &master_key);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+            let session = create_test_payment_session(&mut conn, &product.id, None);
             session_id = session.id.clone();
             project_id = project.id.clone();
         }
@@ -2807,8 +2807,8 @@ mod webhook_security {
         }
 
         // Verify only ONE license was created despite concurrent requests
-        let conn = state.db.get().unwrap();
-        let licenses = queries::list_licenses_for_project(&conn, &project_id)
+        let mut conn = state.db.get().unwrap();
+        let licenses = queries::list_licenses_for_project(&mut conn, &project_id)
             .expect("database query for licenses should succeed");
         assert_eq!(
             licenses.len(),
@@ -2827,11 +2827,11 @@ mod webhook_security {
         let master_key = test_master_key();
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            setup_lemonsqueezy_config(&conn, &org.id, &master_key);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_lemonsqueezy_config(&mut conn, &org.id, &master_key);
             // Need a project for the org so the config can be looked up
-            let _project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+            let _project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
         }
 
         // Include all required fields for the payload

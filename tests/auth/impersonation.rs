@@ -3,16 +3,16 @@ use super::helpers::*;
 #[tokio::test]
 async fn admin_operator_can_impersonate_org_member() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create an operator with admin role
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org and member
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (member_user, _member, _member_key) =
-        create_test_org_member(&conn, &org.id, "user@org.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org.id, "user@org.com", OrgMemberRole::Owner);
 
     // Operator impersonates the member (using user_id)
     let response = app
@@ -38,14 +38,14 @@ async fn admin_operator_can_impersonate_org_member() {
 #[tokio::test]
 async fn owner_operator_can_impersonate_org_member() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, operator_key) =
-        create_test_operator(&conn, "owner@platform.com", OperatorRole::Owner);
+        create_test_operator(&mut conn, "owner@platform.com", OperatorRole::Owner);
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (member_user, _member, _member_key) =
-        create_test_org_member(&conn, &org.id, "user@org.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org.id, "user@org.com", OrgMemberRole::Owner);
 
     let response = app
         .oneshot(
@@ -70,14 +70,14 @@ async fn owner_operator_can_impersonate_org_member() {
 #[tokio::test]
 async fn view_operator_cannot_impersonate() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, operator_key) =
-        create_test_operator(&conn, "view@platform.com", OperatorRole::View);
+        create_test_operator(&mut conn, "view@platform.com", OperatorRole::View);
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (member_user, _member, _member_key) =
-        create_test_org_member(&conn, &org.id, "user@org.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org.id, "user@org.com", OrgMemberRole::Owner);
 
     let response = app
         .oneshot(
@@ -102,14 +102,14 @@ async fn view_operator_cannot_impersonate() {
 #[tokio::test]
 async fn operator_can_access_org_endpoints_directly() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (_user2, _member, _member_key) =
-        create_test_org_member(&conn, &org.id, "user@org.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org.id, "user@org.com", OrgMemberRole::Owner);
 
     // Operators with admin+ role can access org endpoints directly (without impersonation)
     // They get synthetic owner-level access
@@ -135,13 +135,13 @@ async fn operator_can_access_org_endpoints_directly() {
 #[tokio::test]
 async fn view_operator_cannot_access_org_endpoints_directly() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // View-only operator should NOT be able to access org endpoints
     let (_user, operator_key) =
-        create_test_operator(&conn, "viewer@platform.com", OperatorRole::View);
+        create_test_operator(&mut conn, "viewer@platform.com", OperatorRole::View);
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     let response = app
         .oneshot(
@@ -165,17 +165,17 @@ async fn view_operator_cannot_access_org_endpoints_directly() {
 #[tokio::test]
 async fn cannot_impersonate_member_from_different_org() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
-    let org1 = create_test_org(&conn, "Org 1");
-    let org2 = create_test_org(&conn, "Org 2");
+    let org1 = create_test_org(&mut conn, "Org 1");
+    let org2 = create_test_org(&mut conn, "Org 2");
 
     // Member is in org1
     let (member_user, _member, _member_key) =
-        create_test_org_member(&conn, &org1.id, "user@org1.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org1.id, "user@org1.com", OrgMemberRole::Owner);
 
     // Try to access org2's endpoints while impersonating org1's member (user not in org2)
     let response = app
@@ -202,18 +202,18 @@ async fn cannot_impersonate_member_from_different_org() {
 #[tokio::test]
 async fn impersonation_respects_member_permissions() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     // Member role can't create org members (owner-only operation)
     let (member_user, _member, _member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     // Create a user to add as org member
-    let new_user = create_test_user(&conn, "new@org.com", "New Member");
+    let new_user = create_test_user(&mut conn, "new@org.com", "New Member");
 
     // Try to create org member while impersonating a member-role user
     let response = app
@@ -244,12 +244,12 @@ async fn impersonation_respects_member_permissions() {
 #[tokio::test]
 async fn impersonating_nonexistent_member_returns_not_found() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     let response = app
         .oneshot(
@@ -276,13 +276,13 @@ async fn impersonating_nonexistent_member_returns_not_found() {
 #[tokio::test]
 async fn operator_cannot_impersonate_another_operator() {
     let (app, state) = operator_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create two operators - one admin and one owner
     let (target_user, _target_key) =
-        create_test_operator(&conn, "owner@platform.com", OperatorRole::Owner);
+        create_test_operator(&mut conn, "owner@platform.com", OperatorRole::Owner);
     let (_user2, admin_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Admin tries to access owner-only endpoint by "impersonating" the owner
     // This should fail because operator impersonation doesn't exist
@@ -316,19 +316,19 @@ async fn operator_cannot_impersonate_another_operator() {
 #[tokio::test]
 async fn test_operator_cannot_impersonate_deleted_member() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create an admin operator
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org and member
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (member_user, member, _member_key) =
-        create_test_org_member(&conn, &org.id, "user@org.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org.id, "user@org.com", OrgMemberRole::Owner);
 
     // Soft-delete the member
-    paycheck::db::queries::soft_delete_org_member(&conn, &member.id)
+    paycheck::db::queries::soft_delete_org_member(&mut conn, &member.id)
         .expect("Failed to soft-delete member");
 
     // Try to impersonate the deleted member
@@ -358,19 +358,19 @@ async fn test_operator_cannot_impersonate_deleted_member() {
 #[tokio::test]
 async fn test_operator_can_impersonate_self_as_org_member() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create an admin operator
     let (op_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org and add the operator as a member
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let member_input = paycheck::models::CreateOrgMember {
         user_id: op_user.id.clone(),
         role: OrgMemberRole::Member,
     };
-    paycheck::db::queries::create_org_member(&conn, &org.id, &member_input)
+    paycheck::db::queries::create_org_member(&mut conn, &org.id, &member_input)
         .expect("Failed to create org member");
 
     // Impersonate self
@@ -399,17 +399,17 @@ async fn test_operator_can_impersonate_self_as_org_member() {
 #[tokio::test]
 async fn test_operator_cannot_impersonate_user_not_in_any_org() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create an admin operator
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create a user with no org memberships
-    let orphan_user = create_test_user(&conn, "orphan@test.com", "Orphan User");
+    let orphan_user = create_test_user(&mut conn, "orphan@test.com", "Orphan User");
 
     // Create an org (no members added for orphan_user)
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     // Try to impersonate the orphan user
     let response = app
@@ -437,16 +437,16 @@ async fn test_operator_cannot_impersonate_user_not_in_any_org() {
 #[tokio::test]
 async fn test_impersonation_header_case_insensitive() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create an admin operator
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org and member
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (member_user, _member, _member_key) =
-        create_test_org_member(&conn, &org.id, "user@org.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org.id, "user@org.com", OrgMemberRole::Owner);
 
     // Use uppercase header name
     let response = app
@@ -474,14 +474,14 @@ async fn test_impersonation_header_case_insensitive() {
 #[tokio::test]
 async fn test_impersonation_with_invalid_user_id_format() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create an admin operator
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     // Use invalid user_id format
     let response = app
@@ -513,19 +513,19 @@ async fn test_impersonation_with_invalid_user_id_format() {
 #[tokio::test]
 async fn test_impersonation_respects_target_member_role() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create an admin operator
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org with a member-role user (not owner)
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (member_user, _member, _member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     // Create another user to try to add
-    let new_user = create_test_user(&conn, "new@org.com", "New User");
+    let new_user = create_test_user(&mut conn, "new@org.com", "New User");
 
     // Try to create org member while impersonating a member-role user
     // This should fail because member role cannot create new members
@@ -559,19 +559,19 @@ async fn test_impersonation_respects_target_member_role() {
 #[tokio::test]
 async fn test_operator_can_impersonate_as_owner() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create an admin operator
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org with an owner
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (owner_user, _member, _member_key) =
-        create_test_org_member(&conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
 
     // Create a user to add as member
-    let new_user = create_test_user(&conn, "new@org.com", "New User");
+    let new_user = create_test_user(&mut conn, "new@org.com", "New User");
 
     // Impersonate the owner and create a new org member
     let response = app
@@ -610,25 +610,25 @@ async fn test_impersonation_with_scoped_api_key_bypasses_scope() {
     use tower::Service;
 
     let (mut app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create an admin operator (with default full-access key)
     let (op_user, _full_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create two orgs
-    let org1 = create_test_org(&conn, "Org 1");
-    let org2 = create_test_org(&conn, "Org 2");
+    let org1 = create_test_org(&mut conn, "Org 1");
+    let org2 = create_test_org(&mut conn, "Org 2");
 
     // Add members to both orgs
     let (member1_user, _member1, _member1_key) =
-        create_test_org_member(&conn, &org1.id, "user1@org.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org1.id, "user1@org.com", OrgMemberRole::Owner);
     let (member2_user, _member2, _member2_key) =
-        create_test_org_member(&conn, &org2.id, "user2@org.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org2.id, "user2@org.com", OrgMemberRole::Owner);
 
     // Create a scoped API key for the operator that only allows access to org1
     let scoped_key = create_api_key_with_org_scope(
-        &conn,
+        &mut conn,
         &op_user.id,
         &org1.id,
         paycheck::models::AccessLevel::Admin,
@@ -684,19 +684,19 @@ async fn test_scoped_api_key_restricts_synthetic_access() {
     use tower::Service;
 
     let (mut app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create an admin operator
     let (op_user, _full_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create two orgs
-    let org1 = create_test_org(&conn, "Org 1");
-    let org2 = create_test_org(&conn, "Org 2");
+    let org1 = create_test_org(&mut conn, "Org 1");
+    let org2 = create_test_org(&mut conn, "Org 2");
 
     // Create a scoped API key for the operator that only allows access to org1
     let scoped_key = create_api_key_with_org_scope(
-        &conn,
+        &mut conn,
         &op_user.id,
         &org1.id,
         paycheck::models::AccessLevel::Admin,
@@ -750,19 +750,19 @@ async fn test_scoped_api_key_restricts_synthetic_access() {
 #[tokio::test]
 async fn test_cannot_impersonate_member_then_access_different_org() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create an admin operator
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create two orgs
-    let org_a = create_test_org(&conn, "Org A");
-    let org_b = create_test_org(&conn, "Org B");
+    let org_a = create_test_org(&mut conn, "Org A");
+    let org_b = create_test_org(&mut conn, "Org B");
 
     // Create member in org_a only
     let (member_user, _member, _member_key) =
-        create_test_org_member(&conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
 
     // Try to access org_b while impersonating a member of org_a
     let response = app
@@ -791,19 +791,19 @@ async fn test_cannot_impersonate_member_then_access_different_org() {
 #[tokio::test]
 async fn test_impersonation_requires_member_in_requested_org() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create an admin operator
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create org_a with the member
-    let org_a = create_test_org(&conn, "Org A");
+    let org_a = create_test_org(&mut conn, "Org A");
     let (member_user, _member, _member_key) =
-        create_test_org_member(&conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
 
     // Create org_b (member is NOT in this org)
-    let org_b = create_test_org(&conn, "Org B");
+    let org_b = create_test_org(&mut conn, "Org B");
 
     // Try to impersonate the member for org_b (where they're not a member)
     let response = app
@@ -836,17 +836,17 @@ async fn test_impersonation_requires_member_in_requested_org() {
 #[tokio::test]
 async fn test_synthetic_access_blocked_when_impersonation_header_present() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create an admin operator (would normally get synthetic access)
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     // Create a user who is NOT a member of the org
-    let non_member = create_test_user(&conn, "random@test.com", "Random User");
+    let non_member = create_test_user(&mut conn, "random@test.com", "Random User");
 
     // Try to impersonate the non-member
     // This should fail with NOT_FOUND, not fall through to synthetic access
@@ -876,14 +876,14 @@ async fn test_synthetic_access_blocked_when_impersonation_header_present() {
 #[tokio::test]
 async fn test_view_operator_no_synthetic_access() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create a view-only operator
     let (_user, operator_key) =
-        create_test_operator(&conn, "viewer@platform.com", OperatorRole::View);
+        create_test_operator(&mut conn, "viewer@platform.com", OperatorRole::View);
 
     // Create an org
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     // View operators should NOT get synthetic access to org endpoints
     let response = app
@@ -910,17 +910,17 @@ async fn test_view_operator_no_synthetic_access() {
 #[tokio::test]
 async fn test_synthetic_access_grants_owner_permissions() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create an admin operator (NOT a member of any org)
     let (_user, operator_key) =
-        create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
     // Create an org (operator is NOT a member)
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     // Create a user to add as member
-    let new_user = create_test_user(&conn, "new@org.com", "New User");
+    let new_user = create_test_user(&mut conn, "new@org.com", "New User");
 
     // Try to create an org member using synthetic access (owner-only operation)
     let response = app

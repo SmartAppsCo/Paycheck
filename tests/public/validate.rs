@@ -23,17 +23,17 @@ fn setup_validate_test() -> (axum::Router, String, String, String, String) {
     let device_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(future_timestamp(ONE_YEAR)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device-123", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device-123", DeviceType::Uuid);
 
         jti = device.jti.clone();
         public_key = project.public_key.clone();
@@ -150,23 +150,23 @@ async fn test_validate_with_revoked_license_returns_invalid() {
     let public_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(future_timestamp(ONE_YEAR)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device-123", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device-123", DeviceType::Uuid);
 
         jti = device.jti.clone();
         public_key = project.public_key.clone();
 
         // Revoke the license
-        queries::revoke_license(&conn, &license.id).unwrap();
+        queries::revoke_license(&mut conn, &license.id).unwrap();
     }
 
     let app = public_app(state);
@@ -215,23 +215,23 @@ async fn test_validate_with_revoked_jti_returns_invalid() {
     let public_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(future_timestamp(ONE_YEAR)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device-123", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device-123", DeviceType::Uuid);
 
         jti = device.jti.clone();
         public_key = project.public_key.clone();
 
         // Revoke this specific JTI (not the whole license)
-        queries::add_revoked_jti(&conn, &license.id, &jti, Some("test revocation")).unwrap();
+        queries::add_revoked_jti(&mut conn, &license.id, &jti, Some("test revocation")).unwrap();
     }
 
     let app = public_app(state);
@@ -280,10 +280,10 @@ async fn test_validate_with_expired_license_returns_invalid() {
     let public_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         // Create license that expired yesterday
         let license = create_test_license(
             &conn,
@@ -291,7 +291,7 @@ async fn test_validate_with_expired_license_returns_invalid() {
             &product.id,
             Some(past_timestamp(ONE_DAY)), // Expired 1 day ago
         );
-        let device = create_test_device(&conn, &license.id, "test-device-123", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device-123", DeviceType::Uuid);
 
         jti = device.jti.clone();
         public_key = project.public_key.clone();
@@ -342,17 +342,17 @@ async fn test_validate_with_wrong_project_returns_invalid() {
     let jti: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(future_timestamp(ONE_YEAR)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device-123", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device-123", DeviceType::Uuid);
 
         jti = device.jti.clone();
     }
@@ -433,17 +433,17 @@ async fn test_validate_updates_last_seen_timestamp() {
     let public_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(future_timestamp(ONE_YEAR)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device-123", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device-123", DeviceType::Uuid);
 
         jti = device.jti.clone();
         public_key = project.public_key.clone();
@@ -453,8 +453,8 @@ async fn test_validate_updates_last_seen_timestamp() {
 
     // Get initial last_seen_at
     let initial_last_seen = {
-        let conn = state.db.get().unwrap();
-        queries::get_device_by_jti(&conn, &jti)
+        let mut conn = state.db.get().unwrap();
+        queries::get_device_by_jti(&mut conn, &jti)
             .unwrap()
             .unwrap()
             .last_seen_at
@@ -490,8 +490,8 @@ async fn test_validate_updates_last_seen_timestamp() {
 
     // Check that last_seen_at was updated
     let updated_last_seen = {
-        let conn = state.db.get().unwrap();
-        queries::get_device_by_jti(&conn, &jti)
+        let mut conn = state.db.get().unwrap();
+        queries::get_device_by_jti(&mut conn, &jti)
             .unwrap()
             .unwrap()
             .last_seen_at
@@ -512,9 +512,9 @@ async fn test_validate_perpetual_license_returns_valid() {
     let public_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
         // Create product with no expiration (perpetual license)
         let input = CreateProduct {
@@ -527,7 +527,7 @@ async fn test_validate_perpetual_license_returns_valid() {
             features: vec![],
         };
         let product =
-            queries::create_product(&conn, &project.id, &input).expect("Failed to create product");
+            queries::create_product(&mut conn, &project.id, &input).expect("Failed to create product");
 
         let license = create_test_license(
             &conn,
@@ -535,7 +535,7 @@ async fn test_validate_perpetual_license_returns_valid() {
             &product.id,
             None, // Perpetual
         );
-        let device = create_test_device(&conn, &license.id, "test-device-123", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device-123", DeviceType::Uuid);
 
         jti = device.jti.clone();
         public_key = project.public_key.clone();

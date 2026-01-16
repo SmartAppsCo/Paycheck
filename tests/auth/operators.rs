@@ -80,10 +80,10 @@ async fn malformed_auth_header_returns_401() {
 #[tokio::test]
 async fn view_role_cannot_access_operator_list() {
     let (app, state) = operator_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, view_key) =
-        create_test_operator(&conn, "view@test.com", OperatorRole::View);
+        create_test_operator(&mut conn, "view@test.com", OperatorRole::View);
 
     let response = app
         .oneshot(
@@ -107,10 +107,10 @@ async fn view_role_cannot_access_operator_list() {
 #[tokio::test]
 async fn admin_role_cannot_access_operator_list() {
     let (app, state) = operator_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, admin_key) =
-        create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
 
     let response = app
         .oneshot(
@@ -134,10 +134,10 @@ async fn admin_role_cannot_access_operator_list() {
 #[tokio::test]
 async fn owner_role_can_access_operator_list() {
     let (app, state) = operator_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, owner_key) =
-        create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+        create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
 
     let response = app
         .oneshot(
@@ -161,13 +161,13 @@ async fn owner_role_can_access_operator_list() {
 #[tokio::test]
 async fn admin_cannot_create_operator() {
     let (app, state) = operator_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, admin_key) =
-        create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
 
     // Create a user to add as operator
-    let new_user = create_test_user(&conn, "new@test.com", "New Op");
+    let new_user = create_test_user(&mut conn, "new@test.com", "New Op");
 
     let response = app
         .oneshot(
@@ -195,13 +195,13 @@ async fn admin_cannot_create_operator() {
 #[tokio::test]
 async fn owner_can_create_operator() {
     let (app, state) = operator_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, owner_key) =
-        create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+        create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
 
     // Create a user to add as operator
-    let new_user = create_test_user(&conn, "new@test.com", "New Op");
+    let new_user = create_test_user(&mut conn, "new@test.com", "New Op");
 
     let response = app
         .oneshot(
@@ -233,10 +233,10 @@ async fn owner_can_create_operator() {
 #[tokio::test]
 async fn view_role_cannot_list_organizations() {
     let (app, state) = operator_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, view_key) =
-        create_test_operator(&conn, "view@test.com", OperatorRole::View);
+        create_test_operator(&mut conn, "view@test.com", OperatorRole::View);
 
     let response = app
         .oneshot(
@@ -260,10 +260,10 @@ async fn view_role_cannot_list_organizations() {
 #[tokio::test]
 async fn admin_role_can_list_organizations() {
     let (app, state) = operator_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, admin_key) =
-        create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
 
     let response = app
         .oneshot(
@@ -287,10 +287,10 @@ async fn admin_role_can_list_organizations() {
 #[tokio::test]
 async fn owner_role_can_list_organizations() {
     let (app, state) = operator_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, owner_key) =
-        create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+        create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
 
     let response = app
         .oneshot(
@@ -314,10 +314,10 @@ async fn owner_role_can_list_organizations() {
 #[tokio::test]
 async fn view_cannot_create_organization() {
     let (app, state) = operator_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, view_key) =
-        create_test_operator(&conn, "view@test.com", OperatorRole::View);
+        create_test_operator(&mut conn, "view@test.com", OperatorRole::View);
 
     let response = app
         .oneshot(
@@ -342,10 +342,10 @@ async fn view_cannot_create_organization() {
 #[tokio::test]
 async fn admin_can_create_organization() {
     let (app, state) = operator_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, admin_key) =
-        create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
 
     let response = app
         .oneshot(
@@ -374,10 +374,10 @@ async fn admin_can_create_organization() {
 #[tokio::test]
 async fn view_role_can_access_audit_logs() {
     let (app, state) = operator_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, view_key) =
-        create_test_operator(&conn, "view@test.com", OperatorRole::View);
+        create_test_operator(&mut conn, "view@test.com", OperatorRole::View);
 
     let response = app
         .oneshot(
@@ -401,10 +401,10 @@ async fn view_role_can_access_audit_logs() {
 #[tokio::test]
 async fn admin_role_can_access_audit_logs() {
     let (app, state) = operator_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     let (_user, admin_key) =
-        create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
 
     let response = app
         .oneshot(

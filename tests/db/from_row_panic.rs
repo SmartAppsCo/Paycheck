@@ -166,7 +166,7 @@ fn setup_test_db_no_check_constraints() -> Connection {
 /// Note: operator_role is optional, so invalid values are safely ignored rather than erroring
 #[test]
 fn test_invalid_operator_role_treated_as_none() {
-    let conn = setup_test_db_no_check_constraints();
+    let mut conn = setup_test_db_no_check_constraints();
     let now = now();
 
     // Insert user with INVALID operator_role directly via SQL
@@ -176,7 +176,7 @@ fn test_invalid_operator_role_treated_as_none() {
     ).unwrap();
 
     // Attempt to read the user - should succeed but treat invalid role as None
-    let result = queries::get_user_by_id(&conn, "u1");
+    let result = queries::get_user_by_id(&mut conn, "u1");
 
     // Should not panic, and should treat invalid role as None (not an operator)
     let user = result.expect("Should not panic on invalid operator_role").expect("User should be found");
@@ -189,7 +189,7 @@ fn test_invalid_operator_role_treated_as_none() {
 /// Test that invalid OrgMemberRole in DB causes proper error (not panic)
 #[test]
 fn test_invalid_org_member_role_returns_error() {
-    let conn = setup_test_db_no_check_constraints();
+    let mut conn = setup_test_db_no_check_constraints();
     let now = now();
 
     // Insert user, org, and member with INVALID role
@@ -207,7 +207,7 @@ fn test_invalid_org_member_role_returns_error() {
     ).unwrap();
 
     // Should return error, not panic
-    let result = queries::get_org_member_by_id(&conn, "m1");
+    let result = queries::get_org_member_by_id(&mut conn, "m1");
     assert!(
         result.is_err(),
         "reading org member with invalid role should return error, not panic"
@@ -217,7 +217,7 @@ fn test_invalid_org_member_role_returns_error() {
 /// Test that invalid AccessLevel in API key scope causes proper error (not panic)
 #[test]
 fn test_invalid_access_level_returns_error() {
-    let conn = setup_test_db_no_check_constraints();
+    let mut conn = setup_test_db_no_check_constraints();
     let now = now();
 
     // Insert user, org, api_key, and scope with INVALID access level
@@ -239,7 +239,7 @@ fn test_invalid_access_level_returns_error() {
     ).unwrap();
 
     // Should return error, not panic
-    let result = queries::get_api_key_scopes(&conn, "ak1");
+    let result = queries::get_api_key_scopes(&mut conn, "ak1");
     assert!(
         result.is_err(),
         "reading API key scope with invalid access level should return error, not panic"
@@ -249,7 +249,7 @@ fn test_invalid_access_level_returns_error() {
 /// Test that invalid ProjectMemberRole in DB causes proper error (not panic)
 #[test]
 fn test_invalid_project_member_role_returns_error() {
-    let conn = setup_test_db_no_check_constraints();
+    let mut conn = setup_test_db_no_check_constraints();
     let now = now();
 
     // Insert user, org, org_member, project, and project_member with INVALID role
@@ -275,7 +275,7 @@ fn test_invalid_project_member_role_returns_error() {
     ).unwrap();
 
     // Should return error, not panic
-    let result = queries::get_project_member_by_id(&conn, "pm1");
+    let result = queries::get_project_member_by_id(&mut conn, "pm1");
     assert!(
         result.is_err(),
         "reading project member with invalid role should return error, not panic"
@@ -285,7 +285,7 @@ fn test_invalid_project_member_role_returns_error() {
 /// Test that invalid DeviceType in DB causes proper error (not panic)
 #[test]
 fn test_invalid_device_type_returns_error() {
-    let conn = setup_test_db_no_check_constraints();
+    let mut conn = setup_test_db_no_check_constraints();
     let now = now();
 
     // Insert all required entities with a device having INVALID device_type
@@ -315,7 +315,7 @@ fn test_invalid_device_type_returns_error() {
     ).unwrap();
 
     // Should return error, not panic
-    let result = queries::list_devices_for_license(&conn, "lic1");
+    let result = queries::list_devices_for_license(&mut conn, "lic1");
     assert!(
         result.is_err(),
         "reading device with invalid device_type should return error, not panic"
@@ -357,7 +357,7 @@ fn test_list_operators_filters_invalid_roles() {
 /// Test that OrgMemberWithUser handles invalid role gracefully
 #[test]
 fn test_org_member_with_user_invalid_role_returns_error() {
-    let conn = setup_test_db_no_check_constraints();
+    let mut conn = setup_test_db_no_check_constraints();
     let now = now();
 
     // Insert user, org, and member with invalid role
@@ -375,16 +375,54 @@ fn test_org_member_with_user_invalid_role_returns_error() {
     ).unwrap();
 
     // list_org_members returns OrgMemberWithUser
-    let result = queries::list_org_members(&conn, "org1");
+    let result = queries::list_org_members(&mut conn, "org1");
     assert!(
         result.is_err(),
         "listing org members with invalid role should return error, not panic"
     );
 
     // Also test get_org_member_with_user_by_user_and_org
-    let result2 = queries::get_org_member_with_user_by_user_and_org(&conn, "u1", "org1");
+    let result2 = queries::get_org_member_with_user_by_user_and_org(&mut conn, "u1", "org1");
     assert!(
         result2.is_err(),
         "reading OrgMemberWithUser with invalid role should return error, not panic"
+    );
+}
+
+/// Test that get_user_with_roles handles invalid OrgMemberRole gracefully (not panic).
+///
+/// This test documents a bug: get_user_with_roles uses .parse().unwrap() when
+/// reading OrgMemberRole from the database, which will panic if the role value
+/// is invalid. This is in contrast to other FromRow implementations that use
+/// proper error handling.
+///
+/// The fix should change the .unwrap() to proper error propagation so that
+/// corrupted data causes an error return, not a server crash.
+#[test]
+fn test_get_user_with_roles_invalid_member_role_returns_error() {
+    let conn = setup_test_db_no_check_constraints();
+    let now = now();
+
+    // Insert user, org, and member with INVALID role
+    conn.execute(
+        "INSERT INTO users (id, email, name, created_at, updated_at) VALUES ('u1', 'test@example.com', 'Test', ?1, ?1)",
+        [now],
+    ).unwrap();
+    conn.execute(
+        "INSERT INTO organizations (id, name, created_at, updated_at) VALUES ('org1', 'Test Org', ?1, ?1)",
+        [now],
+    ).unwrap();
+    conn.execute(
+        "INSERT INTO org_members (id, user_id, org_id, role, created_at) VALUES ('m1', 'u1', 'org1', 'supervillain', ?1)",
+        [now],
+    ).unwrap();
+
+    // get_user_with_roles should return an error, not panic
+    // BUG: Currently this panics due to .parse().unwrap() in queries.rs:276
+    let result = queries::get_user_with_roles(&conn, "u1");
+
+    assert!(
+        result.is_err(),
+        "get_user_with_roles with invalid OrgMemberRole should return error, not panic"
     );
 }

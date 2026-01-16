@@ -8,7 +8,7 @@ use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path, RestoreRequest};
 use crate::middleware::OrgMemberContext;
 use crate::models::{
-    ActorType, AuditAction, CreateOrgMember, OrgMember, OrgMemberWithUser, UpdateOrgMember,
+    ActorType, AuditAction, CreateOrgMember, OrgMemberWithUser, UpdateOrgMember,
 };
 use crate::pagination::{Paginated, PaginationQuery};
 use crate::util::AuditLogBuilder;
@@ -22,7 +22,7 @@ pub async fn create_org_member(
     Path(org_id): Path<String>,
     headers: HeaderMap,
     Json(input): Json<CreateOrgMember>,
-) -> Result<Json<OrgMember>> {
+) -> Result<Json<OrgMemberWithUser>> {
     ctx.require_owner()?;
 
     let conn = state.db.get()?;
@@ -49,7 +49,12 @@ pub async fn create_org_member(
         .auth_method(&ctx.auth_method)
         .save()?;
 
-    Ok(Json(member))
+    // Return enriched member with user details
+    let member_with_user =
+        queries::get_org_member_with_user_by_user_and_org(&conn, &input.user_id, &org_id)?
+            .ok_or_else(|| AppError::Internal("Failed to fetch created member".into()))?;
+
+    Ok(Json(member_with_user))
 }
 
 /// List org members with user details
@@ -106,7 +111,8 @@ pub async fn update_org_member(
         queries::get_org_member_with_user_by_user_and_org(&conn, &path.user_id, &path.org_id)?
             .or_not_found(msg::NOT_ORG_MEMBER)?;
 
-    queries::update_org_member(&conn, &existing.id, &input)?;
+    queries::update_org_member(&conn, &existing.id, &input)?
+        .or_not_found(msg::NOT_ORG_MEMBER)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))

@@ -229,14 +229,14 @@ mod no_internal_details {
     #[tokio::test]
     async fn not_found_errors_dont_reveal_paths() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Create a real project to test nonexistent sub-resources
-        let project = create_test_project(&conn, &org.id, "Real Project", &state.master_key);
+        let project = create_test_project(&mut conn, &org.id, "Real Project", &state.master_key);
 
         // Test various nonexistent resource lookups
         let nonexistent_ids = vec![
@@ -290,11 +290,11 @@ mod no_internal_details {
     #[tokio::test]
     async fn internal_errors_dont_expose_stack_traces() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Try to trigger potential internal errors with malformed data
         let malformed_requests = vec![
@@ -334,14 +334,14 @@ mod no_internal_details {
     #[tokio::test]
     async fn database_errors_dont_reveal_schema() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Create a project first
-        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
         // Try operations that might trigger database errors
         let test_cases = vec![
@@ -411,10 +411,10 @@ mod no_internal_details {
     #[tokio::test]
     async fn unauthorized_errors_are_generic() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create a real org so we're testing auth, not org existence
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
 
         // Various ways to get 401 should all return the same generic message
         let auth_test_cases = vec![
@@ -481,13 +481,13 @@ mod user_enumeration_prevention {
     #[tokio::test]
     async fn user_lookup_doesnt_reveal_existence() {
         let (app, state) = operator_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create an admin operator
-        let (_, api_key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+        let (_, api_key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
 
         // Create a real user
-        let _real_user = create_test_user(&conn, "real@example.com", "Real User");
+        let _real_user = create_test_user(&mut conn, "real@example.com", "Real User");
 
         // Look up nonexistent user vs real user (but with wrong API key scope)
         let test_cases = vec![
@@ -548,21 +548,21 @@ mod user_enumeration_prevention {
     #[tokio::test]
     async fn org_member_lookup_consistent_for_nonmembers() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create two separate orgs
-        let org_a = create_test_org(&conn, "Org A");
-        let org_b = create_test_org(&conn, "Org B");
+        let org_a = create_test_org(&mut conn, "Org A");
+        let org_b = create_test_org(&mut conn, "Org B");
 
         // Create members in org_a
         let (_, _, key_a) =
-            create_test_org_member(&conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
         let (real_member, _, _) =
-            create_test_org_member(&conn, &org_a.id, "member@orga.com", OrgMemberRole::Member);
+            create_test_org_member(&mut conn, &org_a.id, "member@orga.com", OrgMemberRole::Member);
 
         // Create member in org_b
         let (_, _, key_b) =
-            create_test_org_member(&conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
 
         // User from org_b tries to look up members in org_a
         // Should get same response for real member and fake member
@@ -630,12 +630,12 @@ mod user_enumeration_prevention {
     #[tokio::test]
     async fn email_operations_dont_reveal_existence() {
         let (app, state) = public_app_with_state();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create org, project, product for testing
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
-        let product = create_test_product(&conn, &project.id, "Pro", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
 
         // Create a license with known email
         let _license = create_test_license(
@@ -711,12 +711,12 @@ mod consistent_error_format {
     #[tokio::test]
     async fn all_errors_return_json_with_error_field() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
-        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
         // Various error scenarios
         let error_scenarios = vec![
@@ -776,10 +776,10 @@ mod consistent_error_format {
     #[tokio::test]
     async fn unauthorized_errors_use_consistent_format() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create a real org to ensure we're testing auth, not existence
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
 
         // Try to access with invalid auth token
         let response = app
@@ -864,10 +864,10 @@ mod consistent_error_format {
 
         // Create org and member for authentication
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, api_key) =
-                create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
             // Make enough requests to trigger rate limit
             for i in 0..3 {
@@ -918,12 +918,12 @@ mod validation_error_safety {
     #[tokio::test]
     async fn validation_errors_dont_reveal_regex_patterns() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
-        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
         // Try inputs that would trigger validation errors (type mismatches)
         let test_cases = vec![
@@ -1001,11 +1001,11 @@ mod validation_error_safety {
     #[tokio::test]
     async fn path_validation_errors_dont_leak_info() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Various malformed path parameters (URL-safe only)
         let test_paths = vec![
@@ -1039,12 +1039,12 @@ mod validation_error_safety {
     #[tokio::test]
     async fn query_validation_errors_are_safe() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
-        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
         // Malformed query parameters
         let test_queries = vec![
@@ -1103,18 +1103,18 @@ mod resource_existence_leakage {
     #[tokio::test]
     async fn forbidden_vs_not_found_is_consistent() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create two orgs
-        let org_a = create_test_org(&conn, "Org A");
-        let org_b = create_test_org(&conn, "Org B");
+        let org_a = create_test_org(&mut conn, "Org A");
+        let org_b = create_test_org(&mut conn, "Org B");
 
         // Create project in org_a
-        let project_a = create_test_project(&conn, &org_a.id, "Project A", &state.master_key);
+        let project_a = create_test_project(&mut conn, &org_a.id, "Project A", &state.master_key);
 
         // User from org_b
         let (_, _, key_b) =
-            create_test_org_member(&conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
 
         // Try to access real project in org_a vs fake project
         let real_project_response = app
@@ -1158,19 +1158,19 @@ mod resource_existence_leakage {
     #[tokio::test]
     async fn license_lookup_consistent_for_unauthorized() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org_a = create_test_org(&conn, "Org A");
-        let org_b = create_test_org(&conn, "Org B");
+        let org_a = create_test_org(&mut conn, "Org A");
+        let org_b = create_test_org(&mut conn, "Org B");
 
         // Create project, product, and license in org_a
-        let project_a = create_test_project(&conn, &org_a.id, "Project A", &state.master_key);
-        let product_a = create_test_product(&conn, &project_a.id, "Pro", "pro");
-        let license_a = create_test_license(&conn, &project_a.id, &product_a.id, None);
+        let project_a = create_test_project(&mut conn, &org_a.id, "Project A", &state.master_key);
+        let product_a = create_test_product(&mut conn, &project_a.id, "Pro", "pro");
+        let license_a = create_test_license(&mut conn, &project_a.id, &product_a.id, None);
 
         // User from org_b
         let (_, _, key_b) =
-            create_test_org_member(&conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
 
         // Try to access real license vs fake license
         let test_cases = vec![
@@ -1220,11 +1220,11 @@ mod no_debug_info {
     #[tokio::test]
     async fn no_debug_markers_in_errors() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Trigger various errors
         let error_triggers = vec![
@@ -1297,12 +1297,12 @@ mod no_debug_info {
     #[tokio::test]
     async fn no_internal_field_names_in_validation_errors() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
-        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
         // Submit invalid data
         let response = app

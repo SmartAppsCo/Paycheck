@@ -103,7 +103,8 @@ pub async fn update_product(
         return Err(AppError::NotFound(msg::PRODUCT_NOT_FOUND.into()));
     }
 
-    queries::update_product(&conn, &path.product_id, &input)?;
+    queries::update_product(&conn, &path.product_id, &input)?
+        .or_not_found(msg::PRODUCT_NOT_FOUND)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))

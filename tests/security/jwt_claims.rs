@@ -107,11 +107,11 @@ fn create_test_claims(
 /// Create a complete test setup: org, project, product, license, device, and valid JWT.
 /// Returns (project_public_key, project_private_key, license_id, device_jti, valid_token).
 fn setup_complete_license(state: &AppState) -> (String, Vec<u8>, String, String, String) {
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
-    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
     let license = create_test_license(
         &conn,
         &project.id,
@@ -316,10 +316,10 @@ mod expiration_validation {
         let (app, state) = public_app();
 
         // Setup a license but create a token with a different JTI
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
-        let product = create_test_product(&conn, &project.id, "Pro", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -608,8 +608,8 @@ mod jti_validation {
 
         // Revoke the JTI
         {
-            let conn = state.db.get().unwrap();
-            queries::add_revoked_jti(&conn, &license_id, &jti, Some("test revocation")).unwrap();
+            let mut conn = state.db.get().unwrap();
+            queries::add_revoked_jti(&mut conn, &license_id, &jti, Some("test revocation")).unwrap();
         }
 
         // Now validate should fail
@@ -663,8 +663,8 @@ mod jti_validation {
 
         // Revoke the JTI
         {
-            let conn = state.db.get().unwrap();
-            queries::add_revoked_jti(&conn, &license_id, &jti, Some("test revocation")).unwrap();
+            let mut conn = state.db.get().unwrap();
+            queries::add_revoked_jti(&mut conn, &license_id, &jti, Some("test revocation")).unwrap();
         }
 
         // Now refresh should fail
@@ -727,10 +727,10 @@ mod signature_validation {
         let (app, state) = public_app();
 
         // Setup a legitimate project
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
-        let product = create_test_product(&conn, &project.id, "Pro", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
         let _license = create_test_license(
             &conn,
             &project.id,
@@ -1231,8 +1231,8 @@ mod license_revocation {
 
         // Revoke the license
         {
-            let conn = state.db.get().unwrap();
-            queries::revoke_license(&conn, &license_id).unwrap();
+            let mut conn = state.db.get().unwrap();
+            queries::revoke_license(&mut conn, &license_id).unwrap();
         }
 
         // Now validate should fail
@@ -1266,8 +1266,8 @@ mod license_revocation {
 
         // Revoke the license
         {
-            let conn = state.db.get().unwrap();
-            queries::revoke_license(&conn, &license_id).unwrap();
+            let mut conn = state.db.get().unwrap();
+            queries::revoke_license(&mut conn, &license_id).unwrap();
         }
 
         let response = app

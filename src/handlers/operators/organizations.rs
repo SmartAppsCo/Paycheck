@@ -17,6 +17,7 @@ use crate::util::AuditLogBuilder;
 
 #[derive(Serialize)]
 pub struct OrganizationCreated {
+    #[serde(flatten)]
     pub organization: Organization,
     /// Owner member (if owner_user_id provided). No API key - use Console or create one later.
     #[serde(skip_serializing_if = "Option::is_none")]

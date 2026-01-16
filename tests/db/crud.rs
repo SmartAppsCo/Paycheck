@@ -9,8 +9,8 @@ use common::*;
 
 #[test]
 fn test_create_operator() {
-    let conn = setup_test_db();
-    let (user, api_key) = create_test_operator(&conn, "test@example.com", OperatorRole::Admin);
+    let mut conn = setup_test_db();
+    let (user, api_key) = create_test_operator(&mut conn, "test@example.com", OperatorRole::Admin);
 
     assert!(!user.id.is_empty(), "user should have a generated ID");
     assert_eq!(
@@ -28,10 +28,10 @@ fn test_create_operator() {
 
 #[test]
 fn test_get_operator_by_user_id() {
-    let conn = setup_test_db();
-    let (created, _) = create_test_operator(&conn, "test@example.com", OperatorRole::Owner);
+    let mut conn = setup_test_db();
+    let (created, _) = create_test_operator(&mut conn, "test@example.com", OperatorRole::Owner);
 
-    let fetched = queries::get_user_by_id(&conn, &created.id)
+    let fetched = queries::get_user_by_id(&mut conn, &created.id)
         .expect("Query failed")
         .expect("User not found");
 
@@ -47,11 +47,11 @@ fn test_get_operator_by_user_id() {
 
 #[test]
 fn test_get_user_by_api_key() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let (created_user, api_key) =
-        create_test_operator(&conn, "test@example.com", OperatorRole::View);
+        create_test_operator(&mut conn, "test@example.com", OperatorRole::View);
 
-    let (fetched_user, _api_key) = queries::get_user_by_api_key(&conn, &api_key)
+    let (fetched_user, _api_key) = queries::get_user_by_api_key(&mut conn, &api_key)
         .expect("Query failed")
         .expect("User not found");
 
@@ -63,20 +63,20 @@ fn test_get_user_by_api_key() {
 
 #[test]
 fn test_get_user_with_invalid_api_key_returns_none() {
-    let conn = setup_test_db();
-    let _ = create_test_operator(&conn, "test@example.com", OperatorRole::Admin);
+    let mut conn = setup_test_db();
+    let _ = create_test_operator(&mut conn, "test@example.com", OperatorRole::Admin);
 
-    let result = queries::get_user_by_api_key(&conn, "invalid_key").expect("Query failed");
+    let result = queries::get_user_by_api_key(&mut conn, "invalid_key").expect("Query failed");
 
     assert!(result.is_none(), "invalid API key should return None");
 }
 
 #[test]
 fn test_list_operators() {
-    let conn = setup_test_db();
-    create_test_operator(&conn, "test1@example.com", OperatorRole::Owner);
-    create_test_operator(&conn, "test2@example.com", OperatorRole::Admin);
-    create_test_operator(&conn, "test3@example.com", OperatorRole::View);
+    let mut conn = setup_test_db();
+    create_test_operator(&mut conn, "test1@example.com", OperatorRole::Owner);
+    create_test_operator(&mut conn, "test2@example.com", OperatorRole::Admin);
+    create_test_operator(&mut conn, "test3@example.com", OperatorRole::View);
 
     let operators = queries::list_operators(&conn).expect("Query failed");
 
@@ -85,11 +85,12 @@ fn test_list_operators() {
 
 #[test]
 fn test_update_operator_role() {
-    let conn = setup_test_db();
-    let (user, _) = create_test_operator(&conn, "test@example.com", OperatorRole::View);
+    let mut conn = setup_test_db();
+    let (user, _) = create_test_operator(&mut conn, "test@example.com", OperatorRole::View);
 
-    let updated =
-        queries::update_operator_role(&conn, &user.id, OperatorRole::Admin).expect("Update failed");
+    let updated = queries::update_operator_role(&mut conn, &user.id, OperatorRole::Admin)
+        .expect("Update failed")
+        .expect("Should return updated user");
 
     assert_eq!(
         updated.operator_role,
@@ -100,13 +101,13 @@ fn test_update_operator_role() {
 
 #[test]
 fn test_revoke_operator_role() {
-    let conn = setup_test_db();
-    let (user, _) = create_test_operator(&conn, "test@example.com", OperatorRole::Admin);
+    let mut conn = setup_test_db();
+    let (user, _) = create_test_operator(&mut conn, "test@example.com", OperatorRole::Admin);
 
-    let revoked = queries::revoke_operator_role(&conn, &user.id).expect("Revoke failed");
+    let revoked = queries::revoke_operator_role(&mut conn, &user.id).expect("Revoke failed");
     assert!(revoked, "revoke should return true for existing operator");
 
-    let result = queries::get_user_by_id(&conn, &user.id)
+    let result = queries::get_user_by_id(&mut conn, &user.id)
         .expect("Query failed")
         .expect("User should still exist");
     assert!(
@@ -119,8 +120,8 @@ fn test_revoke_operator_role() {
 
 #[test]
 fn test_create_organization() {
-    let conn = setup_test_db();
-    let org = create_test_org(&conn, "Test Organization");
+    let mut conn = setup_test_db();
+    let org = create_test_org(&mut conn, "Test Organization");
 
     assert!(
         !org.id.is_empty(),
@@ -135,10 +136,10 @@ fn test_create_organization() {
 
 #[test]
 fn test_get_organization_by_id() {
-    let conn = setup_test_db();
-    let created = create_test_org(&conn, "Test Org");
+    let mut conn = setup_test_db();
+    let created = create_test_org(&mut conn, "Test Org");
 
-    let fetched = queries::get_organization_by_id(&conn, &created.id)
+    let fetched = queries::get_organization_by_id(&mut conn, &created.id)
         .expect("Query failed")
         .expect("Organization not found");
 
@@ -154,9 +155,9 @@ fn test_get_organization_by_id() {
 
 #[test]
 fn test_list_organizations() {
-    let conn = setup_test_db();
-    create_test_org(&conn, "Org 1");
-    create_test_org(&conn, "Org 2");
+    let mut conn = setup_test_db();
+    create_test_org(&mut conn, "Org 1");
+    create_test_org(&mut conn, "Org 2");
 
     let orgs = queries::list_organizations(&conn).expect("Query failed");
     assert_eq!(orgs.len(), 2, "should return all 2 created organizations");
@@ -164,9 +165,9 @@ fn test_list_organizations() {
 
 #[test]
 fn test_update_organization() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
-    let org = create_test_org(&conn, "Original Name");
+    let org = create_test_org(&mut conn, "Original Name");
 
     let update = UpdateOrganization {
         name: Some("Updated Name".to_string()),
@@ -175,9 +176,9 @@ fn test_update_organization() {
         resend_api_key: None,
         payment_provider: None,
     };
-    queries::update_organization(&conn, &org.id, &update, &master_key).expect("Update failed");
+    queries::update_organization(&mut conn, &org.id, &update, &master_key).expect("Update failed");
 
-    let updated = queries::get_organization_by_id(&conn, &org.id)
+    let updated = queries::get_organization_by_id(&mut conn, &org.id)
         .expect("Query failed")
         .expect("Organization not found");
 
@@ -189,16 +190,16 @@ fn test_update_organization() {
 
 #[test]
 fn test_delete_organization() {
-    let conn = setup_test_db();
-    let org = create_test_org(&conn, "To Delete");
+    let mut conn = setup_test_db();
+    let org = create_test_org(&mut conn, "To Delete");
 
-    let deleted = queries::delete_organization(&conn, &org.id).expect("Delete failed");
+    let deleted = queries::delete_organization(&mut conn, &org.id).expect("Delete failed");
     assert!(
         deleted,
         "delete should return true for existing organization"
     );
 
-    let result = queries::get_organization_by_id(&conn, &org.id).expect("Query failed");
+    let result = queries::get_organization_by_id(&mut conn, &org.id).expect("Query failed");
     assert!(result.is_none(), "deleted organization should not be found");
 }
 
@@ -206,10 +207,10 @@ fn test_delete_organization() {
 
 #[test]
 fn test_create_org_member() {
-    let conn = setup_test_db();
-    let org = create_test_org(&conn, "Test Org");
+    let mut conn = setup_test_db();
+    let org = create_test_org(&mut conn, "Test Org");
     let (user, member, api_key) =
-        create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Owner);
 
     assert!(
         !member.id.is_empty(),
@@ -230,12 +231,12 @@ fn test_create_org_member() {
 
 #[test]
 fn test_get_user_by_api_key_for_member() {
-    let conn = setup_test_db();
-    let org = create_test_org(&conn, "Test Org");
+    let mut conn = setup_test_db();
+    let org = create_test_org(&mut conn, "Test Org");
     let (created_user, _member, api_key) =
-        create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Admin);
+        create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Admin);
 
-    let (fetched_user, _api_key) = queries::get_user_by_api_key(&conn, &api_key)
+    let (fetched_user, _api_key) = queries::get_user_by_api_key(&mut conn, &api_key)
         .expect("Query failed")
         .expect("User not found");
 
@@ -247,32 +248,32 @@ fn test_get_user_by_api_key_for_member() {
 
 #[test]
 fn test_list_org_members() {
-    let conn = setup_test_db();
-    let org = create_test_org(&conn, "Test Org");
-    create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-    create_test_org_member(&conn, &org.id, "admin@test.com", OrgMemberRole::Admin);
-    create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Member);
+    let mut conn = setup_test_db();
+    let org = create_test_org(&mut conn, "Test Org");
+    create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+    create_test_org_member(&mut conn, &org.id, "admin@test.com", OrgMemberRole::Admin);
+    create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Member);
 
-    let members = queries::list_org_members(&conn, &org.id).expect("Query failed");
+    let members = queries::list_org_members(&mut conn, &org.id).expect("Query failed");
     assert_eq!(members.len(), 3, "should return all 3 created org members");
 }
 
 #[test]
 fn test_same_user_different_orgs() {
-    let conn = setup_test_db();
-    let org1 = create_test_org(&conn, "Org 1");
-    let org2 = create_test_org(&conn, "Org 2");
+    let mut conn = setup_test_db();
+    let org1 = create_test_org(&mut conn, "Org 1");
+    let org2 = create_test_org(&mut conn, "Org 2");
 
     // Create first user and member
     let (user1, m1, _) =
-        create_test_org_member(&conn, &org1.id, "same@test.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org1.id, "same@test.com", OrgMemberRole::Owner);
 
     // Same user can be member of another org
     let m2_input = CreateOrgMember {
         user_id: user1.id.clone(),
         role: OrgMemberRole::Owner,
     };
-    let m2 = queries::create_org_member(&conn, &org2.id, &m2_input)
+    let m2 = queries::create_org_member(&mut conn, &org2.id, &m2_input)
         .expect("Should allow same user in different org");
 
     // Same user_id, different orgs
@@ -290,10 +291,10 @@ fn test_same_user_different_orgs() {
 
 #[test]
 fn test_create_project() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App", &master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
 
     assert!(!project.id.is_empty(), "project should have a generated ID");
     assert_eq!(project.org_id, org.id, "project org_id should match org");
@@ -315,12 +316,12 @@ fn test_create_project() {
 
 #[test]
 fn test_get_project_by_id() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
-    let org = create_test_org(&conn, "Test Org");
-    let created = create_test_project(&conn, &org.id, "My App", &master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let created = create_test_project(&mut conn, &org.id, "My App", &master_key);
 
-    let fetched = queries::get_project_by_id(&conn, &created.id)
+    let fetched = queries::get_project_by_id(&mut conn, &created.id)
         .expect("Query failed")
         .expect("Project not found");
 
@@ -340,13 +341,13 @@ fn test_get_project_by_id() {
 
 #[test]
 fn test_list_projects_for_org() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
-    let org = create_test_org(&conn, "Test Org");
-    create_test_project(&conn, &org.id, "App 1", &master_key);
-    create_test_project(&conn, &org.id, "App 2", &master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    create_test_project(&mut conn, &org.id, "App 1", &master_key);
+    create_test_project(&mut conn, &org.id, "App 2", &master_key);
 
-    let projects = queries::list_projects_for_org(&conn, &org.id).expect("Query failed");
+    let projects = queries::list_projects_for_org(&mut conn, &org.id).expect("Query failed");
     assert_eq!(
         projects.len(),
         2,
@@ -356,9 +357,9 @@ fn test_list_projects_for_org() {
 
 #[test]
 fn test_update_org_stripe_config() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     let stripe_config = StripeConfig {
         secret_key: "sk_test_xxx".to_string(),
@@ -374,9 +375,9 @@ fn test_update_org_stripe_config() {
         payment_provider: None,
     };
 
-    queries::update_organization(&conn, &org.id, &update, &master_key).expect("Update failed");
+    queries::update_organization(&mut conn, &org.id, &update, &master_key).expect("Update failed");
 
-    let updated = queries::get_organization_by_id(&conn, &org.id)
+    let updated = queries::get_organization_by_id(&mut conn, &org.id)
         .expect("Query failed")
         .expect("Organization not found");
 
@@ -407,9 +408,9 @@ fn test_update_org_stripe_config() {
 
 #[test]
 fn test_update_org_lemonsqueezy_config() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     let ls_config = LemonSqueezyConfig {
         api_key: "ls_test_api_key".to_string(),
@@ -425,9 +426,9 @@ fn test_update_org_lemonsqueezy_config() {
         payment_provider: None,
     };
 
-    queries::update_organization(&conn, &org.id, &update, &master_key).expect("Update failed");
+    queries::update_organization(&mut conn, &org.id, &update, &master_key).expect("Update failed");
 
-    let updated = queries::get_organization_by_id(&conn, &org.id)
+    let updated = queries::get_organization_by_id(&mut conn, &org.id)
         .expect("Query failed")
         .expect("Organization not found");
 
@@ -458,9 +459,9 @@ fn test_update_org_lemonsqueezy_config() {
 
 #[test]
 fn test_update_org_both_payment_configs() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     let stripe_config = StripeConfig {
         secret_key: "sk_test_both".to_string(),
@@ -482,9 +483,9 @@ fn test_update_org_both_payment_configs() {
         payment_provider: Some(Some("stripe".to_string())),
     };
 
-    queries::update_organization(&conn, &org.id, &update, &master_key).expect("Update failed");
+    queries::update_organization(&mut conn, &org.id, &update, &master_key).expect("Update failed");
 
-    let updated = queries::get_organization_by_id(&conn, &org.id)
+    let updated = queries::get_organization_by_id(&mut conn, &org.id)
         .expect("Query failed")
         .expect("Organization not found");
 
@@ -522,10 +523,10 @@ fn test_update_org_both_payment_configs() {
 
 #[test]
 fn test_payment_config_wrong_key_fails() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
     let wrong_key = MasterKey::from_bytes([1u8; 32]); // Different key
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     let stripe_config = StripeConfig {
         secret_key: "sk_secret".to_string(),
@@ -541,9 +542,9 @@ fn test_payment_config_wrong_key_fails() {
         payment_provider: None,
     };
 
-    queries::update_organization(&conn, &org.id, &update, &master_key).expect("Update failed");
+    queries::update_organization(&mut conn, &org.id, &update, &master_key).expect("Update failed");
 
-    let updated = queries::get_organization_by_id(&conn, &org.id)
+    let updated = queries::get_organization_by_id(&mut conn, &org.id)
         .expect("Query failed")
         .expect("Organization not found");
 
@@ -556,11 +557,11 @@ fn test_payment_config_wrong_key_fails() {
 
 #[test]
 fn test_create_product() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App", &master_key);
-    let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
     assert!(!product.id.is_empty(), "product should have a generated ID");
     assert_eq!(
@@ -591,13 +592,13 @@ fn test_create_product() {
 
 #[test]
 fn test_get_product_by_id() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App", &master_key);
-    let created = create_test_product(&conn, &project.id, "Enterprise", "enterprise");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
+    let created = create_test_product(&mut conn, &project.id, "Enterprise", "enterprise");
 
-    let fetched = queries::get_product_by_id(&conn, &created.id)
+    let fetched = queries::get_product_by_id(&mut conn, &created.id)
         .expect("Query failed")
         .expect("Product not found");
 
@@ -613,15 +614,15 @@ fn test_get_product_by_id() {
 
 #[test]
 fn test_list_products_for_project() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App", &master_key);
-    create_test_product(&conn, &project.id, "Free", "free");
-    create_test_product(&conn, &project.id, "Pro", "pro");
-    create_test_product(&conn, &project.id, "Enterprise", "enterprise");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
+    create_test_product(&mut conn, &project.id, "Free", "free");
+    create_test_product(&mut conn, &project.id, "Pro", "pro");
+    create_test_product(&mut conn, &project.id, "Enterprise", "enterprise");
 
-    let products = queries::list_products_for_project(&conn, &project.id).expect("Query failed");
+    let products = queries::list_products_for_project(&mut conn, &project.id).expect("Query failed");
     assert_eq!(
         products.len(),
         3,
@@ -631,11 +632,11 @@ fn test_list_products_for_project() {
 
 #[test]
 fn test_update_product() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App", &master_key);
-    let product = create_test_product(&conn, &project.id, "Basic", "basic");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Basic", "basic");
 
     let update = UpdateProduct {
         name: Some("Premium".to_string()),
@@ -651,9 +652,9 @@ fn test_update_product() {
         ]),
     };
 
-    queries::update_product(&conn, &product.id, &update).expect("Update failed");
+    queries::update_product(&mut conn, &product.id, &update).expect("Update failed");
 
-    let updated = queries::get_product_by_id(&conn, &product.id)
+    let updated = queries::get_product_by_id(&mut conn, &product.id)
         .expect("Query failed")
         .expect("Product not found");
 
@@ -678,16 +679,16 @@ fn test_update_product() {
 
 #[test]
 fn test_delete_product() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App", &master_key);
-    let product = create_test_product(&conn, &project.id, "To Delete", "delete");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "To Delete", "delete");
 
-    let deleted = queries::delete_product(&conn, &product.id).expect("Delete failed");
+    let deleted = queries::delete_product(&mut conn, &product.id).expect("Delete failed");
     assert!(deleted, "delete should return true for existing product");
 
-    let result = queries::get_product_by_id(&conn, &product.id).expect("Query failed");
+    let result = queries::get_product_by_id(&mut conn, &product.id).expect("Query failed");
     assert!(result.is_none(), "deleted product should not be found");
 }
 
@@ -695,14 +696,14 @@ fn test_delete_product() {
 
 #[test]
 fn test_delete_org_cascades_to_members() {
-    let conn = setup_test_db();
-    let org = create_test_org(&conn, "Test Org");
+    let mut conn = setup_test_db();
+    let org = create_test_org(&mut conn, "Test Org");
     let (_user, member, _) =
-        create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Owner);
 
-    queries::delete_organization(&conn, &org.id).expect("Delete failed");
+    queries::delete_organization(&mut conn, &org.id).expect("Delete failed");
 
-    let result = queries::get_org_member_by_id(&conn, &member.id).expect("Query failed");
+    let result = queries::get_org_member_by_id(&mut conn, &member.id).expect("Query failed");
     assert!(
         result.is_none(),
         "org member should be cascade deleted with org"
@@ -711,14 +712,14 @@ fn test_delete_org_cascades_to_members() {
 
 #[test]
 fn test_delete_org_cascades_to_projects() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App", &master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
 
-    queries::delete_organization(&conn, &org.id).expect("Delete failed");
+    queries::delete_organization(&mut conn, &org.id).expect("Delete failed");
 
-    let result = queries::get_project_by_id(&conn, &project.id).expect("Query failed");
+    let result = queries::get_project_by_id(&mut conn, &project.id).expect("Query failed");
     assert!(
         result.is_none(),
         "project should be cascade deleted with org"
@@ -727,15 +728,15 @@ fn test_delete_org_cascades_to_projects() {
 
 #[test]
 fn test_delete_project_cascades_to_products() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "My App", &master_key);
-    let product = create_test_product(&conn, &project.id, "Pro", "pro");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
 
-    queries::delete_project(&conn, &project.id).expect("Delete failed");
+    queries::delete_project(&mut conn, &project.id).expect("Delete failed");
 
-    let result = queries::get_product_by_id(&conn, &product.id).expect("Query failed");
+    let result = queries::get_product_by_id(&mut conn, &product.id).expect("Query failed");
     assert!(
         result.is_none(),
         "product should be cascade deleted with project"
@@ -746,7 +747,7 @@ fn test_delete_project_cascades_to_products() {
 
 #[test]
 fn test_purge_old_public_audit_logs_only_deletes_public() {
-    let conn = setup_test_audit_db();
+    let mut conn = setup_test_audit_db();
 
     // Create audit logs with different actor types, all with old timestamps
     // Using timestamp 0 (1970) to ensure they're "old"
@@ -788,7 +789,7 @@ fn test_purge_old_public_audit_logs_only_deletes_public() {
     assert_eq!(count, 4, "should have 4 audit logs before purge");
 
     // Purge with 1 day retention (anything older than 1 day ago)
-    let deleted = queries::purge_old_public_audit_logs(&conn, ONE_DAY).unwrap();
+    let deleted = queries::purge_old_public_audit_logs(&mut conn, ONE_DAY).unwrap();
 
     // Only the public log should be deleted
     assert_eq!(deleted, 1, "should delete only 1 public audit log");
@@ -840,7 +841,7 @@ fn test_purge_old_public_audit_logs_only_deletes_public() {
 
 #[test]
 fn test_purge_old_public_audit_logs_respects_retention_period() {
-    let conn = setup_test_audit_db();
+    let mut conn = setup_test_audit_db();
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -866,7 +867,7 @@ fn test_purge_old_public_audit_logs_respects_retention_period() {
     .unwrap();
 
     // Purge with 30 day retention
-    let deleted = queries::purge_old_public_audit_logs(&conn, ONE_MONTH).unwrap();
+    let deleted = queries::purge_old_public_audit_logs(&mut conn, ONE_MONTH).unwrap();
 
     // Only the old public log should be deleted
     assert_eq!(deleted, 1, "should delete only the old public log");
@@ -889,19 +890,19 @@ fn test_purge_old_public_audit_logs_respects_retention_period() {
 
 #[test]
 fn test_api_key_scope_rejects_project_from_different_org() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
 
     // Create two different orgs
-    let org_a = create_test_org(&conn, "Org A");
-    let org_b = create_test_org(&conn, "Org B");
+    let org_a = create_test_org(&mut conn, "Org A");
+    let org_b = create_test_org(&mut conn, "Org B");
 
     // Create a project in Org B
-    let project_b = create_test_project(&conn, &org_b.id, "Project B", &master_key);
+    let project_b = create_test_project(&mut conn, &org_b.id, "Project B", &master_key);
 
     // Create a user who is member of org_a (so membership check passes)
     let (user, _, _) =
-        create_test_org_member(&conn, &org_a.id, "test@example.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org_a.id, "test@example.com", OrgMemberRole::Member);
 
     // Try to create an API key with a scope that references org_a but project from org_b
     let invalid_scope = paycheck::models::CreateApiKeyScope {
@@ -911,7 +912,7 @@ fn test_api_key_scope_rejects_project_from_different_org() {
     };
 
     let result = queries::create_api_key(
-        &conn,
+        &mut conn,
         &user.id,
         "test-key",
         None,
@@ -933,14 +934,14 @@ fn test_api_key_scope_rejects_project_from_different_org() {
 
 #[test]
 fn test_api_key_scope_rejects_nonexistent_project() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
 
     // Create an org
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     // Create a user who is member of the org (so membership check passes)
     let (user, _, _) =
-        create_test_org_member(&conn, &org.id, "test@example.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "test@example.com", OrgMemberRole::Member);
 
     // Try to create an API key with a scope that references a non-existent project
     let invalid_scope = paycheck::models::CreateApiKeyScope {
@@ -950,7 +951,7 @@ fn test_api_key_scope_rejects_nonexistent_project() {
     };
 
     let result = queries::create_api_key(
-        &conn,
+        &mut conn,
         &user.id,
         "test-key",
         None,
@@ -972,16 +973,16 @@ fn test_api_key_scope_rejects_nonexistent_project() {
 
 #[test]
 fn test_api_key_scope_accepts_valid_project() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
 
     // Create an org and project
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
     // Create a user who is member of the org (so membership check passes)
     let (user, _, _) =
-        create_test_org_member(&conn, &org.id, "test@example.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "test@example.com", OrgMemberRole::Member);
 
     // Create an API key with a valid scope (project belongs to org, user is member)
     let valid_scope = paycheck::models::CreateApiKeyScope {
@@ -991,7 +992,7 @@ fn test_api_key_scope_accepts_valid_project() {
     };
 
     let result = queries::create_api_key(
-        &conn,
+        &mut conn,
         &user.id,
         "test-key",
         None,
@@ -1007,7 +1008,7 @@ fn test_api_key_scope_accepts_valid_project() {
 
     // Verify the scope was created
     let (api_key, _full_key) = result.unwrap();
-    let scopes = queries::get_api_key_scopes(&conn, &api_key.id).expect("Get scopes failed");
+    let scopes = queries::get_api_key_scopes(&mut conn, &api_key.id).expect("Get scopes failed");
     assert_eq!(scopes.len(), 1, "should have exactly 1 scope");
     assert_eq!(scopes[0].org_id, org.id, "scope org_id should match input");
     assert_eq!(

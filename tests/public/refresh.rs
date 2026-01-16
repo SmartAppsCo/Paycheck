@@ -39,13 +39,13 @@ fn setup_refresh_test() -> (Router, String, String, String, String) {
     let device_id: String;
 
     {
-        let conn = pool.get().unwrap();
+        let mut conn = pool.get().unwrap();
         paycheck::db::init_db(&conn).unwrap();
 
         // Create test hierarchy with encrypted project key
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -54,7 +54,7 @@ fn setup_refresh_test() -> (Router, String, String, String, String) {
         );
 
         // Create a device
-        let device = create_test_device(&conn, &license.id, "test-device-123", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device-123", DeviceType::Uuid);
 
         jti = device.jti.clone();
         license_id = license.id.clone();
@@ -254,7 +254,7 @@ async fn test_refresh_rejects_non_uuid_product_id() {
     let manager = SqliteConnectionManager::memory();
     let pool = Pool::builder().max_size(4).build(manager).unwrap();
     {
-        let conn = pool.get().unwrap();
+        let mut conn = pool.get().unwrap();
         paycheck::db::init_db(&conn).unwrap();
     }
 
@@ -323,19 +323,19 @@ async fn test_refresh_with_revoked_license_fails() {
     let token: String;
 
     {
-        let conn = pool.get().unwrap();
+        let mut conn = pool.get().unwrap();
         paycheck::db::init_db(&conn).unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(future_timestamp(ONE_YEAR)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
         // Create JWT
         let claims = LicenseClaims {
@@ -361,7 +361,7 @@ async fn test_refresh_with_revoked_license_fails() {
         .unwrap();
 
         // Revoke the license
-        queries::revoke_license(&conn, &license.id).unwrap();
+        queries::revoke_license(&mut conn, &license.id).unwrap();
     }
 
     let audit_manager = SqliteConnectionManager::memory();
@@ -423,19 +423,19 @@ async fn test_refresh_with_revoked_jti_fails() {
     let token: String;
 
     {
-        let conn = pool.get().unwrap();
+        let mut conn = pool.get().unwrap();
         paycheck::db::init_db(&conn).unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(future_timestamp(ONE_YEAR)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
         // Create JWT
         let claims = LicenseClaims {
@@ -461,7 +461,7 @@ async fn test_refresh_with_revoked_jti_fails() {
         .unwrap();
 
         // Revoke this specific JTI
-        queries::add_revoked_jti(&conn, &license.id, &device.jti, Some("test revocation")).unwrap();
+        queries::add_revoked_jti(&mut conn, &license.id, &device.jti, Some("test revocation")).unwrap();
     }
 
     let audit_manager = SqliteConnectionManager::memory();
@@ -526,12 +526,12 @@ async fn test_refresh_with_expired_jwt_succeeds() {
     let token: String;
 
     {
-        let conn = pool.get().unwrap();
+        let mut conn = pool.get().unwrap();
         paycheck::db::init_db(&conn).unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         // License valid for 365 days
         let license = create_test_license(
             &conn,
@@ -539,7 +539,7 @@ async fn test_refresh_with_expired_jwt_succeeds() {
             &product.id,
             Some(future_timestamp(ONE_YEAR)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
         // Create claims
         let claims = LicenseClaims {
@@ -643,12 +643,12 @@ async fn test_refresh_with_expired_license_fails() {
     let token: String;
 
     {
-        let conn = pool.get().unwrap();
+        let mut conn = pool.get().unwrap();
         paycheck::db::init_db(&conn).unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         // License expired 1 day ago (database-level expiration)
         let license = create_test_license(
             &conn,
@@ -656,7 +656,7 @@ async fn test_refresh_with_expired_license_fails() {
             &product.id,
             Some(past_timestamp(ONE_DAY)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
         // Create claims (these don't matter since DB-level expiration is checked first)
         let claims = LicenseClaims {
@@ -746,11 +746,11 @@ async fn test_refresh_with_expired_license_exp_fails() {
     let token: String;
 
     {
-        let conn = pool.get().unwrap();
+        let mut conn = pool.get().unwrap();
         paycheck::db::init_db(&conn).unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
         // Create a product with 1-day license expiration
         let input = paycheck::models::CreateProduct {
@@ -762,10 +762,10 @@ async fn test_refresh_with_expired_license_exp_fails() {
             device_limit: 3,
             features: vec![],
         };
-        let product = queries::create_product(&conn, &project.id, &input).unwrap();
+        let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
         // License itself doesn't expire (no database-level expiration)
-        let license = create_test_license(&conn, &project.id, &product.id, None);
+        let license = create_test_license(&mut conn, &project.id, &product.id, None);
 
         // Create device - but manually set activated_at to 2 days ago
         // so the license_exp (activated_at + 1 day) is in the past
@@ -788,7 +788,7 @@ async fn test_refresh_with_expired_license_exp_fails() {
         .unwrap();
 
         // Fetch the device to get the backdated record
-        let device = queries::get_device_by_jti(&conn, &jti).unwrap().unwrap();
+        let device = queries::get_device_by_jti(&mut conn, &jti).unwrap().unwrap();
 
         // Create claims
         let claims = LicenseClaims {

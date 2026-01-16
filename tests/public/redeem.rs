@@ -23,10 +23,10 @@ async fn test_redeem_with_valid_code_returns_token() {
     let code: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -36,7 +36,7 @@ async fn test_redeem_with_valid_code_returns_token() {
 
         // Create an activation code
         let activation_code =
-            queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+            queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                 .unwrap();
 
         public_key = project.public_key.clone();
@@ -112,10 +112,10 @@ async fn test_redeem_with_invalid_device_type_returns_error() {
     let code: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -124,7 +124,7 @@ async fn test_redeem_with_invalid_device_type_returns_error() {
         );
 
         let activation_code =
-            queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+            queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                 .unwrap();
 
         public_key = project.public_key.clone();
@@ -172,9 +172,9 @@ async fn test_redeem_code_not_found_returns_forbidden() {
     let public_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
         public_key = project.public_key.clone();
     }
@@ -218,10 +218,10 @@ async fn test_redeem_code_already_used_returns_forbidden() {
     let code: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -230,11 +230,11 @@ async fn test_redeem_code_already_used_returns_forbidden() {
         );
 
         let activation_code =
-            queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+            queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                 .unwrap();
 
         // Mark the code as used
-        queries::mark_activation_code_used(&conn, &activation_code.code).unwrap();
+        queries::mark_activation_code_used(&mut conn, &activation_code.code).unwrap();
 
         public_key = project.public_key.clone();
         code = activation_code.code.clone();
@@ -279,10 +279,10 @@ async fn test_redeem_code_creates_device_record() {
     let license_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -291,7 +291,7 @@ async fn test_redeem_code_creates_device_record() {
         );
 
         let activation_code =
-            queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+            queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                 .unwrap();
 
         public_key = project.public_key.clone();
@@ -329,8 +329,8 @@ async fn test_redeem_code_creates_device_record() {
     );
 
     // Verify device was created
-    let conn = state.db.get().unwrap();
-    let devices = queries::list_devices_for_license(&conn, &license_id).unwrap();
+    let mut conn = state.db.get().unwrap();
+    let devices = queries::list_devices_for_license(&mut conn, &license_id).unwrap();
     assert_eq!(devices.len(), 1, "exactly one device should be created");
     assert_eq!(
         devices[0].device_id, "new-device-123",
@@ -352,10 +352,10 @@ async fn test_redeem_revoked_license_returns_forbidden() {
     let code: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -364,11 +364,11 @@ async fn test_redeem_revoked_license_returns_forbidden() {
         );
 
         let activation_code =
-            queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+            queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                 .unwrap();
 
         // Revoke the license
-        queries::revoke_license(&conn, &license.id).unwrap();
+        queries::revoke_license(&mut conn, &license.id).unwrap();
 
         public_key = project.public_key.clone();
         code = activation_code.code.clone();
@@ -412,10 +412,10 @@ async fn test_redeem_expired_license_returns_forbidden() {
     let code: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -424,7 +424,7 @@ async fn test_redeem_expired_license_returns_forbidden() {
         );
 
         let activation_code =
-            queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+            queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                 .unwrap();
 
         public_key = project.public_key.clone();
@@ -469,9 +469,9 @@ async fn test_redeem_device_limit_exceeded_returns_error() {
     let code: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
         // Create product with device_limit = 1
         let input = CreateProduct {
@@ -484,7 +484,7 @@ async fn test_redeem_device_limit_exceeded_returns_error() {
             features: vec![],
         };
         let product =
-            queries::create_product(&conn, &project.id, &input).expect("Failed to create product");
+            queries::create_product(&mut conn, &project.id, &input).expect("Failed to create product");
 
         let license = create_test_license(
             &conn,
@@ -494,10 +494,10 @@ async fn test_redeem_device_limit_exceeded_returns_error() {
         );
 
         // Create a device (using up the limit)
-        create_test_device(&conn, &license.id, "device-1", DeviceType::Uuid);
+        create_test_device(&mut conn, &license.id, "device-1", DeviceType::Uuid);
 
         let activation_code =
-            queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+            queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                 .unwrap();
 
         public_key = project.public_key.clone();
@@ -543,10 +543,10 @@ async fn test_redeem_same_device_returns_token() {
     let code: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -555,10 +555,10 @@ async fn test_redeem_same_device_returns_token() {
         );
 
         // Create an existing device
-        create_test_device(&conn, &license.id, "existing-device", DeviceType::Uuid);
+        create_test_device(&mut conn, &license.id, "existing-device", DeviceType::Uuid);
 
         let activation_code =
-            queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+            queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                 .unwrap();
 
         public_key = project.public_key.clone();
@@ -604,10 +604,10 @@ async fn test_redeem_with_public_key() {
     let code: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -616,7 +616,7 @@ async fn test_redeem_with_public_key() {
         );
 
         let activation_code =
-            queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+            queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                 .unwrap();
 
         public_key = project.public_key.clone();
@@ -669,10 +669,10 @@ mod activation_code_security {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -681,7 +681,7 @@ mod activation_code_security {
             );
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             public_key = project.public_key.clone();
@@ -752,10 +752,10 @@ mod activation_code_security {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -764,7 +764,7 @@ mod activation_code_security {
             );
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             // Manually set the expiry to 1 second ago (past)
@@ -817,10 +817,10 @@ mod activation_code_security {
         let second_code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -830,18 +830,18 @@ mod activation_code_security {
 
             // Create first activation code
             let first_activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
             first_code = first_activation_code.code.clone();
 
             // Mark first code as used (simulating that a new code was requested, which should
             // invalidate old codes - in practice the system creates new codes without invalidating,
             // but this test verifies that used codes cannot be reused)
-            queries::mark_activation_code_used(&conn, &first_activation_code.code).unwrap();
+            queries::mark_activation_code_used(&mut conn, &first_activation_code.code).unwrap();
 
             // Create second activation code
             let second_activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
             second_code = second_activation_code.code.clone();
 
@@ -912,10 +912,10 @@ mod activation_code_security {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -925,11 +925,11 @@ mod activation_code_security {
 
             // Create activation code first
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             // Then revoke the license
-            queries::revoke_license(&conn, &license.id).unwrap();
+            queries::revoke_license(&mut conn, &license.id).unwrap();
 
             public_key = project.public_key.clone();
             code = activation_code.code.clone();
@@ -973,10 +973,10 @@ mod activation_code_security {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -986,11 +986,11 @@ mod activation_code_security {
 
             // Create activation code first
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             // Then soft-delete the license
-            queries::soft_delete_license(&conn, &license.id).unwrap();
+            queries::soft_delete_license(&mut conn, &license.id).unwrap();
 
             public_key = project.public_key.clone();
             code = activation_code.code.clone();
@@ -1044,9 +1044,9 @@ mod device_limit_enforcement {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             // Create product with device_limit = 2
             let input = CreateProduct {
@@ -1058,14 +1058,14 @@ mod device_limit_enforcement {
                 device_limit: 2,
                 features: vec![],
             };
-            let product = queries::create_product(&conn, &project.id, &input).unwrap();
+            let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
             // Create license at device limit (2 devices)
-            let (license, _devices) = create_license_at_device_limit(&conn, &project.id, &product);
+            let (license, _devices) = create_license_at_device_limit(&mut conn, &project.id, &product);
 
             // Create activation code for attempting one more activation
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             public_key = project.public_key.clone();
@@ -1111,9 +1111,9 @@ mod device_limit_enforcement {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             // Create product with device_limit = 1
             let input = CreateProduct {
@@ -1125,7 +1125,7 @@ mod device_limit_enforcement {
                 device_limit: 1,
                 features: vec![],
             };
-            let product = queries::create_product(&conn, &project.id, &input).unwrap();
+            let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
             let license = create_test_license(
                 &conn,
@@ -1135,10 +1135,10 @@ mod device_limit_enforcement {
             );
 
             // Create an existing device (using up the limit)
-            create_test_device(&conn, &license.id, "existing-device", DeviceType::Uuid);
+            create_test_device(&mut conn, &license.id, "existing-device", DeviceType::Uuid);
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             public_key = project.public_key.clone();
@@ -1185,9 +1185,9 @@ mod device_limit_enforcement {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             // Create product with device_limit = 0 (unlimited)
             let input = CreateProduct {
@@ -1199,7 +1199,7 @@ mod device_limit_enforcement {
                 device_limit: 0, // 0 means unlimited devices
                 features: vec![],
             };
-            let product = queries::create_product(&conn, &project.id, &input).unwrap();
+            let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
             let license = create_test_license(
                 &conn,
@@ -1209,7 +1209,7 @@ mod device_limit_enforcement {
             );
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             public_key = project.public_key.clone();
@@ -1255,9 +1255,9 @@ mod device_limit_enforcement {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             // Create product with device_limit = 1
             let input = CreateProduct {
@@ -1269,7 +1269,7 @@ mod device_limit_enforcement {
                 device_limit: 1,
                 features: vec![],
             };
-            let product = queries::create_product(&conn, &project.id, &input).unwrap();
+            let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
             let license = create_test_license(
                 &conn,
@@ -1279,11 +1279,11 @@ mod device_limit_enforcement {
             );
 
             // Create and then delete a device (simulating deactivation)
-            let device = create_test_device(&conn, &license.id, "old-device", DeviceType::Uuid);
-            queries::delete_device(&conn, &device.id).unwrap();
+            let device = create_test_device(&mut conn, &license.id, "old-device", DeviceType::Uuid);
+            queries::delete_device(&mut conn, &device.id).unwrap();
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             public_key = project.public_key.clone();
@@ -1337,9 +1337,9 @@ mod activation_limit_enforcement {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             // Create product with activation_limit = 2, device_limit = 10
             let input = CreateProduct {
@@ -1351,7 +1351,7 @@ mod activation_limit_enforcement {
                 device_limit: 10,    // Device limit is higher
                 features: vec![],
             };
-            let product = queries::create_product(&conn, &project.id, &input).unwrap();
+            let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
             let license = create_test_license(
                 &conn,
@@ -1368,7 +1368,7 @@ mod activation_limit_enforcement {
             .unwrap();
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             public_key = project.public_key.clone();
@@ -1414,9 +1414,9 @@ mod activation_limit_enforcement {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             // Create product with activation_limit = 2, device_limit = 10
             let input = CreateProduct {
@@ -1428,7 +1428,7 @@ mod activation_limit_enforcement {
                 device_limit: 10,    // Device limit is higher
                 features: vec![],
             };
-            let product = queries::create_product(&conn, &project.id, &input).unwrap();
+            let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
             let license = create_test_license(
                 &conn,
@@ -1438,8 +1438,8 @@ mod activation_limit_enforcement {
             );
 
             // Create 2 devices and then delete them (simulating activations followed by deactivations)
-            let device1 = create_test_device(&conn, &license.id, "device-1", DeviceType::Uuid);
-            let device2 = create_test_device(&conn, &license.id, "device-2", DeviceType::Uuid);
+            let device1 = create_test_device(&mut conn, &license.id, "device-1", DeviceType::Uuid);
+            let device2 = create_test_device(&mut conn, &license.id, "device-2", DeviceType::Uuid);
 
             // Manually set activation_count to 2 (these devices counted)
             conn.execute(
@@ -1449,11 +1449,11 @@ mod activation_limit_enforcement {
             .unwrap();
 
             // Delete devices (deactivate them)
-            queries::delete_device(&conn, &device1.id).unwrap();
-            queries::delete_device(&conn, &device2.id).unwrap();
+            queries::delete_device(&mut conn, &device1.id).unwrap();
+            queries::delete_device(&mut conn, &device2.id).unwrap();
 
             // Verify activation_count is still 2 even though devices are deleted
-            let updated_license = queries::get_license_by_id(&conn, &license.id)
+            let updated_license = queries::get_license_by_id(&mut conn, &license.id)
                 .unwrap()
                 .unwrap();
             assert_eq!(
@@ -1462,7 +1462,7 @@ mod activation_limit_enforcement {
             );
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             public_key = project.public_key.clone();
@@ -1511,10 +1511,10 @@ mod activation_limit_enforcement {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -1523,17 +1523,17 @@ mod activation_limit_enforcement {
             );
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             code = activation_code.code.clone();
 
             // First claim should succeed
-            let first_claim = queries::try_claim_activation_code(&conn, &code).unwrap();
+            let first_claim = queries::try_claim_activation_code(&mut conn, &code).unwrap();
             assert!(first_claim.is_some(), "first atomic claim should succeed");
 
             // Second claim with same code should fail (already claimed)
-            let second_claim = queries::try_claim_activation_code(&conn, &code).unwrap();
+            let second_claim = queries::try_claim_activation_code(&mut conn, &code).unwrap();
             assert!(
                 second_claim.is_none(),
                 "second atomic claim should fail - code already used"
@@ -1556,9 +1556,9 @@ mod activation_limit_enforcement {
         let codes: Vec<String>;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             // Product with device_limit=1 but high activation_limit
             let input = CreateProduct {
@@ -1570,7 +1570,7 @@ mod activation_limit_enforcement {
                 device_limit: 1,       // Only 1 device allowed!
                 features: vec![],
             };
-            let product = queries::create_product(&conn, &project.id, &input).unwrap();
+            let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -1650,8 +1650,8 @@ mod activation_limit_enforcement {
 
         // Verify only one device was created despite concurrent attempts
         {
-            let conn = state.db.get().unwrap();
-            let devices = queries::list_devices_for_license(&conn, &license_id).unwrap();
+            let mut conn = state.db.get().unwrap();
+            let devices = queries::list_devices_for_license(&mut conn, &license_id).unwrap();
             assert_eq!(
                 devices.len(),
                 1,
@@ -1659,7 +1659,7 @@ mod activation_limit_enforcement {
             );
 
             // Verify activation_count is correct (only incremented once)
-            let license = queries::get_license_by_id(&conn, &license_id)
+            let license = queries::get_license_by_id(&mut conn, &license_id)
                 .unwrap()
                 .unwrap();
             assert_eq!(license.activation_count, 1, "Activation count should be 1");
@@ -1680,9 +1680,9 @@ mod activation_limit_enforcement {
         let codes: Vec<String>;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             // Product with activation_limit=2 but high device_limit
             let input = CreateProduct {
@@ -1694,7 +1694,7 @@ mod activation_limit_enforcement {
                 device_limit: 100,   // High device limit
                 features: vec![],
             };
-            let product = queries::create_product(&conn, &project.id, &input).unwrap();
+            let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -1774,15 +1774,15 @@ mod activation_limit_enforcement {
 
         // Verify exactly 2 devices created
         {
-            let conn = state.db.get().unwrap();
-            let devices = queries::list_devices_for_license(&conn, &license_id).unwrap();
+            let mut conn = state.db.get().unwrap();
+            let devices = queries::list_devices_for_license(&mut conn, &license_id).unwrap();
             assert_eq!(
                 devices.len(),
                 2,
                 "Exactly 2 devices should be created (activation_limit=2)"
             );
 
-            let license = queries::get_license_by_id(&conn, &license_id)
+            let license = queries::get_license_by_id(&mut conn, &license_id)
                 .unwrap()
                 .unwrap();
             assert_eq!(
@@ -1804,9 +1804,9 @@ mod activation_limit_enforcement {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
             // Product with high device limit - we want to test code atomicity, not device limits
             let input = CreateProduct {
                 name: "Unlimited".to_string(),
@@ -1817,7 +1817,7 @@ mod activation_limit_enforcement {
                 device_limit: 100,
                 features: vec![],
             };
-            let product = queries::create_product(&conn, &project.id, &input).unwrap();
+            let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -1826,7 +1826,7 @@ mod activation_limit_enforcement {
             );
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             public_key = project.public_key.clone();
@@ -1884,8 +1884,8 @@ mod activation_limit_enforcement {
 
         // Verify only one device was created
         {
-            let conn = state.db.get().unwrap();
-            let devices = queries::list_devices_for_license(&conn, &license_id).unwrap();
+            let mut conn = state.db.get().unwrap();
+            let devices = queries::list_devices_for_license(&mut conn, &license_id).unwrap();
             assert_eq!(
                 devices.len(),
                 1,
@@ -1912,10 +1912,10 @@ mod input_length_validation {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -1924,7 +1924,7 @@ mod input_length_validation {
             );
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             public_key = project.public_key.clone();
@@ -1985,10 +1985,10 @@ mod input_length_validation {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -1997,7 +1997,7 @@ mod input_length_validation {
             );
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             public_key = project.public_key.clone();
@@ -2058,10 +2058,10 @@ mod input_length_validation {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -2070,7 +2070,7 @@ mod input_length_validation {
             );
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             public_key = project.public_key.clone();
@@ -2127,10 +2127,10 @@ mod input_length_validation {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -2139,7 +2139,7 @@ mod input_length_validation {
             );
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             public_key = project.public_key.clone();

@@ -3,17 +3,17 @@ use super::helpers::*;
 #[tokio::test]
 async fn cannot_access_product_from_another_project() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project1 = create_test_project(&conn, &org.id, "Project 1", &state.master_key);
-    let project2 = create_test_project(&conn, &org.id, "Project 2", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project1 = create_test_project(&mut conn, &org.id, "Project 1", &state.master_key);
+    let project2 = create_test_project(&mut conn, &org.id, "Project 2", &state.master_key);
 
     // Create product in project1
-    let product = create_test_product(&conn, &project1.id, "Product 1", "pro");
+    let product = create_test_product(&mut conn, &project1.id, "Product 1", "pro");
 
     let (_user, _owner, owner_key) =
-        create_test_org_member(&conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
 
     // Try to access product1 via project2's URL
     let response = app
@@ -42,17 +42,17 @@ async fn cannot_access_product_from_another_project() {
 #[tokio::test]
 async fn cannot_access_license_from_another_project() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project1 = create_test_project(&conn, &org.id, "Project 1", &state.master_key);
-    let project2 = create_test_project(&conn, &org.id, "Project 2", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project1 = create_test_project(&mut conn, &org.id, "Project 1", &state.master_key);
+    let project2 = create_test_project(&mut conn, &org.id, "Project 2", &state.master_key);
 
-    let product = create_test_product(&conn, &project1.id, "Product 1", "pro");
-    let license = create_test_license(&conn, &project1.id, &product.id, None);
+    let product = create_test_product(&mut conn, &project1.id, "Product 1", "pro");
+    let license = create_test_license(&mut conn, &project1.id, &product.id, None);
 
     let (_user, _owner, owner_key) =
-        create_test_org_member(&conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
 
     // Try to access license via project2's URL
     let response = app
@@ -80,21 +80,21 @@ async fn cannot_access_license_from_another_project() {
 #[tokio::test]
 async fn member_with_access_to_project1_cannot_access_project2() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project1 = create_test_project(&conn, &org.id, "Project 1", &state.master_key);
-    let project2 = create_test_project(&conn, &org.id, "Project 2", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project1 = create_test_project(&mut conn, &org.id, "Project 1", &state.master_key);
+    let project2 = create_test_project(&mut conn, &org.id, "Project 2", &state.master_key);
 
     let (_user, member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     // Give member access to project1 only
     let pm_input = CreateProjectMember {
         org_member_id: member.id.clone(),
         role: ProjectMemberRole::View,
     };
-    queries::create_project_member(&conn, &project1.id, &pm_input).unwrap();
+    queries::create_project_member(&mut conn, &project1.id, &pm_input).unwrap();
 
     // Should be able to access project1
     let response = app

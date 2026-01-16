@@ -47,13 +47,13 @@ async fn test_callback_pending_session_redirects_with_pending_status() {
     let session_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         // Create a payment session that's NOT completed
-        let session = create_test_payment_session(&conn, &product.id, None);
+        let session = create_test_payment_session(&mut conn, &product.id, None);
 
         session_id = session.id.clone();
     }
@@ -99,10 +99,10 @@ async fn test_callback_completed_session_redirects_with_activation_code() {
     let session_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         // Create license (no device - that's created at activation time)
         let license = create_test_license(
@@ -113,10 +113,10 @@ async fn test_callback_completed_session_redirects_with_activation_code() {
         );
 
         // Create a payment session
-        let session = create_test_payment_session(&conn, &product.id, None);
+        let session = create_test_payment_session(&mut conn, &product.id, None);
 
         // Complete the session (simulating webhook completion)
-        complete_payment_session(&conn, &session.id, &license.id);
+        complete_payment_session(&mut conn, &session.id, &license.id);
 
         session_id = session.id.clone();
     }
@@ -180,8 +180,8 @@ async fn test_callback_project_redirect_url() {
     let session_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
 
         // Create project with a redirect URL configured
         let input = CreateProject {
@@ -203,7 +203,7 @@ async fn test_callback_project_redirect_url() {
         )
         .unwrap();
 
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         // Create license
         let license = create_test_license(
@@ -214,10 +214,10 @@ async fn test_callback_project_redirect_url() {
         );
 
         // Create a payment session (no redirect_url - uses project's)
-        let session = create_test_payment_session(&conn, &product.id, None);
+        let session = create_test_payment_session(&mut conn, &product.id, None);
 
         // Complete the session
-        complete_payment_session(&conn, &session.id, &license.id);
+        complete_payment_session(&mut conn, &session.id, &license.id);
 
         session_id = session.id.clone();
     }

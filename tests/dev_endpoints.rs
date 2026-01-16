@@ -33,11 +33,11 @@ fn operator_app_with_payment_configs() -> (Router, String) {
 
     let org_id: String;
     {
-        let conn = pool.get().unwrap();
+        let mut conn = pool.get().unwrap();
         paycheck::db::init_db(&conn).unwrap();
 
         // Create test data
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         org_id = org.id.clone();
 
         // Add payment configs to organization
@@ -57,7 +57,7 @@ fn operator_app_with_payment_configs() -> (Router, String) {
             payment_provider: Some(Some("stripe".to_string())),
         };
 
-        queries::update_organization(&conn, &org.id, &update, &master_key)
+        queries::update_organization(&mut conn, &org.id, &update, &master_key)
             .expect("Failed to update organization with payment configs");
     }
 
@@ -171,10 +171,10 @@ async fn test_operator_get_payment_config_no_configs() {
 
     let org_id: String;
     {
-        let conn = pool.get().unwrap();
+        let mut conn = pool.get().unwrap();
         paycheck::db::init_db(&conn).unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         org_id = org.id.clone();
         // No payment configs added
     }

@@ -325,10 +325,10 @@ mod public_cors {
         let (app, state) = public_app();
 
         // Create test data for /validate endpoint
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
-        let product = create_test_product(&conn, &project.id, "Pro", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -465,10 +465,10 @@ mod admin_cors {
         let (app, state) = admin_app_with_origins(vec!["https://console.paycheck.dev"]);
 
         // Create test data
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_user, _member, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
         drop(conn);
 
         // Request from non-allowed origin
@@ -507,10 +507,10 @@ mod admin_cors {
         let (app, state) = admin_app_with_origins(vec![allowed_origin]);
 
         // Create test data
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_user, _member, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
         drop(conn);
 
         let response = app
@@ -556,10 +556,10 @@ mod admin_cors {
         let (app, state) = admin_app_with_origins(origins.clone());
 
         // Create test data
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_user, _member, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
         drop(conn);
 
         // Test each allowed origin
@@ -606,10 +606,10 @@ mod admin_cors {
         let (app, state) = admin_app_with_origins(vec![allowed_origin]);
 
         // Create test data
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_user, _member, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
         drop(conn);
 
         let response = app
@@ -644,8 +644,8 @@ mod admin_cors {
         let (app, state) = admin_app_with_origins(vec![allowed_origin]);
 
         // Create test data
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         drop(conn);
 
         // Send preflight request
@@ -685,8 +685,8 @@ mod admin_cors {
         let (app, state) = admin_app_with_origins(vec![allowed_origin]);
 
         // Create test data
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         drop(conn);
 
         let response = app
@@ -731,9 +731,9 @@ mod admin_cors {
         let (app, state) = operator_app_with_origins(vec![allowed_origin]);
 
         // Create test operator
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
         let (_user, api_key) =
-            create_test_operator(&conn, "admin@paycheck.dev", OperatorRole::Admin);
+            create_test_operator(&mut conn, "admin@paycheck.dev", OperatorRole::Admin);
         drop(conn);
 
         // Request from allowed origin
@@ -829,8 +829,8 @@ mod preflight_requests {
         let (app, state) = admin_app_with_origins(vec![allowed_origin]);
 
         // Create test data
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         drop(conn);
 
         let response = app
@@ -864,9 +864,9 @@ mod preflight_requests {
         let (app, state) = admin_app_with_origins(vec![allowed_origin]);
 
         // Create test data
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
         drop(conn);
 
         let response = app
@@ -897,8 +897,8 @@ mod preflight_requests {
         let (app, state) = admin_app_with_origins(vec![allowed_origin]);
 
         // Create test data
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         drop(conn);
 
         // Send preflight WITHOUT Authorization header
@@ -1015,10 +1015,10 @@ mod edge_cases {
         let (app, state) = admin_app_with_origins(vec![allowed_origin]);
 
         // Create test data
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_user, _member, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
         drop(conn);
 
         // Test case variations that should NOT match
@@ -1065,10 +1065,10 @@ mod edge_cases {
         let (app, state) = admin_app_with_origins(vec![allowed_origin]);
 
         // Create test data
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_user, _member, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
         drop(conn);
 
         // Origin with trailing slash
@@ -1104,10 +1104,10 @@ mod edge_cases {
         let (app, state) = admin_app_with_origins(vec![allowed_origin]);
 
         // Create test data
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_user, _member, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
         drop(conn);
 
         // Different port should not be allowed
@@ -1143,10 +1143,10 @@ mod edge_cases {
         let (app, state) = admin_app_with_origins(vec![allowed_origin]);
 
         // Create test data
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_user, _member, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
         drop(conn);
 
         let subdomain_variations = vec![
@@ -1192,10 +1192,10 @@ mod edge_cases {
         let (app, state) = admin_app_with_origins(vec![allowed_origin]);
 
         // Create test data
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_user, _member, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
         drop(conn);
 
         // HTTP instead of HTTPS should not be allowed

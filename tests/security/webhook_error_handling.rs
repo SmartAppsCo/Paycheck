@@ -82,15 +82,15 @@ async fn test_stripe_webhook_corrupted_config_should_not_return_500() {
     let project_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
 
         // Set up CORRUPTED Stripe config - this is the key difference
-        setup_corrupted_stripe_config(&conn, &org.id);
+        setup_corrupted_stripe_config(&mut conn, &org.id);
 
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let session = create_test_payment_session(&conn, &product.id, None);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+        let session = create_test_payment_session(&mut conn, &product.id, None);
 
         session_id = session.id.clone();
         project_id = project.id.clone();
@@ -160,15 +160,15 @@ async fn test_stripe_webhook_valid_config_works() {
     let project_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
 
         // Set up VALID Stripe config
-        setup_stripe_config(&conn, &org.id, &master_key);
+        setup_stripe_config(&mut conn, &org.id, &master_key);
 
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let session = create_test_payment_session(&conn, &product.id, None);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+        let session = create_test_payment_session(&mut conn, &product.id, None);
 
         session_id = session.id.clone();
         project_id = project.id.clone();
@@ -260,15 +260,15 @@ async fn test_lemonsqueezy_webhook_corrupted_config_should_not_return_500() {
     let project_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
 
         // Set up CORRUPTED LemonSqueezy config
-        setup_corrupted_lemonsqueezy_config(&conn, &org.id);
+        setup_corrupted_lemonsqueezy_config(&mut conn, &org.id);
 
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let session = create_test_payment_session(&conn, &product.id, None);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+        let session = create_test_payment_session(&mut conn, &product.id, None);
 
         session_id = session.id.clone();
         project_id = project.id.clone();

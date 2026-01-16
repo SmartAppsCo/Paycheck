@@ -37,10 +37,10 @@ mod email_hash_lookup {
         let email = "customer@example.com";
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
             // Create license with known email hash
             let email_hash = test_email_hasher().hash(email);
@@ -55,7 +55,7 @@ mod email_hash_lookup {
                 payment_provider_order_id: None,
             };
             let _license =
-                queries::create_license(&conn, &project.id, &product.id, &input).unwrap();
+                queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
 
             public_key = project.public_key.clone();
         }
@@ -108,10 +108,10 @@ mod email_hash_lookup {
         let public_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
             // Create license with lowercase email hash
             let email_hash = test_email_hasher().hash("test@example.com");
@@ -126,7 +126,7 @@ mod email_hash_lookup {
                 payment_provider_order_id: None,
             };
             let _license =
-                queries::create_license(&conn, &project.id, &product.id, &input).unwrap();
+                queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
 
             public_key = project.public_key.clone();
         }
@@ -184,12 +184,12 @@ mod email_hash_lookup {
         let email = "multi@example.com";
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product1 = create_test_product(&conn, &project.id, "Basic Plan", "basic");
-            let product2 = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-            let product3 = create_test_product(&conn, &project.id, "Enterprise Plan", "enterprise");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product1 = create_test_product(&mut conn, &project.id, "Basic Plan", "basic");
+            let product2 = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+            let product3 = create_test_product(&mut conn, &project.id, "Enterprise Plan", "enterprise");
 
             let email_hash = test_email_hasher().hash(email);
 
@@ -206,7 +206,7 @@ mod email_hash_lookup {
                     payment_provider_order_id: None,
                 };
                 let _license =
-                    queries::create_license(&conn, &project.id, &product.id, &input).unwrap();
+                    queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
             }
 
             public_key = project.public_key.clone();
@@ -255,10 +255,10 @@ mod email_hash_lookup {
         let license_id: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
             let email_hash = test_email_hasher().hash(email);
             let input = CreateLicense {
@@ -271,13 +271,13 @@ mod email_hash_lookup {
                 payment_provider_subscription_id: None,
                 payment_provider_order_id: None,
             };
-            let license = queries::create_license(&conn, &project.id, &product.id, &input).unwrap();
+            let license = queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
             license_id = license.id.clone();
         }
 
         // Verify the stored email_hash is not the plaintext email
-        let conn = state.db.get().unwrap();
-        let license = queries::get_license_by_id(&conn, &license_id)
+        let mut conn = state.db.get().unwrap();
+        let license = queries::get_license_by_id(&mut conn, &license_id)
             .unwrap()
             .unwrap();
 
@@ -369,10 +369,10 @@ mod activation_code_lifecycle {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -382,7 +382,7 @@ mod activation_code_lifecycle {
 
             // Create an activation code
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             // Manually set the expiry to 31 minutes ago (past the 30 min TTL)
@@ -438,10 +438,10 @@ mod activation_code_lifecycle {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -450,7 +450,7 @@ mod activation_code_lifecycle {
             );
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             // Set expiry to 1 second in the future (still valid)
@@ -508,10 +508,10 @@ mod activation_code_lifecycle {
         let second_code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -521,13 +521,13 @@ mod activation_code_lifecycle {
 
             // Create first activation code
             let first_activation =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
             first_code = first_activation.code.clone();
 
             // Create second activation code
             let second_activation =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
             second_code = second_activation.code.clone();
 
@@ -607,10 +607,10 @@ mod activation_code_lifecycle {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -619,11 +619,11 @@ mod activation_code_lifecycle {
             );
 
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             // Mark the code as used
-            queries::mark_activation_code_used(&conn, &activation_code.code).unwrap();
+            queries::mark_activation_code_used(&mut conn, &activation_code.code).unwrap();
 
             public_key = project.public_key.clone();
             code = activation_code.code.clone();
@@ -667,10 +667,10 @@ mod activation_code_lifecycle {
         let master_key = test_master_key();
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -680,7 +680,7 @@ mod activation_code_lifecycle {
 
             let before = now();
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
             let after = now();
 
@@ -722,10 +722,10 @@ mod recovery_edge_cases {
         let email = "revoked@example.com";
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
             let email_hash = test_email_hasher().hash(email);
             let input = CreateLicense {
@@ -738,10 +738,10 @@ mod recovery_edge_cases {
                 payment_provider_subscription_id: None,
                 payment_provider_order_id: None,
             };
-            let license = queries::create_license(&conn, &project.id, &product.id, &input).unwrap();
+            let license = queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
 
             // Revoke the license
-            queries::revoke_license(&conn, &license.id).unwrap();
+            queries::revoke_license(&mut conn, &license.id).unwrap();
 
             public_key = project.public_key.clone();
         }
@@ -776,13 +776,13 @@ mod recovery_edge_cases {
 
         // No activation codes should have been created
         // (The query filters out revoked licenses)
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
         let email_hash = test_email_hasher().hash(email);
-        let project = queries::get_project_by_public_key(&conn, &public_key)
+        let project = queries::get_project_by_public_key(&mut conn, &public_key)
             .unwrap()
             .unwrap();
         let licenses =
-            queries::get_licenses_by_email_hash(&conn, &project.id, &email_hash).unwrap();
+            queries::get_licenses_by_email_hash(&mut conn, &project.id, &email_hash).unwrap();
         assert!(
             licenses.is_empty(),
             "Revoked license should not appear in recovery query"
@@ -799,10 +799,10 @@ mod recovery_edge_cases {
         let email = "deleted@example.com";
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
             let email_hash = test_email_hasher().hash(email);
             let input = CreateLicense {
@@ -815,10 +815,10 @@ mod recovery_edge_cases {
                 payment_provider_subscription_id: None,
                 payment_provider_order_id: None,
             };
-            let license = queries::create_license(&conn, &project.id, &product.id, &input).unwrap();
+            let license = queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
 
             // Soft-delete the license
-            queries::soft_delete_license(&conn, &license.id).unwrap();
+            queries::soft_delete_license(&mut conn, &license.id).unwrap();
 
             public_key = project.public_key.clone();
         }
@@ -852,13 +852,13 @@ mod recovery_edge_cases {
         );
 
         // No activation codes should have been created
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
         let email_hash = test_email_hasher().hash(email);
-        let project = queries::get_project_by_public_key(&conn, &public_key)
+        let project = queries::get_project_by_public_key(&mut conn, &public_key)
             .unwrap()
             .unwrap();
         let licenses =
-            queries::get_licenses_by_email_hash(&conn, &project.id, &email_hash).unwrap();
+            queries::get_licenses_by_email_hash(&mut conn, &project.id, &email_hash).unwrap();
         assert!(
             licenses.is_empty(),
             "Deleted license should not appear in recovery query"
@@ -875,10 +875,10 @@ mod recovery_edge_cases {
         let email = "expired@example.com";
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
             let email_hash = test_email_hasher().hash(email);
             let input = CreateLicense {
@@ -892,7 +892,7 @@ mod recovery_edge_cases {
                 payment_provider_order_id: None,
             };
             let _license =
-                queries::create_license(&conn, &project.id, &product.id, &input).unwrap();
+                queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
 
             public_key = project.public_key.clone();
         }
@@ -926,13 +926,13 @@ mod recovery_edge_cases {
         );
 
         // No activation codes should have been created
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
         let email_hash = test_email_hasher().hash(email);
-        let project = queries::get_project_by_public_key(&conn, &public_key)
+        let project = queries::get_project_by_public_key(&mut conn, &public_key)
             .unwrap()
             .unwrap();
         let licenses =
-            queries::get_licenses_by_email_hash(&conn, &project.id, &email_hash).unwrap();
+            queries::get_licenses_by_email_hash(&mut conn, &project.id, &email_hash).unwrap();
         assert!(
             licenses.is_empty(),
             "Expired license should not appear in recovery query"
@@ -948,10 +948,10 @@ mod recovery_edge_cases {
         let public_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let _product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let _product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
             public_key = project.public_key.clone();
         }
@@ -1020,10 +1020,10 @@ mod recovery_edge_cases {
         let nonexistent_email = "doesnotexist@example.com";
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
             // Create license with existing email
             let email_hash = test_email_hasher().hash(existing_email);
@@ -1038,7 +1038,7 @@ mod recovery_edge_cases {
                 payment_provider_order_id: None,
             };
             let _license =
-                queries::create_license(&conn, &project.id, &product.id, &input).unwrap();
+                queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
 
             public_key = project.public_key.clone();
         }
@@ -1124,10 +1124,10 @@ mod recovery_edge_cases {
         let valid_public_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let _product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let _product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
             valid_public_key = project.public_key.clone();
         }
@@ -1199,10 +1199,10 @@ mod recovery_edge_cases {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -1212,11 +1212,11 @@ mod recovery_edge_cases {
 
             // Create activation code before revoking
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             // Revoke the license
-            queries::revoke_license(&conn, &license.id).unwrap();
+            queries::revoke_license(&mut conn, &license.id).unwrap();
 
             public_key = project.public_key.clone();
             code = activation_code.code.clone();
@@ -1262,10 +1262,10 @@ mod recovery_edge_cases {
         let code: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -1275,11 +1275,11 @@ mod recovery_edge_cases {
 
             // Create activation code before deleting
             let activation_code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)
+                queries::create_activation_code(&mut conn, &license.id, &project.license_key_prefix)
                     .unwrap();
 
             // Soft-delete the license
-            queries::soft_delete_license(&conn, &license.id).unwrap();
+            queries::soft_delete_license(&mut conn, &license.id).unwrap();
 
             public_key = project.public_key.clone();
             code = activation_code.code.clone();
@@ -1325,9 +1325,9 @@ mod recovery_edge_cases {
         let public_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             public_key = project.public_key.clone();
         }
@@ -1370,9 +1370,9 @@ mod recovery_edge_cases {
         let public_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             public_key = project.public_key.clone();
         }

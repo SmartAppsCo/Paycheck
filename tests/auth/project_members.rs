@@ -3,21 +3,21 @@ use super::helpers::*;
 #[tokio::test]
 async fn member_with_view_role_cannot_add_project_member() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
     let (_user, member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
     let (_user2, other_member, _) =
-        create_test_org_member(&conn, &org.id, "other@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "other@org.com", OrgMemberRole::Member);
 
     let pm_input = CreateProjectMember {
         org_member_id: member.id.clone(),
         role: ProjectMemberRole::View,
     };
-    queries::create_project_member(&conn, &project.id, &pm_input).unwrap();
+    queries::create_project_member(&mut conn, &project.id, &pm_input).unwrap();
 
     let response = app
         .oneshot(
@@ -45,21 +45,21 @@ async fn member_with_view_role_cannot_add_project_member() {
 #[tokio::test]
 async fn member_with_admin_project_role_can_add_project_member() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
     let (_user, member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
     let (_user2, other_member, _) =
-        create_test_org_member(&conn, &org.id, "other@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "other@org.com", OrgMemberRole::Member);
 
     let pm_input = CreateProjectMember {
         org_member_id: member.id.clone(),
         role: ProjectMemberRole::Admin,
     };
-    queries::create_project_member(&conn, &project.id, &pm_input).unwrap();
+    queries::create_project_member(&mut conn, &project.id, &pm_input).unwrap();
 
     let response = app
         .oneshot(
@@ -87,19 +87,19 @@ async fn member_with_admin_project_role_can_add_project_member() {
 #[tokio::test]
 async fn member_can_list_project_members_with_view_role() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
     let (_user, member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let pm_input = CreateProjectMember {
         org_member_id: member.id.clone(),
         role: ProjectMemberRole::View,
     };
-    queries::create_project_member(&conn, &project.id, &pm_input).unwrap();
+    queries::create_project_member(&mut conn, &project.id, &pm_input).unwrap();
 
     let response = app
         .oneshot(

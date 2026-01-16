@@ -121,7 +121,7 @@ pub async fn update_user(
         return Err(AppError::BadRequest(msg::EMAIL_ALREADY_EXISTS.into()));
     }
 
-    queries::update_user(&conn, &id, &input)?;
+    queries::update_user(&conn, &id, &input)?.or_not_found(msg::USER_NOT_FOUND)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.user.id))

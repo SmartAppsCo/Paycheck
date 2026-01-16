@@ -172,12 +172,12 @@ fn test_secure_hash_database_lookup() {
     use paycheck::models::CreateLicense;
 
     let state = create_test_app_state();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Setup
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
-    let product = create_test_product(&conn, &project.id, "Pro", "pro");
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
 
     // Create license with secure email hash
     let email = "customer@example.com";
@@ -193,18 +193,18 @@ fn test_secure_hash_database_lookup() {
         payment_provider_subscription_id: None,
         payment_provider_order_id: Some("order-123".to_string()),
     };
-    let license = queries::create_license(&conn, &project.id, &product.id, &input).unwrap();
+    let license = queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
 
     // Verify we can look it up using the same email
     let lookup_hash = state.email_hasher.hash(email);
-    let found = queries::get_licenses_by_email_hash(&conn, &project.id, &lookup_hash).unwrap();
+    let found = queries::get_licenses_by_email_hash(&mut conn, &project.id, &lookup_hash).unwrap();
 
     assert_eq!(found.len(), 1, "Should find the license by email hash");
     assert_eq!(found[0].id, license.id);
 
     // Different email should not find it
     let wrong_hash = state.email_hasher.hash("other@example.com");
-    let not_found = queries::get_licenses_by_email_hash(&conn, &project.id, &wrong_hash).unwrap();
+    let not_found = queries::get_licenses_by_email_hash(&mut conn, &project.id, &wrong_hash).unwrap();
 
     assert!(
         not_found.is_empty(),

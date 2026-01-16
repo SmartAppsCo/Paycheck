@@ -143,12 +143,12 @@ mod operation_logging {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (user, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro", "pro");
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
 
             org_id = org.id;
             project_id = project.id;
@@ -256,12 +256,12 @@ mod operation_logging {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (user, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro", "pro");
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
             let license = create_test_license(
                 &conn,
                 &project.id,
@@ -350,10 +350,10 @@ mod operation_logging {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (user, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
 
             org_id = org.id;
             user_id = user.id;
@@ -433,14 +433,14 @@ mod operation_logging {
         let second_key_id: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (user, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
 
             // Create a second API key to revoke
             let (key_record, _) =
-                queries::create_api_key(&conn, &user.id, "To Revoke", None, true, None).unwrap();
+                queries::create_api_key(&mut conn, &user.id, "To Revoke", None, true, None).unwrap();
 
             org_id = org.id;
             user_id = user.id;
@@ -519,11 +519,11 @@ mod operation_logging {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (user, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let new_user = create_test_user(&conn, "newmember@test.com", "New Member");
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let new_user = create_test_user(&mut conn, "newmember@test.com", "New Member");
 
             org_id = org.id;
             user_id = user.id;
@@ -619,12 +619,12 @@ mod operation_logging {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (user, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
             let (member_user, _, _) =
-                create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Member);
+                create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Member);
 
             org_id = org.id;
             user_id = user.id;
@@ -706,12 +706,12 @@ mod operation_logging {
         let before_action = chrono::Utc::now().timestamp();
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro", "pro");
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
 
             org_id = org.id;
             project_id = project.id;
@@ -794,10 +794,10 @@ mod sensitive_data_exclusion {
         let created_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (user, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
 
             org_id = org.id;
             user_id = user.id;
@@ -882,10 +882,10 @@ mod sensitive_data_exclusion {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
 
             org_id = org.id;
             api_key = key;
@@ -968,12 +968,12 @@ mod sensitive_data_exclusion {
         let customer_email = "secret-customer@example.com";
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro", "pro");
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
 
             org_id = org.id;
             project_id = project.id;
@@ -1047,8 +1047,8 @@ mod audit_immutability {
 
         let org_id: String;
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             org_id = org.id;
         }
 
@@ -1115,10 +1115,10 @@ mod audit_immutability {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
 
             org_id = org.id;
             api_key = key;
@@ -1180,10 +1180,10 @@ mod audit_immutability {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
 
             org_id = org.id;
             api_key = key;
@@ -1251,19 +1251,19 @@ mod impersonation_logging {
         let operator_api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
+            let mut conn = state.db.get().unwrap();
 
             // Create org with an owner member
-            let org = create_test_org(&conn, "Test Org");
+            let org = create_test_org(&mut conn, "Test Org");
             let (member_user, _, _) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
 
             // Create operator who will impersonate
             let (operator_user, op_key) =
-                create_test_operator(&conn, "operator@admin.com", OperatorRole::Admin);
+                create_test_operator(&mut conn, "operator@admin.com", OperatorRole::Admin);
 
             // Create a user to add as org member
-            let new_user = create_test_user(&conn, "newmember@test.com", "New Member");
+            let new_user = create_test_user(&mut conn, "newmember@test.com", "New Member");
 
             org_id = org.id;
             operator_user_id = operator_user.id;
@@ -1374,17 +1374,17 @@ mod impersonation_logging {
         let operator_api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
+            let mut conn = state.db.get().unwrap();
 
             // Create org (operator will have synthetic access)
-            let org = create_test_org(&conn, "Test Org");
+            let org = create_test_org(&mut conn, "Test Org");
 
             // Create operator with admin role
             let (_, op_key) =
-                create_test_operator(&conn, "operator@admin.com", OperatorRole::Admin);
+                create_test_operator(&mut conn, "operator@admin.com", OperatorRole::Admin);
 
             // Create a user to add as org member
-            let new_user = create_test_user(&conn, "newmember@test.com", "New Member");
+            let new_user = create_test_user(&mut conn, "newmember@test.com", "New Member");
 
             org_id = org.id;
             new_user_id = new_user.id;
@@ -1474,16 +1474,16 @@ mod org_scoped_queries {
         let api_key1: String;
 
         {
-            let conn = state.db.get().unwrap();
+            let mut conn = state.db.get().unwrap();
             let audit_conn = state.audit.get().unwrap();
 
             // Create two orgs with members
-            let org1 = create_test_org(&conn, "Org 1");
-            let org2 = create_test_org(&conn, "Org 2");
+            let org1 = create_test_org(&mut conn, "Org 1");
+            let org2 = create_test_org(&mut conn, "Org 2");
 
             let (_, _, key1) =
-                create_test_org_member(&conn, &org1.id, "user1@test.com", OrgMemberRole::Owner);
-            let _ = create_test_org_member(&conn, &org2.id, "user2@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org1.id, "user1@test.com", OrgMemberRole::Owner);
+            let _ = create_test_org_member(&mut conn, &org2.id, "user2@test.com", OrgMemberRole::Owner);
 
             // Create audit logs for each org
             queries::create_audit_log(
@@ -1574,15 +1574,15 @@ mod org_scoped_queries {
         let api_key1: String;
 
         {
-            let conn = state.db.get().unwrap();
+            let mut conn = state.db.get().unwrap();
             let audit_conn = state.audit.get().unwrap();
 
             // Create two orgs
-            let org1 = create_test_org(&conn, "Org 1");
-            let org2 = create_test_org(&conn, "Org 2");
+            let org1 = create_test_org(&mut conn, "Org 1");
+            let org2 = create_test_org(&mut conn, "Org 2");
 
             let (_, _, key1) =
-                create_test_org_member(&conn, &org1.id, "user1@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org1.id, "user1@test.com", OrgMemberRole::Owner);
 
             // Create audit logs for each org
             queries::create_audit_log(
@@ -1679,12 +1679,12 @@ mod org_scoped_queries {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (user, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro", "pro");
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
 
             org_id = org.id;
             project_id = project.id;

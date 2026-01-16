@@ -44,7 +44,7 @@ struct Cli {
 }
 
 fn bootstrap_first_operator(state: &AppState, email: &str) {
-    let conn = state
+    let mut conn = state
         .db
         .get()
         .expect("Failed to get db connection for bootstrap");
@@ -75,7 +75,7 @@ fn bootstrap_first_operator(state: &AppState, email: &str) {
 
     // Create API key for the operator's user
     let (_api_key_record, api_key) =
-        queries::create_api_key(&conn, &user.id, "Default", None, true, None)
+        queries::create_api_key(&mut conn, &user.id, "Default", None, true, None)
             .expect("Failed to create bootstrap API key");
 
     queries::create_audit_log(
@@ -113,7 +113,7 @@ fn bootstrap_first_operator(state: &AppState, email: &str) {
 /// Creates: operator, organization, org member, project, and product.
 /// Only runs in dev mode and when database is empty.
 fn seed_dev_data(state: &AppState) {
-    let conn = state
+    let mut conn = state
         .db
         .get()
         .expect("Failed to get db connection for seeding");
@@ -144,7 +144,7 @@ fn seed_dev_data(state: &AppState) {
 
     // Create API key for operator
     let (_, operator_api_key) =
-        queries::create_api_key(&conn, &operator_user.id, "Default", None, true, None)
+        queries::create_api_key(&mut conn, &operator_user.id, "Default", None, true, None)
             .expect("Failed to create operator API key");
 
     queries::create_audit_log(
@@ -217,7 +217,7 @@ fn seed_dev_data(state: &AppState) {
 
     // Create an API key for the member
     let (_, member_api_key) =
-        queries::create_api_key(&conn, &member_user.id, "Default", None, true, None)
+        queries::create_api_key(&mut conn, &member_user.id, "Default", None, true, None)
             .expect("Failed to create dev org member API key");
 
     queries::create_audit_log(

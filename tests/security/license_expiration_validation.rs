@@ -78,12 +78,12 @@ async fn test_license_negative_license_exp_days_should_fail() {
     let org_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _member, key) =
-            create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         org_id = org.id;
         project_id = project.id;
@@ -135,12 +135,12 @@ async fn test_license_negative_updates_exp_days_should_fail() {
     let org_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _member, key) =
-            create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         org_id = org.id;
         project_id = project.id;
@@ -192,12 +192,12 @@ async fn test_license_positive_expiration_works() {
     let org_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _member, key) =
-            create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         org_id = org.id;
         project_id = project.id;
@@ -245,12 +245,12 @@ async fn test_license_null_expiration_perpetual_works() {
     let org_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _member, key) =
-            create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         org_id = org.id;
         project_id = project.id;

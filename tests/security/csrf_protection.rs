@@ -81,10 +81,10 @@ async fn test_create_license_without_auth_header_rejected() {
     let org_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         org_id = org.id;
         project_id = project.id;
@@ -128,10 +128,10 @@ async fn test_create_license_with_empty_auth_header_rejected() {
     let org_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         org_id = org.id;
         project_id = project.id;
@@ -177,12 +177,12 @@ async fn test_form_encoded_submission_rejected() {
     let api_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _member, key) =
-            create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         org_id = org.id;
         project_id = project.id;
@@ -232,12 +232,12 @@ async fn test_delete_without_auth_rejected() {
     let device_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license = create_test_license(&conn, &project.id, &product.id, None);
-        let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Machine);
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+        let license = create_test_license(&mut conn, &project.id, &product.id, None);
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Machine);
 
         org_id = org.id;
         project_id = project.id;
@@ -277,10 +277,10 @@ async fn test_put_without_auth_rejected() {
     let member_user_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, _member, _key) =
-            create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Member);
+            create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Member);
 
         org_id = org.id;
         member_user_id = user.id;
@@ -322,11 +322,11 @@ async fn test_revoke_license_without_auth_rejected() {
     let license_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
-        let license = create_test_license(&conn, &project.id, &product.id, None);
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+        let license = create_test_license(&mut conn, &project.id, &product.id, None);
 
         org_id = org.id;
         project_id = project.id;
@@ -368,12 +368,12 @@ async fn test_valid_auth_allows_request() {
     let api_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_, _member, key) =
-            create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         org_id = org.id;
         project_id = project.id;

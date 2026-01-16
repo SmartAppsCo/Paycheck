@@ -81,12 +81,12 @@ mod operator_tests {
         let new_user_id: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
             api_key = key;
 
             // Create a user first, then use their ID to create an operator
-            let new_user = create_test_user(&conn, "newoperator@test.com", "New Operator");
+            let new_user = create_test_user(&mut conn, "newoperator@test.com", "New Operator");
             new_user_id = new_user.id.clone();
         }
 
@@ -138,10 +138,10 @@ mod operator_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
-            let _ = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
-            let _ = create_test_operator(&conn, "view@test.com", OperatorRole::View);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
+            let _ = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
+            let _ = create_test_operator(&mut conn, "view@test.com", OperatorRole::View);
             api_key = key;
         }
 
@@ -181,10 +181,10 @@ mod operator_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
             let (target_user, _) =
-                create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+                create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             target_user_id = target_user.id;
             api_key = key;
         }
@@ -233,8 +233,8 @@ mod operator_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
             api_key = key;
         }
 
@@ -265,10 +265,10 @@ mod operator_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
             let (target_user, _) =
-                create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+                create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             target_user_id = target_user.id;
             api_key = key;
         }
@@ -316,9 +316,9 @@ mod operator_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
+            let mut conn = state.db.get().unwrap();
             let (owner_user, key) =
-                create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+                create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
             owner_user_id = owner_user.id;
             api_key = key;
         }
@@ -356,10 +356,10 @@ mod operator_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
             let (target_user, _) =
-                create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+                create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             target_user_id = target_user.id.clone();
             api_key = key;
         }
@@ -393,8 +393,8 @@ mod operator_tests {
         );
 
         // Verify operator role is revoked
-        let conn = state.db.get().unwrap();
-        let user = queries::get_user_by_id(&conn, &target_user_id)
+        let mut conn = state.db.get().unwrap();
+        let user = queries::get_user_by_id(&mut conn, &target_user_id)
             .unwrap()
             .expect("User should still exist");
         assert!(
@@ -411,9 +411,9 @@ mod operator_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
+            let mut conn = state.db.get().unwrap();
             let (owner_user, key) =
-                create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+                create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
             owner_user_id = owner_user.id;
             api_key = key;
         }
@@ -444,8 +444,8 @@ mod operator_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
             api_key = key;
         }
 
@@ -483,8 +483,8 @@ mod organization_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
         }
 
@@ -517,11 +517,11 @@ mod organization_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         assert!(
-            json["organization"]["id"].as_str().is_some(),
+            json["id"].as_str().is_some(),
             "Response should include organization id"
         );
         assert_eq!(
-            json["organization"]["name"], "Acme Corp",
+            json["name"], "Acme Corp",
             "Organization name should match request"
         );
         // No owner when owner_email not specified
@@ -539,12 +539,12 @@ mod organization_tests {
         let owner_user_id: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
 
             // Create a user first to use as owner
-            let owner_user = create_test_user(&conn, "owner@acme.com", "John Owner");
+            let owner_user = create_test_user(&mut conn, "owner@acme.com", "John Owner");
             owner_user_id = owner_user.id.clone();
         }
 
@@ -578,11 +578,11 @@ mod organization_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         assert!(
-            json["organization"]["id"].as_str().is_some(),
+            json["id"].as_str().is_some(),
             "Response should include organization id"
         );
         assert_eq!(
-            json["organization"]["name"], "Acme Corp",
+            json["name"], "Acme Corp",
             "Organization name should match request"
         );
         // Owner member should be returned (OrgMember struct: id, user_id, org_id, role)
@@ -601,9 +601,9 @@ mod organization_tests {
         );
 
         // Verify org member was created with full user details
-        let conn = state.db.get().unwrap();
-        let org_id = json["organization"]["id"].as_str().unwrap();
-        let members = queries::list_org_members_with_user(&conn, org_id).unwrap();
+        let mut conn = state.db.get().unwrap();
+        let org_id = json["id"].as_str().unwrap();
+        let members = queries::list_org_members_with_user(&mut conn, org_id).unwrap();
         assert_eq!(
             members.len(),
             1,
@@ -627,11 +627,11 @@ mod organization_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
-            let _ = create_test_org(&conn, "Org 1");
-            let _ = create_test_org(&conn, "Org 2");
-            let _ = create_test_org(&conn, "Org 3");
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
+            let _ = create_test_org(&mut conn, "Org 1");
+            let _ = create_test_org(&mut conn, "Org 2");
+            let _ = create_test_org(&mut conn, "Org 3");
             api_key = key;
         }
 
@@ -671,9 +671,9 @@ mod organization_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
+            let org = create_test_org(&mut conn, "Test Org");
             org_id = org.id;
             api_key = key;
         }
@@ -715,8 +715,8 @@ mod organization_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
         }
 
@@ -747,9 +747,9 @@ mod organization_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
-            let org = create_test_org(&conn, "Original Name");
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
+            let org = create_test_org(&mut conn, "Original Name");
             org_id = org.id;
             api_key = key;
         }
@@ -797,9 +797,9 @@ mod organization_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
+            let org = create_test_org(&mut conn, "Test Org");
             org_id = org.id;
             api_key = key;
         }
@@ -832,8 +832,8 @@ mod organization_tests {
         );
 
         // Verify config was encrypted and stored
-        let conn = state.db.get().unwrap();
-        let org = queries::get_organization_by_id(&conn, &org_id)
+        let mut conn = state.db.get().unwrap();
+        let org = queries::get_organization_by_id(&mut conn, &org_id)
             .unwrap()
             .unwrap();
         let stripe_config = org.decrypt_stripe_config(&master_key).unwrap();
@@ -856,9 +856,9 @@ mod organization_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
+            let org = create_test_org(&mut conn, "Test Org");
             org_id = org.id;
             api_key = key;
         }
@@ -905,9 +905,9 @@ mod organization_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
+            let org = create_test_org(&mut conn, "Test Org");
             org_id = org.id.clone();
             api_key = key;
         }
@@ -941,8 +941,8 @@ mod organization_tests {
         );
 
         // Verify org is removed
-        let conn = state.db.get().unwrap();
-        let result = queries::get_organization_by_id(&conn, &org_id).unwrap();
+        let mut conn = state.db.get().unwrap();
+        let result = queries::get_organization_by_id(&mut conn, &org_id).unwrap();
         assert!(
             result.is_none(),
             "Organization should no longer exist after deletion"
@@ -956,8 +956,8 @@ mod organization_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
         }
 
@@ -997,10 +997,10 @@ mod payment_config_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
-            let org = create_test_org(&conn, "Test Org");
-            setup_stripe_config(&conn, &org.id, &master_key);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_stripe_config(&mut conn, &org.id, &master_key);
             org_id = org.id;
             api_key = key;
         }
@@ -1063,10 +1063,10 @@ mod payment_config_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
-            let org = create_test_org(&conn, "Test Org");
-            setup_lemonsqueezy_config(&conn, &org.id, &master_key);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
+            let org = create_test_org(&mut conn, "Test Org");
+            setup_lemonsqueezy_config(&mut conn, &org.id, &master_key);
             org_id = org.id;
             api_key = key;
         }
@@ -1124,9 +1124,9 @@ mod payment_config_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
+            let org = create_test_org(&mut conn, "Test Org");
             // No payment config setup
             org_id = org.id;
             api_key = key;
@@ -1175,8 +1175,8 @@ mod payment_config_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
         }
 
@@ -1214,16 +1214,16 @@ mod audit_log_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "view@test.com", OperatorRole::View);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "view@test.com", OperatorRole::View);
             api_key = key;
         }
 
         // Create an org to generate an audit log entry
         {
-            let conn = state.db.get().unwrap();
+            let mut conn = state.db.get().unwrap();
             let (_, admin_key) =
-                create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+                create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
 
             // Use the API to create an org (this generates audit log)
             let app2 = handlers::operators::router(state.clone()).with_state(state.clone());
@@ -1281,8 +1281,8 @@ mod audit_log_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "view@test.com", OperatorRole::View);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "view@test.com", OperatorRole::View);
             api_key = key;
         }
 
@@ -1323,8 +1323,8 @@ mod audit_log_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "view@test.com", OperatorRole::View);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "view@test.com", OperatorRole::View);
             api_key = key;
         }
 
@@ -1373,16 +1373,16 @@ mod audit_log_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "view@test.com", OperatorRole::View);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "view@test.com", OperatorRole::View);
             api_key = key;
         }
 
         // Create an org to generate an audit log entry
         {
-            let conn = state.db.get().unwrap();
+            let mut conn = state.db.get().unwrap();
             let (_, admin_key) =
-                create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+                create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
 
             let app2 = handlers::operators::router(state.clone()).with_state(state.clone());
             let body = json!({"name": "Text Test Org"});
@@ -1442,8 +1442,8 @@ mod audit_log_tests {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "view@test.com", OperatorRole::View);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "view@test.com", OperatorRole::View);
             api_key = key;
         }
 
@@ -1478,8 +1478,8 @@ mod audit_log_tests {
 
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
         }
 
@@ -1530,10 +1530,10 @@ mod audit_log_tests {
 
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             // Create some audit logs by creating an org
-            let _ = create_test_org(&conn, "Test Org");
+            let _ = create_test_org(&mut conn, "Test Org");
             api_key = key;
         }
 
@@ -1576,8 +1576,8 @@ mod audit_log_tests {
 
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
         }
 
@@ -1620,8 +1620,8 @@ mod audit_log_tests {
 
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
         }
 
@@ -1670,8 +1670,8 @@ mod user_tests {
 
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
         }
 
@@ -1726,11 +1726,11 @@ mod user_tests {
 
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
             // Create existing user
-            create_test_user(&conn, "existing@example.com", "Existing User");
+            create_test_user(&mut conn, "existing@example.com", "Existing User");
         }
 
         let body = json!({
@@ -1773,12 +1773,12 @@ mod user_tests {
 
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
             // Create additional users
-            create_test_user(&conn, "user1@example.com", "User One");
-            create_test_user(&conn, "user2@example.com", "User Two");
+            create_test_user(&mut conn, "user1@example.com", "User One");
+            create_test_user(&mut conn, "user2@example.com", "User Two");
         }
 
         let response = app
@@ -1817,10 +1817,10 @@ mod user_tests {
 
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
-            create_test_user(&conn, "findme@example.com", "Find Me");
+            create_test_user(&mut conn, "findme@example.com", "Find Me");
         }
 
         let response = app
@@ -1863,10 +1863,10 @@ mod user_tests {
         let api_key: String;
         let user_id: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
-            let user = create_test_user(&conn, "target@example.com", "Target User");
+            let user = create_test_user(&mut conn, "target@example.com", "Target User");
             user_id = user.id;
         }
 
@@ -1905,8 +1905,8 @@ mod user_tests {
 
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
         }
 
@@ -1936,10 +1936,10 @@ mod user_tests {
         let api_key: String;
         let user_id: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
-            let user = create_test_user(&conn, "update@example.com", "Old Name");
+            let user = create_test_user(&mut conn, "update@example.com", "Old Name");
             user_id = user.id;
         }
 
@@ -1981,12 +1981,12 @@ mod user_tests {
         let api_key: String;
         let user_id: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
-            let user = create_test_user(&conn, "original@example.com", "Original");
+            let user = create_test_user(&mut conn, "original@example.com", "Original");
             user_id = user.id;
-            create_test_user(&conn, "taken@example.com", "Taken");
+            create_test_user(&mut conn, "taken@example.com", "Taken");
         }
 
         let body = json!({
@@ -2020,10 +2020,10 @@ mod user_tests {
         let api_key: String;
         let user_id: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
-            let user = create_test_user(&conn, "delete@example.com", "Delete Me");
+            let user = create_test_user(&mut conn, "delete@example.com", "Delete Me");
             user_id = user.id;
         }
 
@@ -2042,15 +2042,15 @@ mod user_tests {
         assert_eq!(response.status(), 200, "Delete user should return 200 OK");
 
         // Verify user is soft-deleted (not found via normal query)
-        let conn = state.db.get().unwrap();
-        let user = queries::get_user_by_id(&conn, &user_id).unwrap();
+        let mut conn = state.db.get().unwrap();
+        let user = queries::get_user_by_id(&mut conn, &user_id).unwrap();
         assert!(
             user.is_none(),
             "User should not be found via normal query after soft delete"
         );
 
         // But still exists as deleted
-        let deleted = queries::get_deleted_user_by_id(&conn, &user_id).unwrap();
+        let deleted = queries::get_deleted_user_by_id(&mut conn, &user_id).unwrap();
         assert!(
             deleted.is_some(),
             "User should still exist in deleted state"
@@ -2064,8 +2064,8 @@ mod user_tests {
         let api_key: String;
         let admin_user_id: String;
         {
-            let conn = state.db.get().unwrap();
-            let (user, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (user, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
             admin_user_id = user.id;
         }
@@ -2105,12 +2105,12 @@ mod user_tests {
         let api_key: String;
         let user_id: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
-            let user = create_test_user(&conn, "restore@example.com", "Restore Me");
+            let user = create_test_user(&mut conn, "restore@example.com", "Restore Me");
             user_id = user.id.clone();
-            queries::soft_delete_user(&conn, &user.id).unwrap();
+            queries::soft_delete_user(&mut conn, &user.id).unwrap();
         }
 
         let body = json!({ "force": false });
@@ -2131,8 +2131,8 @@ mod user_tests {
         assert_eq!(response.status(), 200, "Restore user should return 200 OK");
 
         // Verify user is restored
-        let conn = state.db.get().unwrap();
-        let user = queries::get_user_by_id(&conn, &user_id).unwrap();
+        let mut conn = state.db.get().unwrap();
+        let user = queries::get_user_by_id(&mut conn, &user_id).unwrap();
         assert!(
             user.is_some(),
             "User should be found via normal query after restoration"
@@ -2146,10 +2146,10 @@ mod user_tests {
         let api_key: String;
         let user_id: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
-            let user = create_test_user(&conn, "gdpr@example.com", "GDPR Delete");
+            let user = create_test_user(&mut conn, "gdpr@example.com", "GDPR Delete");
             user_id = user.id;
         }
 
@@ -2181,13 +2181,13 @@ mod user_tests {
         );
 
         // Verify user is completely gone
-        let conn = state.db.get().unwrap();
-        let user = queries::get_user_by_id(&conn, &user_id).unwrap();
+        let mut conn = state.db.get().unwrap();
+        let user = queries::get_user_by_id(&mut conn, &user_id).unwrap();
         assert!(
             user.is_none(),
             "User should not be found via normal query after hard delete"
         );
-        let deleted = queries::get_deleted_user_by_id(&conn, &user_id).unwrap();
+        let deleted = queries::get_deleted_user_by_id(&mut conn, &user_id).unwrap();
         assert!(
             deleted.is_none(),
             "User should not be found even in deleted state after hard delete"
@@ -2201,8 +2201,8 @@ mod user_tests {
         let api_key: String;
         let admin_user_id: String;
         {
-            let conn = state.db.get().unwrap();
-            let (user, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (user, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
             admin_user_id = user.id;
         }
@@ -2241,10 +2241,10 @@ mod operator_api_key_tests {
         let api_key: String;
         let user_id: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
-            let user = create_test_user(&conn, "target@example.com", "Target User");
+            let user = create_test_user(&mut conn, "target@example.com", "Target User");
             user_id = user.id;
         }
 
@@ -2298,10 +2298,10 @@ mod operator_api_key_tests {
         let api_key: String;
         let user_id: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
-            let user = create_test_user(&conn, "target@example.com", "Target User");
+            let user = create_test_user(&mut conn, "target@example.com", "Target User");
             user_id = user.id;
         }
 
@@ -2346,8 +2346,8 @@ mod operator_api_key_tests {
 
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
         }
 
@@ -2382,14 +2382,14 @@ mod operator_api_key_tests {
         let api_key: String;
         let user_id: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
-            let user = create_test_user(&conn, "target@example.com", "Target User");
+            let user = create_test_user(&mut conn, "target@example.com", "Target User");
             user_id = user.id.clone();
             // Create some API keys for this user
-            queries::create_api_key(&conn, &user.id, "Key 1", None, true, None).unwrap();
-            queries::create_api_key(&conn, &user.id, "Key 2", None, true, None).unwrap();
+            queries::create_api_key(&mut conn, &user.id, "Key 1", None, true, None).unwrap();
+            queries::create_api_key(&mut conn, &user.id, "Key 2", None, true, None).unwrap();
         }
 
         let response = app
@@ -2430,13 +2430,13 @@ mod operator_api_key_tests {
         let user_id: String;
         let key_to_revoke_id: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
-            let user = create_test_user(&conn, "target@example.com", "Target User");
+            let user = create_test_user(&mut conn, "target@example.com", "Target User");
             user_id = user.id.clone();
             let (key_record, _) =
-                queries::create_api_key(&conn, &user.id, "To Revoke", None, true, None).unwrap();
+                queries::create_api_key(&mut conn, &user.id, "To Revoke", None, true, None).unwrap();
             key_to_revoke_id = key_record.id;
         }
 
@@ -2462,8 +2462,8 @@ mod operator_api_key_tests {
         );
 
         // Verify key has revoked_at set
-        let conn = state.db.get().unwrap();
-        let key = queries::get_api_key_by_id(&conn, &key_to_revoke_id)
+        let mut conn = state.db.get().unwrap();
+        let key = queries::get_api_key_by_id(&mut conn, &key_to_revoke_id)
             .unwrap()
             .expect("Key should still exist in DB");
         assert!(
@@ -2480,14 +2480,14 @@ mod operator_api_key_tests {
         let other_user_id: String;
         let key_id: String;
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             api_key = key;
-            let user = create_test_user(&conn, "owner@example.com", "Key Owner");
-            let other_user = create_test_user(&conn, "other@example.com", "Other User");
+            let user = create_test_user(&mut conn, "owner@example.com", "Key Owner");
+            let other_user = create_test_user(&mut conn, "other@example.com", "Other User");
             other_user_id = other_user.id;
             let (key_record, _) =
-                queries::create_api_key(&conn, &user.id, "Owned Key", None, true, None).unwrap();
+                queries::create_api_key(&mut conn, &user.id, "Owned Key", None, true, None).unwrap();
             key_id = key_record.id;
         }
 

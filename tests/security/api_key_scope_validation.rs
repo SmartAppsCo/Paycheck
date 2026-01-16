@@ -77,10 +77,10 @@ async fn test_api_key_scope_with_nonexistent_org_should_fail() {
     let api_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, _member, key) =
-            create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
 
         org_id = org.id;
         user_id = user.id;
@@ -140,15 +140,15 @@ async fn test_api_key_scope_for_unauthorized_org_should_fail() {
     let api_key: String;
 
     {
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create two organizations
-        let org1 = create_test_org(&conn, "Org 1 - User's Org");
-        let org2 = create_test_org(&conn, "Org 2 - Other Org");
+        let org1 = create_test_org(&mut conn, "Org 1 - User's Org");
+        let org2 = create_test_org(&mut conn, "Org 2 - Other Org");
 
         // User is only a member of org1, NOT org2
         let (user, _member, key) =
-            create_test_org_member(&conn, &org1.id, "owner@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org1.id, "owner@test.com", OrgMemberRole::Owner);
 
         org1_id = org1.id;
         org2_id = org2.id;
@@ -195,12 +195,12 @@ async fn test_api_key_scope_for_unauthorized_org_should_fail() {
 /// This tests the defense-in-depth check in queries::create_api_key()
 #[test]
 fn test_db_layer_rejects_scope_for_non_member_org() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
 
     // Create user and two orgs
-    let user = create_test_user(&conn, "user@example.com", "Test User");
-    let org_member_of = create_test_org(&conn, "Org User Is Member Of");
-    let org_not_member_of = create_test_org(&conn, "Org User Is NOT Member Of");
+    let user = create_test_user(&mut conn, "user@example.com", "Test User");
+    let org_member_of = create_test_org(&mut conn, "Org User Is Member Of");
+    let org_not_member_of = create_test_org(&mut conn, "Org User Is NOT Member Of");
 
     // Make user a member of only one org
     let _ = queries::create_org_member(
@@ -220,7 +220,7 @@ fn test_db_layer_rejects_scope_for_non_member_org() {
         access: AccessLevel::Admin,
     };
 
-    let result = queries::create_api_key(&conn, &user.id, "Test Key", None, true, Some(&[scope]));
+    let result = queries::create_api_key(&mut conn, &user.id, "Test Key", None, true, Some(&[scope]));
 
     // This should fail because user is not a member of org_not_member_of
     assert!(
@@ -245,10 +245,10 @@ async fn test_api_key_scope_for_own_org_works() {
     let api_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, _member, key) =
-            create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
 
         org_id = org.id;
         user_id = user.id;

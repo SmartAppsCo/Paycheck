@@ -51,11 +51,11 @@ async fn test_buy_no_payment_provider_configured_returns_error() {
     let product_id: String;
 
     {
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
         // Create org without any payment config
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         product_id = product.id.clone();
     }
@@ -107,10 +107,10 @@ async fn test_buy_invalid_provider_returns_error() {
     let product_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         product_id = product.id.clone();
     }
@@ -178,10 +178,10 @@ async fn test_buy_accepts_minimal_request() {
     let product_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
         product_id = product.id.clone();
     }
@@ -234,12 +234,12 @@ async fn test_buy_accepts_optional_fields() {
     let product_id: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         // Create payment config so we get past payment config check and fail on Stripe config
-        create_test_payment_config(&conn, &product.id, "stripe", Some(1999));
+        create_test_payment_config(&mut conn, &product.id, "stripe", Some(1999));
 
         product_id = product.id.clone();
     }

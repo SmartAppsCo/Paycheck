@@ -236,7 +236,9 @@ pub mod msg {
 
     // Post-operation errors (for consistency in error messages after mutations)
     pub const USER_NOT_FOUND_AFTER_RESTORE: &str = "User not found after restore";
+    pub const USER_NOT_FOUND_AFTER_UPDATE: &str = "User not found after update";
     pub const ORG_NOT_FOUND_AFTER_UPDATE: &str = "Organization not found after update";
+    pub const MEMBER_NOT_FOUND_AFTER_UPDATE: &str = "Member not found after update";
     pub const ORG_NOT_FOUND_AFTER_RESTORE: &str = "Organization not found after restore";
     pub const PROJECT_NOT_FOUND_AFTER_RESTORE: &str = "Project not found after restore";
     pub const PRODUCT_NOT_FOUND_AFTER_RESTORE: &str = "Product not found after restore";

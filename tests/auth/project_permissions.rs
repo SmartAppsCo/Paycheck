@@ -7,14 +7,14 @@ use super::helpers::*;
 #[tokio::test]
 async fn member_without_project_access_cannot_read_project() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
     // Create a member with no project membership
     let (_user, _member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let response = app
         .oneshot(
@@ -39,12 +39,12 @@ async fn member_without_project_access_cannot_read_project() {
 #[tokio::test]
 async fn member_without_project_access_cannot_list_products() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
     let (_user, _member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let response = app
         .oneshot(
@@ -73,20 +73,20 @@ async fn member_without_project_access_cannot_list_products() {
 #[tokio::test]
 async fn member_with_view_role_can_read_project() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
     let (_user, member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     // Add project membership with View role
     let pm_input = CreateProjectMember {
         org_member_id: member.id.clone(),
         role: ProjectMemberRole::View,
     };
-    queries::create_project_member(&conn, &project.id, &pm_input).unwrap();
+    queries::create_project_member(&mut conn, &project.id, &pm_input).unwrap();
 
     let response = app
         .oneshot(
@@ -110,19 +110,19 @@ async fn member_with_view_role_can_read_project() {
 #[tokio::test]
 async fn member_with_view_role_can_list_products() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
     let (_user, member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let pm_input = CreateProjectMember {
         org_member_id: member.id.clone(),
         role: ProjectMemberRole::View,
     };
-    queries::create_project_member(&conn, &project.id, &pm_input).unwrap();
+    queries::create_project_member(&mut conn, &project.id, &pm_input).unwrap();
 
     let response = app
         .oneshot(
@@ -146,19 +146,19 @@ async fn member_with_view_role_can_list_products() {
 #[tokio::test]
 async fn member_with_view_role_cannot_create_product() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
     let (_user, member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let pm_input = CreateProjectMember {
         org_member_id: member.id.clone(),
         role: ProjectMemberRole::View,
     };
-    queries::create_project_member(&conn, &project.id, &pm_input).unwrap();
+    queries::create_project_member(&mut conn, &project.id, &pm_input).unwrap();
 
     let response = app
             .oneshot(
@@ -188,19 +188,19 @@ async fn member_with_view_role_cannot_create_product() {
 #[tokio::test]
 async fn member_with_view_role_cannot_update_project() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
     let (_user, member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let pm_input = CreateProjectMember {
         org_member_id: member.id.clone(),
         role: ProjectMemberRole::View,
     };
-    queries::create_project_member(&conn, &project.id, &pm_input).unwrap();
+    queries::create_project_member(&mut conn, &project.id, &pm_input).unwrap();
 
     let response = app
         .oneshot(
@@ -229,19 +229,19 @@ async fn member_with_view_role_cannot_update_project() {
 #[tokio::test]
 async fn member_with_admin_project_role_can_create_product() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
     let (_user, member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let pm_input = CreateProjectMember {
         org_member_id: member.id.clone(),
         role: ProjectMemberRole::Admin,
     };
-    queries::create_project_member(&conn, &project.id, &pm_input).unwrap();
+    queries::create_project_member(&mut conn, &project.id, &pm_input).unwrap();
 
     let response = app
             .oneshot(
@@ -271,19 +271,19 @@ async fn member_with_admin_project_role_can_create_product() {
 #[tokio::test]
 async fn member_with_admin_project_role_can_update_project() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
     let (_user, member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let pm_input = CreateProjectMember {
         org_member_id: member.id.clone(),
         role: ProjectMemberRole::Admin,
     };
-    queries::create_project_member(&conn, &project.id, &pm_input).unwrap();
+    queries::create_project_member(&mut conn, &project.id, &pm_input).unwrap();
 
     let response = app
         .oneshot(
@@ -308,19 +308,19 @@ async fn member_with_admin_project_role_can_update_project() {
 #[tokio::test]
 async fn member_with_admin_project_role_cannot_delete_project() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
     let (_user, member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let pm_input = CreateProjectMember {
         org_member_id: member.id.clone(),
         role: ProjectMemberRole::Admin,
     };
-    queries::create_project_member(&conn, &project.id, &pm_input).unwrap();
+    queries::create_project_member(&mut conn, &project.id, &pm_input).unwrap();
 
     // Project deletion requires org-level Admin or Owner
     let response = app
@@ -349,14 +349,14 @@ async fn member_with_admin_project_role_cannot_delete_project() {
 #[tokio::test]
 async fn org_admin_has_implicit_project_write_access() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
     // Admin org member - no project_members entry needed
     let (_user, _admin, admin_key) =
-        create_test_org_member(&conn, &org.id, "admin@org.com", OrgMemberRole::Admin);
+        create_test_org_member(&mut conn, &org.id, "admin@org.com", OrgMemberRole::Admin);
 
     let response = app
             .oneshot(
@@ -386,13 +386,13 @@ async fn org_admin_has_implicit_project_write_access() {
 #[tokio::test]
 async fn org_owner_has_implicit_project_write_access() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
     let (_user, _owner, owner_key) =
-        create_test_org_member(&conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
 
     let response = app
             .oneshot(
@@ -422,13 +422,13 @@ async fn org_owner_has_implicit_project_write_access() {
 #[tokio::test]
 async fn org_admin_can_delete_project() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
-    let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
     let (_user, _admin, admin_key) =
-        create_test_org_member(&conn, &org.id, "admin@org.com", OrgMemberRole::Admin);
+        create_test_org_member(&mut conn, &org.id, "admin@org.com", OrgMemberRole::Admin);
 
     let response = app
         .oneshot(

@@ -85,6 +85,37 @@ impl UpdateBuilder {
         let affected = conn.execute(&sql, rusqlite::params_from_iter(values))?;
         Ok(affected > 0)
     }
+
+    /// Execute the update and return the updated entity using RETURNING clause.
+    /// Returns None if no rows matched (entity not found or no fields to update).
+    fn execute_returning<T: super::from_row::FromRow>(
+        mut self,
+        conn: &Connection,
+        returning_cols: &str,
+    ) -> Result<Option<T>> {
+        if self.fields.is_empty() {
+            return Ok(None);
+        }
+        if self.track_updated_at {
+            self.fields.push(("updated_at", now().into()));
+        }
+        let sets: Vec<String> = self
+            .fields
+            .iter()
+            .map(|(col, _)| format!("{} = ?", col))
+            .collect();
+        let mut values: Vec<Value> = self.fields.into_iter().map(|(_, v)| v).collect();
+        values.push(self.id.into());
+        let sql = format!(
+            "UPDATE {} SET {} WHERE id = ? AND deleted_at IS NULL RETURNING {}",
+            self.table,
+            sets.join(", "),
+            returning_cols
+        );
+        conn.query_row(&sql, rusqlite::params_from_iter(values), T::from_row)
+            .optional()
+            .map_err(Into::into)
+    }
 }
 
 // ============ Users ============
@@ -174,13 +205,14 @@ pub fn list_users_paginated(
     Ok((items, total))
 }
 
-pub fn update_user(conn: &Connection, id: &str, input: &UpdateUser) -> Result<bool> {
+/// Update a user. Returns the updated user, or None if not found.
+pub fn update_user(conn: &Connection, id: &str, input: &UpdateUser) -> Result<Option<User>> {
     let email = input.email.as_ref().map(|e| e.trim().to_lowercase());
     UpdateBuilder::new("users", id)
         .with_updated_at()
         .set_opt("email", email)
         .set_opt("name", input.name.clone())
-        .execute(conn)
+        .execute_returning(conn, USER_COLS)
 }
 
 pub fn delete_user(conn: &Connection, id: &str) -> Result<bool> {
@@ -269,12 +301,11 @@ pub fn get_user_with_roles(conn: &Connection, id: &str) -> Result<Option<UserWit
              ORDER BY o.name",
         )?;
         stmt.query_map([&id], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get::<_, String>(3)?.parse().unwrap(),
-            ))
+            let role: OrgMemberRole = row
+                .get::<_, String>(3)?
+                .parse()
+                .map_err(|_| rusqlite::Error::InvalidColumnType(3, "role".to_string(), rusqlite::types::Type::Text))?;
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, role))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?
     };
@@ -305,6 +336,8 @@ pub fn list_users_with_roles_paginated(
     offset: i64,
     include_deleted: bool,
 ) -> Result<(Vec<UserWithRoles>, i64)> {
+    use std::collections::HashMap;
+
     let deleted_filter = if include_deleted {
         ""
     } else {
@@ -325,47 +358,73 @@ pub fn list_users_with_roles_paginated(
         params![limit, offset],
     )?;
 
-    // For each user, fetch their org memberships
-    let mut results = Vec::with_capacity(users.len());
-    for user in users {
-        // Get org memberships with org names
-        let memberships: Vec<(String, String, String, OrgMemberRole)> = {
-            let mut stmt = conn.prepare(
-                "SELECT m.id, m.org_id, o.name, m.role
-                 FROM org_members m
-                 JOIN organizations o ON o.id = m.org_id
-                 WHERE m.user_id = ?1
-                 ORDER BY o.name",
-            )?;
-            stmt.query_map([&user.id], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get::<_, String>(3)?.parse().unwrap(),
-                ))
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?
-        };
-
-        results.push(UserWithRoles {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            created_at: user.created_at,
-            updated_at: user.updated_at,
-            operator_role: user.operator_role,
-            memberships: memberships
-                .into_iter()
-                .map(|(id, org_id, org_name, role)| UserOrgMembership {
-                    id,
-                    org_id,
-                    org_name,
-                    role,
-                })
-                .collect(),
-        });
+    if users.is_empty() {
+        return Ok((vec![], total));
     }
+
+    // Batch fetch all org memberships for these users in one query
+    let user_ids: Vec<&str> = users.iter().map(|u| u.id.as_str()).collect();
+    let placeholders: Vec<String> = (1..=user_ids.len()).map(|i| format!("?{}", i)).collect();
+    let sql = format!(
+        "SELECT m.user_id, m.id, m.org_id, o.name, m.role
+         FROM org_members m
+         JOIN organizations o ON o.id = m.org_id
+         WHERE m.user_id IN ({}) AND m.deleted_at IS NULL
+         ORDER BY o.name",
+        placeholders.join(", ")
+    );
+
+    let params: Vec<&dyn rusqlite::ToSql> = user_ids
+        .iter()
+        .map(|id| id as &dyn rusqlite::ToSql)
+        .collect();
+
+    let mut stmt = conn.prepare(&sql)?;
+    let membership_rows = stmt
+        .query_map(rusqlite::params_from_iter(&params), |row| {
+            Ok((
+                row.get::<_, String>(0)?, // user_id
+                row.get::<_, String>(1)?, // membership id
+                row.get::<_, String>(2)?, // org_id
+                row.get::<_, String>(3)?, // org_name
+                row.get::<_, String>(4)?, // role
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    // Group memberships by user_id
+    let mut membership_map: HashMap<String, Vec<UserOrgMembership>> = HashMap::new();
+    for (user_id, id, org_id, org_name, role_str) in membership_rows {
+        let role = role_str
+            .parse::<OrgMemberRole>()
+            .map_err(|_| AppError::Internal(format!("Invalid role in database: {}", role_str)))?;
+        membership_map
+            .entry(user_id)
+            .or_default()
+            .push(UserOrgMembership {
+                id,
+                org_id,
+                org_name,
+                role,
+            });
+    }
+
+    // Build results
+    let results = users
+        .into_iter()
+        .map(|user| {
+            let memberships = membership_map.remove(&user.id).unwrap_or_default();
+            UserWithRoles {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                created_at: user.created_at,
+                updated_at: user.updated_at,
+                operator_role: user.operator_role,
+                memberships,
+            }
+        })
+        .collect();
 
     Ok((results, total))
 }
@@ -400,23 +459,22 @@ pub fn revoke_operator_role(conn: &Connection, user_id: &str) -> Result<bool> {
     Ok(affected > 0)
 }
 
-/// Update a user's operator role. Returns the updated user.
+/// Update a user's operator role. Returns the updated user, or None if not found/not an operator.
 pub fn update_operator_role(
     conn: &Connection,
     user_id: &str,
     role: OperatorRole,
-) -> Result<User> {
-    let affected = conn.execute(
-        "UPDATE users SET operator_role = ?1, updated_at = ?2 WHERE id = ?3 AND operator_role IS NOT NULL AND deleted_at IS NULL",
+) -> Result<Option<User>> {
+    query_one(
+        conn,
+        &format!(
+            "UPDATE users SET operator_role = ?1, updated_at = ?2
+             WHERE id = ?3 AND operator_role IS NOT NULL AND deleted_at IS NULL
+             RETURNING {}",
+            USER_COLS
+        ),
         params![role.as_ref(), now(), user_id],
-    )?;
-
-    if affected == 0 {
-        return Err(AppError::NotFound("Operator not found".into()));
-    }
-
-    get_user_by_id(conn, user_id)?
-        .ok_or_else(|| AppError::NotFound("User not found".into()))
+    )
 }
 
 /// List all operators (users with operator_role set).
@@ -499,20 +557,27 @@ pub fn get_user_by_api_key(conn: &Connection, api_key: &str) -> Result<Option<(U
     Ok(None)
 }
 
-/// Create an API key for a user
+/// Create an API key for a user.
+///
+/// This function uses a transaction with IMMEDIATE mode to prevent TOCTOU races
+/// where the validated state (org membership, project ownership) could change
+/// between validation and insertion.
 pub fn create_api_key(
-    conn: &Connection,
+    conn: &mut Connection,
     user_id: &str,
     name: &str,
     expires_in_days: Option<i64>,
     user_manageable: bool,
     scopes: Option<&[CreateApiKeyScope]>,
 ) -> Result<(ApiKey, String)> {
-    // Validate all scopes BEFORE creating anything
+    // Use IMMEDIATE to acquire write lock at transaction start, preventing TOCTOU races
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+    // Validate all scopes within the transaction
     if let Some(scopes) = scopes {
         for scope in scopes {
             // Validate that org exists
-            let org_exists: bool = conn
+            let org_exists: bool = tx
                 .query_row(
                     "SELECT 1 FROM organizations WHERE id = ?1 AND deleted_at IS NULL",
                     params![&scope.org_id],
@@ -529,7 +594,7 @@ pub fn create_api_key(
 
             // Validate that user is a member of the organization OR is an admin+ operator
             // Operators with admin/owner role have synthetic access to all orgs
-            let is_member: bool = conn
+            let is_member: bool = tx
                 .query_row(
                     "SELECT 1 FROM org_members WHERE user_id = ?1 AND org_id = ?2 AND deleted_at IS NULL",
                     params![user_id, &scope.org_id],
@@ -538,7 +603,7 @@ pub fn create_api_key(
                 .optional()?
                 .unwrap_or(false);
 
-            let is_admin_operator: bool = conn
+            let is_admin_operator: bool = tx
                 .query_row(
                     "SELECT 1 FROM users WHERE id = ?1 AND operator_role IN ('admin', 'owner') AND deleted_at IS NULL",
                     params![user_id],
@@ -555,7 +620,7 @@ pub fn create_api_key(
 
             // Validate that project belongs to org (if project_id is specified)
             if let Some(ref project_id) = scope.project_id {
-                let project_org_id: Option<String> = conn
+                let project_org_id: Option<String> = tx
                     .query_row(
                         "SELECT org_id FROM projects WHERE id = ?1 AND deleted_at IS NULL",
                         params![project_id],
@@ -588,17 +653,17 @@ pub fn create_api_key(
     let key_hash = hash_secret(&key);
     let expires_at = expires_in_days.map(|days| now + days * 86400);
 
-    conn.execute(
+    tx.execute(
         "INSERT INTO api_keys (id, user_id, name, key_prefix, key_hash, user_manageable, created_at, last_used_at, expires_at, revoked_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, NULL)",
         params![&id, user_id, name, prefix, &key_hash, user_manageable as i32, now, expires_at],
     )?;
 
-    // Insert scopes (already validated above)
+    // Insert scopes (already validated above, within same transaction)
     if let Some(scopes) = scopes {
         for scope in scopes {
             let scope_id = gen_id();
-            conn.execute(
+            tx.execute(
                 "INSERT INTO api_key_scopes (id, api_key_id, org_id, project_id, access)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
@@ -611,6 +676,9 @@ pub fn create_api_key(
             )?;
         }
     }
+
+    // Commit the transaction - all or nothing
+    tx.commit()?;
 
     Ok((
         ApiKey {
@@ -1536,12 +1604,16 @@ pub fn list_org_members_with_user_paginated(
     Ok((items, total))
 }
 
-pub fn update_org_member(conn: &Connection, id: &str, input: &UpdateOrgMember) -> Result<()> {
+/// Update an org member. Returns the updated member, or None if not found.
+pub fn update_org_member(
+    conn: &Connection,
+    id: &str,
+    input: &UpdateOrgMember,
+) -> Result<Option<OrgMember>> {
     UpdateBuilder::new("org_members", id)
         .with_updated_at()
         .set_opt("role", input.role.map(|r| r.as_ref().to_string()))
-        .execute(conn)?;
-    Ok(())
+        .execute_returning(conn, ORG_MEMBER_COLS)
 }
 
 pub fn delete_org_member(conn: &Connection, id: &str) -> Result<bool> {
@@ -1827,7 +1899,8 @@ pub fn update_project_private_key(conn: &Connection, id: &str, private_key: &[u8
     Ok(())
 }
 
-pub fn update_project(conn: &Connection, id: &str, input: &UpdateProject) -> Result<()> {
+/// Update a project. Returns the updated project, or None if not found.
+pub fn update_project(conn: &Connection, id: &str, input: &UpdateProject) -> Result<Option<Project>> {
     // All nullable fields use Option<Option<T>> pattern:
     // None = leave unchanged, Some(None) = clear, Some(Some(v)) = set
     let mut builder = UpdateBuilder::new("projects", id)
@@ -1855,8 +1928,7 @@ pub fn update_project(conn: &Connection, id: &str, input: &UpdateProject) -> Res
         builder = builder.set_nullable("email_webhook_url", email_webhook_url.clone());
     }
 
-    builder.execute(conn)?;
-    Ok(())
+    builder.execute_returning(conn, PROJECT_COLS)
 }
 
 pub fn delete_project(conn: &Connection, id: &str) -> Result<bool> {
@@ -2056,17 +2128,23 @@ pub fn list_project_members_paginated(
     Ok((items, total))
 }
 
+/// Update a project member. Returns the updated member, or None if not found.
 pub fn update_project_member(
     conn: &Connection,
     id: &str,
     project_id: &str,
     input: &UpdateProjectMember,
-) -> Result<bool> {
-    let affected = conn.execute(
-        "UPDATE project_members SET role = ?1, updated_at = ?2 WHERE id = ?3 AND project_id = ?4",
+) -> Result<Option<ProjectMember>> {
+    query_one(
+        conn,
+        &format!(
+            "UPDATE project_members SET role = ?1, updated_at = ?2
+             WHERE id = ?3 AND project_id = ?4 AND deleted_at IS NULL
+             RETURNING {}",
+            PROJECT_MEMBER_COLS
+        ),
         params![input.role.as_ref(), now(), id, project_id],
-    )?;
-    Ok(affected > 0)
+    )
 }
 
 /// Soft delete a project member. Returns true if the member was found and soft deleted.
@@ -2174,7 +2252,8 @@ pub fn list_products_for_project_paginated(
     Ok((products, total))
 }
 
-pub fn update_product(conn: &Connection, id: &str, input: &UpdateProduct) -> Result<()> {
+/// Update a product. Returns the updated product, or None if not found.
+pub fn update_product(conn: &Connection, id: &str, input: &UpdateProduct) -> Result<Option<Product>> {
     let features_json = input
         .features
         .as_ref()
@@ -2189,8 +2268,7 @@ pub fn update_product(conn: &Connection, id: &str, input: &UpdateProduct) -> Res
         .set_opt("activation_limit", input.activation_limit)
         .set_opt("device_limit", input.device_limit)
         .set_opt("features", features_json)
-        .execute(conn)?;
-    Ok(())
+        .execute_returning(conn, PRODUCT_COLS)
 }
 
 pub fn delete_product(conn: &Connection, id: &str) -> Result<bool> {
@@ -2333,15 +2411,14 @@ pub fn update_payment_config(
     conn: &Connection,
     id: &str,
     input: &UpdatePaymentConfig,
-) -> Result<()> {
+) -> Result<bool> {
     UpdateBuilder::new("product_payment_config", id)
         .with_updated_at()
         .set_opt("stripe_price_id", input.stripe_price_id.clone())
         .set_opt("price_cents", input.price_cents)
         .set_opt("currency", input.currency.clone())
         .set_opt("ls_variant_id", input.ls_variant_id.clone())
-        .execute(conn)?;
-    Ok(())
+        .execute(conn)
 }
 
 pub fn delete_payment_config(conn: &Connection, id: &str) -> Result<bool> {
@@ -2750,9 +2827,9 @@ pub fn increment_activation_count(conn: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn revoke_license(conn: &Connection, id: &str) -> Result<()> {
-    conn.execute("UPDATE licenses SET revoked = 1 WHERE id = ?1", params![id])?;
-    Ok(())
+pub fn revoke_license(conn: &Connection, id: &str) -> Result<bool> {
+    let affected = conn.execute("UPDATE licenses SET revoked = 1 WHERE id = ?1", params![id])?;
+    Ok(affected > 0)
 }
 
 /// Soft delete a license. No cascade needed (devices/codes use FK CASCADE for hard delete).

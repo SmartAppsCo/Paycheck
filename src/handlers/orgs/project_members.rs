@@ -115,7 +115,7 @@ pub async fn update_project_member(
     Path(path): Path<ProjectMemberPath>,
     headers: HeaderMap,
     Json(input): Json<UpdateProjectMember>,
-) -> Result<Json<serde_json::Value>> {
+) -> Result<Json<ProjectMemberWithDetails>> {
     if !ctx.can_write_project() {
         return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
@@ -132,12 +132,8 @@ pub async fn update_project_member(
     )?
     .or_not_found(msg::NOT_PROJECT_MEMBER)?;
 
-    let updated = queries::update_project_member(&conn, &existing.id, &path.project_id, &input)?;
-    if !updated {
-        return Err(AppError::NotFound(
-            "User is not a member of this project".into(),
-        ));
-    }
+    queries::update_project_member(&conn, &existing.id, &path.project_id, &input)?
+        .or_not_found(msg::NOT_PROJECT_MEMBER)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))
@@ -153,7 +149,16 @@ pub async fn update_project_member(
         .auth_method(&ctx.auth_method)
         .save()?;
 
-    Ok(Json(serde_json::json!({ "updated": true })))
+    // Return the updated member with details (enriched with user info)
+    let member = queries::get_project_member_by_user_and_project(
+        &conn,
+        &path.user_id,
+        &path.org_id,
+        &path.project_id,
+    )?
+    .ok_or_else(|| AppError::Internal(msg::MEMBER_NOT_FOUND_AFTER_UPDATE.into()))?;
+
+    Ok(Json(member))
 }
 
 pub async fn delete_project_member(

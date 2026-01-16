@@ -128,12 +128,12 @@ mod user_cascade {
     #[tokio::test]
     async fn test_delete_user_api_keys_stop_working() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create org and member with API key
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, _member, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Verify API key works before deletion
         let response_before = app
@@ -156,7 +156,7 @@ mod user_cascade {
         );
 
         // Soft delete the user
-        queries::soft_delete_user(&conn, &user.id).expect("Soft delete failed");
+        queries::soft_delete_user(&mut conn, &user.id).expect("Soft delete failed");
 
         // API key should no longer work (user is deleted)
         let response_after = app
@@ -181,23 +181,23 @@ mod user_cascade {
     /// Delete user -> cascades to org_members (membership revoked).
     #[test]
     fn test_delete_user_cascades_to_org_members() {
-        let conn = setup_test_db();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = setup_test_db();
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, member, _api_key) =
-            create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Owner);
 
         // Soft delete the user
-        queries::soft_delete_user(&conn, &user.id).expect("Soft delete failed");
+        queries::soft_delete_user(&mut conn, &user.id).expect("Soft delete failed");
 
         // Org member should not be found via normal query
-        let result = queries::get_org_member_by_id(&conn, &member.id).expect("Query failed");
+        let result = queries::get_org_member_by_id(&mut conn, &member.id).expect("Query failed");
         assert!(
             result.is_none(),
             "Org member should not be found after user soft delete"
         );
 
         // Org member should be found via deleted query with depth 1
-        let deleted = queries::get_deleted_org_member_by_id(&conn, &member.id)
+        let deleted = queries::get_deleted_org_member_by_id(&mut conn, &member.id)
             .expect("Query failed")
             .expect("Deleted org member should be found");
 
@@ -219,14 +219,14 @@ mod user_cascade {
     #[tokio::test]
     async fn test_delete_user_operator_api_key_stops_working() {
         let (app, state) = operator_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create operator with API key
         let (admin_user, admin_key) =
-            create_test_operator(&conn, "admin@test.com", OperatorRole::Admin);
+            create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
 
         // Create another operator to query (so we have something to list)
-        create_test_operator(&conn, "other@test.com", OperatorRole::View);
+        create_test_operator(&mut conn, "other@test.com", OperatorRole::View);
 
         // Verify API key works before deletion
         let response_before = app
@@ -249,7 +249,7 @@ mod user_cascade {
         );
 
         // Soft delete the user
-        queries::soft_delete_user(&conn, &admin_user.id).expect("Soft delete failed");
+        queries::soft_delete_user(&mut conn, &admin_user.id).expect("Soft delete failed");
 
         // API key should no longer work
         let response_after = app
@@ -282,11 +282,11 @@ mod org_cascade {
     /// Delete org -> cascades to projects, products, licenses.
     #[test]
     fn test_delete_org_cascades_to_projects_products_licenses() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -295,18 +295,18 @@ mod org_cascade {
         );
 
         // Soft delete the organization
-        queries::soft_delete_organization(&conn, &org.id).expect("Soft delete failed");
+        queries::soft_delete_organization(&mut conn, &org.id).expect("Soft delete failed");
 
         // Org should not be found via normal query
         assert!(
-            queries::get_organization_by_id(&conn, &org.id)
+            queries::get_organization_by_id(&mut conn, &org.id)
                 .expect("Query failed")
                 .is_none(),
             "Organization should be excluded from normal queries after soft delete"
         );
 
         // Project should be cascade deleted (depth 1)
-        let deleted_project = queries::get_deleted_project_by_id(&conn, &project.id)
+        let deleted_project = queries::get_deleted_project_by_id(&mut conn, &project.id)
             .expect("Query failed")
             .expect("Deleted project should be found");
         assert_eq!(
@@ -316,7 +316,7 @@ mod org_cascade {
         );
 
         // Product should be cascade deleted (depth 2)
-        let deleted_product = queries::get_deleted_product_by_id(&conn, &product.id)
+        let deleted_product = queries::get_deleted_product_by_id(&mut conn, &product.id)
             .expect("Query failed")
             .expect("Deleted product should be found");
         assert_eq!(
@@ -326,7 +326,7 @@ mod org_cascade {
         );
 
         // License should be cascade deleted (depth 3)
-        let deleted_license = queries::get_deleted_license_by_id(&conn, &license.id)
+        let deleted_license = queries::get_deleted_license_by_id(&mut conn, &license.id)
             .expect("Query failed")
             .expect("Deleted license should be found");
         assert_eq!(
@@ -339,24 +339,24 @@ mod org_cascade {
     /// Delete org -> cascades to org_members.
     #[test]
     fn test_delete_org_cascades_to_org_members() {
-        let conn = setup_test_db();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = setup_test_db();
+        let org = create_test_org(&mut conn, "Test Org");
         let (_user, member, _api_key) =
-            create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Owner);
 
         // Soft delete the organization
-        queries::soft_delete_organization(&conn, &org.id).expect("Soft delete failed");
+        queries::soft_delete_organization(&mut conn, &org.id).expect("Soft delete failed");
 
         // Org member should not be found via normal query
         assert!(
-            queries::get_org_member_by_id(&conn, &member.id)
+            queries::get_org_member_by_id(&mut conn, &member.id)
                 .expect("Query failed")
                 .is_none(),
             "Org member should be excluded from normal queries after parent org is soft deleted"
         );
 
         // Org member should be cascade deleted (depth 1)
-        let deleted_member = queries::get_deleted_org_member_by_id(&conn, &member.id)
+        let deleted_member = queries::get_deleted_org_member_by_id(&mut conn, &member.id)
             .expect("Query failed")
             .expect("Deleted member should be found");
         assert_eq!(
@@ -370,12 +370,12 @@ mod org_cascade {
     #[tokio::test]
     async fn test_delete_org_api_keys_stop_working_for_org() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create org with a member
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (_user, _member, api_key) =
-            create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Owner);
 
         // Verify API key works before deletion
         let response_before = app
@@ -398,7 +398,7 @@ mod org_cascade {
         );
 
         // Soft delete the organization
-        queries::soft_delete_organization(&conn, &org.id).expect("Soft delete failed");
+        queries::soft_delete_organization(&mut conn, &org.id).expect("Soft delete failed");
 
         // API key should still be valid but org access is gone
         // (the user exists, but org is deleted so 404 for the org)
@@ -426,13 +426,13 @@ mod org_cascade {
     /// Delete org with multiple projects - all cascade correctly.
     #[test]
     fn test_delete_org_multiple_projects_cascade() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
 
         // Create multiple projects with products and licenses
-        let project1 = create_test_project(&conn, &org.id, "Project 1", &master_key);
-        let product1 = create_test_product(&conn, &project1.id, "Pro 1", "pro");
+        let project1 = create_test_project(&mut conn, &org.id, "Project 1", &master_key);
+        let product1 = create_test_product(&mut conn, &project1.id, "Pro 1", "pro");
         let license1 = create_test_license(
             &conn,
             &project1.id,
@@ -440,8 +440,8 @@ mod org_cascade {
             Some(future_timestamp(LICENSE_VALID_DAYS)),
         );
 
-        let project2 = create_test_project(&conn, &org.id, "Project 2", &master_key);
-        let product2 = create_test_product(&conn, &project2.id, "Pro 2", "pro");
+        let project2 = create_test_project(&mut conn, &org.id, "Project 2", &master_key);
+        let product2 = create_test_product(&mut conn, &project2.id, "Pro 2", "pro");
         let license2 = create_test_license(
             &conn,
             &project2.id,
@@ -450,11 +450,11 @@ mod org_cascade {
         );
 
         // Soft delete the organization
-        queries::soft_delete_organization(&conn, &org.id).expect("Soft delete failed");
+        queries::soft_delete_organization(&mut conn, &org.id).expect("Soft delete failed");
 
         // All projects should be cascade deleted at depth 1
         assert_eq!(
-            queries::get_deleted_project_by_id(&conn, &project1.id)
+            queries::get_deleted_project_by_id(&mut conn, &project1.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -462,7 +462,7 @@ mod org_cascade {
             "Project 1 cascade depth should be 1 when deleted via org cascade"
         );
         assert_eq!(
-            queries::get_deleted_project_by_id(&conn, &project2.id)
+            queries::get_deleted_project_by_id(&mut conn, &project2.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -472,7 +472,7 @@ mod org_cascade {
 
         // All products at depth 2
         assert_eq!(
-            queries::get_deleted_product_by_id(&conn, &product1.id)
+            queries::get_deleted_product_by_id(&mut conn, &product1.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -480,7 +480,7 @@ mod org_cascade {
             "Product 1 cascade depth should be 2 when deleted via org->project cascade"
         );
         assert_eq!(
-            queries::get_deleted_product_by_id(&conn, &product2.id)
+            queries::get_deleted_product_by_id(&mut conn, &product2.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -490,7 +490,7 @@ mod org_cascade {
 
         // All licenses at depth 3
         assert_eq!(
-            queries::get_deleted_license_by_id(&conn, &license1.id)
+            queries::get_deleted_license_by_id(&mut conn, &license1.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -498,7 +498,7 @@ mod org_cascade {
             "License 1 cascade depth should be 3 when deleted via org->project->product cascade"
         );
         assert_eq!(
-            queries::get_deleted_license_by_id(&conn, &license2.id)
+            queries::get_deleted_license_by_id(&mut conn, &license2.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -518,11 +518,11 @@ mod project_cascade {
     /// Delete project -> cascades to products and licenses.
     #[test]
     fn test_delete_project_cascades_to_products_and_licenses() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -531,10 +531,10 @@ mod project_cascade {
         );
 
         // Soft delete the project
-        queries::soft_delete_project(&conn, &project.id).expect("Soft delete failed");
+        queries::soft_delete_project(&mut conn, &project.id).expect("Soft delete failed");
 
         // Project deleted at depth 0
-        let deleted_project = queries::get_deleted_project_by_id(&conn, &project.id)
+        let deleted_project = queries::get_deleted_project_by_id(&mut conn, &project.id)
             .expect("Query failed")
             .expect("Deleted project should be found");
         assert_eq!(
@@ -544,7 +544,7 @@ mod project_cascade {
         );
 
         // Product cascade deleted at depth 1
-        let deleted_product = queries::get_deleted_product_by_id(&conn, &product.id)
+        let deleted_product = queries::get_deleted_product_by_id(&mut conn, &product.id)
             .expect("Query failed")
             .expect("Deleted product should be found");
         assert_eq!(
@@ -554,7 +554,7 @@ mod project_cascade {
         );
 
         // License cascade deleted at depth 2
-        let deleted_license = queries::get_deleted_license_by_id(&conn, &license.id)
+        let deleted_license = queries::get_deleted_license_by_id(&mut conn, &license.id)
             .expect("Query failed")
             .expect("Deleted license should be found");
         assert_eq!(
@@ -567,15 +567,15 @@ mod project_cascade {
     /// Delete project with multiple products - all cascade correctly.
     #[test]
     fn test_delete_project_multiple_products_cascade() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
         // Create multiple products
-        let product1 = create_test_product(&conn, &project.id, "Free", "free");
-        let product2 = create_test_product(&conn, &project.id, "Pro", "pro");
-        let product3 = create_test_product(&conn, &project.id, "Enterprise", "enterprise");
+        let product1 = create_test_product(&mut conn, &project.id, "Free", "free");
+        let product2 = create_test_product(&mut conn, &project.id, "Pro", "pro");
+        let product3 = create_test_product(&mut conn, &project.id, "Enterprise", "enterprise");
 
         // Create licenses for each
         let license1 = create_test_license(
@@ -598,11 +598,11 @@ mod project_cascade {
         );
 
         // Soft delete the project
-        queries::soft_delete_project(&conn, &project.id).expect("Soft delete failed");
+        queries::soft_delete_project(&mut conn, &project.id).expect("Soft delete failed");
 
         // All products should be cascade deleted at depth 1
         for product_id in [&product1.id, &product2.id, &product3.id] {
-            let deleted = queries::get_deleted_product_by_id(&conn, product_id)
+            let deleted = queries::get_deleted_product_by_id(&mut conn, product_id)
                 .unwrap()
                 .unwrap();
             assert_eq!(
@@ -614,7 +614,7 @@ mod project_cascade {
 
         // All licenses should be cascade deleted at depth 2
         for license_id in [&license1.id, &license2.id, &license3.id] {
-            let deleted = queries::get_deleted_license_by_id(&conn, license_id)
+            let deleted = queries::get_deleted_license_by_id(&mut conn, license_id)
                 .unwrap()
                 .unwrap();
             assert_eq!(
@@ -629,11 +629,11 @@ mod project_cascade {
     /// but become inaccessible via their parent license.
     #[test]
     fn test_delete_project_devices_inaccessible() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -642,14 +642,14 @@ mod project_cascade {
         );
 
         // Create device for license
-        let _device = create_test_device(&conn, &license.id, "device-123", DeviceType::Machine);
+        let _device = create_test_device(&mut conn, &license.id, "device-123", DeviceType::Machine);
 
         // Soft delete the project
-        queries::soft_delete_project(&conn, &project.id).expect("Soft delete failed");
+        queries::soft_delete_project(&mut conn, &project.id).expect("Soft delete failed");
 
         // License is cascade deleted
         assert!(
-            queries::get_license_by_id(&conn, &license.id)
+            queries::get_license_by_id(&mut conn, &license.id)
                 .unwrap()
                 .is_none(),
             "License should be excluded from normal queries after parent project is soft deleted"
@@ -657,7 +657,7 @@ mod project_cascade {
 
         // Devices still exist in DB but become orphaned - can be verified by listing
         // (devices don't have soft delete - they're cleaned up via FK CASCADE on hard delete)
-        let devices = queries::list_devices_for_license(&conn, &license.id).expect("Query failed");
+        let devices = queries::list_devices_for_license(&mut conn, &license.id).expect("Query failed");
         assert!(
             !devices.is_empty(),
             "Devices should still exist in DB since they don't have soft delete"
@@ -676,39 +676,39 @@ mod restore_cascade {
     /// Note: Operators are now just users with operator_role, not a separate entity that cascades.
     #[test]
     fn test_restore_user_restores_cascaded_children() {
-        let conn = setup_test_db();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = setup_test_db();
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, member, _api_key) =
-            create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Owner);
 
         // Also grant operator role to user
-        queries::grant_operator_role(&conn, &user.id, OperatorRole::View)
+        queries::grant_operator_role(&mut conn, &user.id, OperatorRole::View)
             .expect("Failed to grant operator role");
 
         // Soft delete the user (cascades to org_member, operator_role stays on user)
-        queries::soft_delete_user(&conn, &user.id).expect("Soft delete failed");
+        queries::soft_delete_user(&mut conn, &user.id).expect("Soft delete failed");
 
         // Verify org_member is deleted
         assert!(
-            queries::get_org_member_by_id(&conn, &member.id)
+            queries::get_org_member_by_id(&mut conn, &member.id)
                 .unwrap()
                 .is_none(),
             "Org member should be excluded from normal queries after user soft delete"
         );
 
         // Restore the user
-        queries::restore_user(&conn, &user.id, false).expect("Restore failed");
+        queries::restore_user(&mut conn, &user.id, false).expect("Restore failed");
 
         // Org member should be restored
         assert!(
-            queries::get_org_member_by_id(&conn, &member.id)
+            queries::get_org_member_by_id(&mut conn, &member.id)
                 .unwrap()
                 .is_some(),
             "Org member should be restored"
         );
 
         // User's operator_role should still be set
-        let user = queries::get_user_by_id(&conn, &user.id)
+        let user = queries::get_user_by_id(&mut conn, &user.id)
             .unwrap()
             .expect("User should exist");
         assert!(
@@ -720,13 +720,13 @@ mod restore_cascade {
     /// Restore org -> restores cascaded projects/products/licenses.
     #[test]
     fn test_restore_org_restores_entire_hierarchy() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (_user, member, _api_key) =
-            create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Owner);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -735,70 +735,70 @@ mod restore_cascade {
         );
 
         // Soft delete the organization (cascades to all children)
-        queries::soft_delete_organization(&conn, &org.id).expect("Soft delete failed");
+        queries::soft_delete_organization(&mut conn, &org.id).expect("Soft delete failed");
 
         // Verify all are deleted
         assert!(
-            queries::get_organization_by_id(&conn, &org.id)
+            queries::get_organization_by_id(&mut conn, &org.id)
                 .unwrap()
                 .is_none(),
             "Organization should be excluded from normal queries after soft delete"
         );
         assert!(
-            queries::get_org_member_by_id(&conn, &member.id)
+            queries::get_org_member_by_id(&mut conn, &member.id)
                 .unwrap()
                 .is_none(),
             "Org member should be excluded after org cascade delete"
         );
         assert!(
-            queries::get_project_by_id(&conn, &project.id)
+            queries::get_project_by_id(&mut conn, &project.id)
                 .unwrap()
                 .is_none(),
             "Project should be excluded after org cascade delete"
         );
         assert!(
-            queries::get_product_by_id(&conn, &product.id)
+            queries::get_product_by_id(&mut conn, &product.id)
                 .unwrap()
                 .is_none(),
             "Product should be excluded after org cascade delete"
         );
         assert!(
-            queries::get_license_by_id(&conn, &license.id)
+            queries::get_license_by_id(&mut conn, &license.id)
                 .unwrap()
                 .is_none(),
             "License should be excluded after org cascade delete"
         );
 
         // Restore the organization
-        queries::restore_organization(&conn, &org.id).expect("Restore failed");
+        queries::restore_organization(&mut conn, &org.id).expect("Restore failed");
 
         // All entities should be restored
         assert!(
-            queries::get_organization_by_id(&conn, &org.id)
+            queries::get_organization_by_id(&mut conn, &org.id)
                 .unwrap()
                 .is_some(),
             "Organization should be accessible after restore"
         );
         assert!(
-            queries::get_org_member_by_id(&conn, &member.id)
+            queries::get_org_member_by_id(&mut conn, &member.id)
                 .unwrap()
                 .is_some(),
             "Org member should be restored when parent org is restored"
         );
         assert!(
-            queries::get_project_by_id(&conn, &project.id)
+            queries::get_project_by_id(&mut conn, &project.id)
                 .unwrap()
                 .is_some(),
             "Project should be restored when parent org is restored"
         );
         assert!(
-            queries::get_product_by_id(&conn, &product.id)
+            queries::get_product_by_id(&mut conn, &product.id)
                 .unwrap()
                 .is_some(),
             "Product should be restored when parent org is restored"
         );
         assert!(
-            queries::get_license_by_id(&conn, &license.id)
+            queries::get_license_by_id(&mut conn, &license.id)
                 .unwrap()
                 .is_some(),
             "License should be restored when parent org is restored"
@@ -812,11 +812,11 @@ mod restore_cascade {
     /// Restore project -> restores products and licenses.
     #[test]
     fn test_restore_project_restores_products_and_licenses() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -825,26 +825,26 @@ mod restore_cascade {
         );
 
         // Soft delete the project
-        queries::soft_delete_project(&conn, &project.id).expect("Soft delete failed");
+        queries::soft_delete_project(&mut conn, &project.id).expect("Soft delete failed");
 
         // Restore the project
-        queries::restore_project(&conn, &project.id, false).expect("Restore failed");
+        queries::restore_project(&mut conn, &project.id, false).expect("Restore failed");
 
         // All entities should be restored
         assert!(
-            queries::get_project_by_id(&conn, &project.id)
+            queries::get_project_by_id(&mut conn, &project.id)
                 .unwrap()
                 .is_some(),
             "Project should be accessible after restore"
         );
         assert!(
-            queries::get_product_by_id(&conn, &product.id)
+            queries::get_product_by_id(&mut conn, &product.id)
                 .unwrap()
                 .is_some(),
             "Product should be restored when parent project is restored"
         );
         assert!(
-            queries::get_license_by_id(&conn, &license.id)
+            queries::get_license_by_id(&mut conn, &license.id)
                 .unwrap()
                 .is_some(),
             "License should be restored when parent project is restored"
@@ -855,29 +855,29 @@ mod restore_cascade {
     /// (items deleted separately remain deleted).
     #[test]
     fn test_restore_selective_by_timestamp() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product1 = create_test_product(&conn, &project.id, "Product 1", "tier1");
-        let product2 = create_test_product(&conn, &project.id, "Product 2", "tier2");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product1 = create_test_product(&mut conn, &project.id, "Product 1", "tier1");
+        let product2 = create_test_product(&mut conn, &project.id, "Product 2", "tier2");
 
         // Soft delete product1 directly
-        queries::soft_delete_product(&conn, &product1.id).expect("Soft delete failed");
+        queries::soft_delete_product(&mut conn, &product1.id).expect("Soft delete failed");
 
         // Wait a tiny bit to ensure different timestamp
         std::thread::sleep(std::time::Duration::from_millis(10));
 
         // Soft delete project (cascades to product2, not product1 which is already deleted)
-        queries::soft_delete_project(&conn, &project.id).expect("Soft delete failed");
+        queries::soft_delete_project(&mut conn, &project.id).expect("Soft delete failed");
 
         // Restore project - should only restore product2 (cascade-deleted with project)
         // product1 was deleted separately and should stay deleted
-        queries::restore_project(&conn, &project.id, false).expect("Restore failed");
+        queries::restore_project(&mut conn, &project.id, false).expect("Restore failed");
 
         // Project should be restored
         assert!(
-            queries::get_project_by_id(&conn, &project.id)
+            queries::get_project_by_id(&mut conn, &project.id)
                 .unwrap()
                 .is_some(),
             "Project should be accessible after restore"
@@ -885,7 +885,7 @@ mod restore_cascade {
 
         // Product2 should be restored (was cascade-deleted with project)
         assert!(
-            queries::get_product_by_id(&conn, &product2.id)
+            queries::get_product_by_id(&mut conn, &product2.id)
                 .unwrap()
                 .is_some(),
             "Product 2 should be restored since it was cascade-deleted with the project"
@@ -893,7 +893,7 @@ mod restore_cascade {
 
         // Product1 should still be deleted (was deleted separately before project)
         assert!(
-            queries::get_product_by_id(&conn, &product1.id)
+            queries::get_product_by_id(&mut conn, &product1.id)
                 .unwrap()
                 .is_none(),
             "Product 1 should remain deleted since it was deleted separately before project"
@@ -904,15 +904,15 @@ mod restore_cascade {
     #[tokio::test]
     async fn test_restore_user_api_keys_work_again() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create org and member
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, _member, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Soft delete the user
-        queries::soft_delete_user(&conn, &user.id).expect("Soft delete failed");
+        queries::soft_delete_user(&mut conn, &user.id).expect("Soft delete failed");
 
         // Verify key doesn't work
         let response_deleted = app
@@ -934,7 +934,7 @@ mod restore_cascade {
         );
 
         // Restore the user
-        queries::restore_user(&conn, &user.id, false).expect("Restore failed");
+        queries::restore_user(&mut conn, &user.id, false).expect("Restore failed");
 
         // API key should work again
         let response_restored = app
@@ -967,11 +967,11 @@ mod purge_verification {
     /// Purge old soft-deleted records works correctly.
     #[test]
     fn test_purge_removes_old_soft_deleted_records() {
-        let conn = setup_test_db();
-        let org = create_test_org(&conn, "Old Deleted Org");
+        let mut conn = setup_test_db();
+        let org = create_test_org(&mut conn, "Old Deleted Org");
 
         // Soft delete the org
-        queries::soft_delete_organization(&conn, &org.id).expect("Soft delete failed");
+        queries::soft_delete_organization(&mut conn, &org.id).expect("Soft delete failed");
 
         // Manually set deleted_at to 100 days ago to simulate old deletion
         let old_timestamp = now() - (100 * 86400);
@@ -982,7 +982,7 @@ mod purge_verification {
         .expect("Update timestamp failed");
 
         // Purge with 30 day retention
-        let result = queries::purge_soft_deleted_records(&conn, ONE_MONTH).expect("Purge failed");
+        let result = queries::purge_soft_deleted_records(&mut conn, ONE_MONTH).expect("Purge failed");
 
         // Should have purged the organization
         assert!(
@@ -991,7 +991,7 @@ mod purge_verification {
         );
 
         // Org should be completely gone (not even as deleted)
-        let gone = queries::get_deleted_organization_by_id(&conn, &org.id).expect("Query failed");
+        let gone = queries::get_deleted_organization_by_id(&mut conn, &org.id).expect("Query failed");
         assert!(
             gone.is_none(),
             "Organization should be permanently removed from database after purge"
@@ -1001,13 +1001,13 @@ mod purge_verification {
     /// Purge respects retention period (recent deletes not purged).
     #[test]
     fn test_purge_respects_retention_period() {
-        let conn = setup_test_db();
-        let old_org = create_test_org(&conn, "Old Org");
-        let recent_org = create_test_org(&conn, "Recent Org");
+        let mut conn = setup_test_db();
+        let old_org = create_test_org(&mut conn, "Old Org");
+        let recent_org = create_test_org(&mut conn, "Recent Org");
 
         // Soft delete both
-        queries::soft_delete_organization(&conn, &old_org.id).expect("Soft delete failed");
-        queries::soft_delete_organization(&conn, &recent_org.id).expect("Soft delete failed");
+        queries::soft_delete_organization(&mut conn, &old_org.id).expect("Soft delete failed");
+        queries::soft_delete_organization(&mut conn, &recent_org.id).expect("Soft delete failed");
 
         // Set old_org to 100 days ago
         let old_timestamp = now() - (100 * 86400);
@@ -1018,11 +1018,11 @@ mod purge_verification {
         .expect("Update timestamp failed");
 
         // Purge with 30 day retention
-        queries::purge_soft_deleted_records(&conn, ONE_MONTH).expect("Purge failed");
+        queries::purge_soft_deleted_records(&mut conn, ONE_MONTH).expect("Purge failed");
 
         // Old org should be gone
         assert!(
-            queries::get_deleted_organization_by_id(&conn, &old_org.id)
+            queries::get_deleted_organization_by_id(&mut conn, &old_org.id)
                 .expect("Query failed")
                 .is_none(),
             "Organization deleted 100 days ago should be purged with 30-day retention"
@@ -1030,7 +1030,7 @@ mod purge_verification {
 
         // Recent org should still exist (as deleted)
         assert!(
-            queries::get_deleted_organization_by_id(&conn, &recent_org.id)
+            queries::get_deleted_organization_by_id(&mut conn, &recent_org.id)
                 .expect("Query failed")
                 .is_some(),
             "Recently deleted organization should be preserved within retention period"
@@ -1040,11 +1040,11 @@ mod purge_verification {
     /// Purge removes entire cascade hierarchy when old enough.
     #[test]
     fn test_purge_removes_entire_hierarchy() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -1053,7 +1053,7 @@ mod purge_verification {
         );
 
         // Soft delete organization (cascades to all)
-        queries::soft_delete_organization(&conn, &org.id).expect("Soft delete failed");
+        queries::soft_delete_organization(&mut conn, &org.id).expect("Soft delete failed");
 
         // Set all to old timestamp
         let old_timestamp = now() - (100 * 86400);
@@ -1079,7 +1079,7 @@ mod purge_verification {
         .unwrap();
 
         // Purge
-        let result = queries::purge_soft_deleted_records(&conn, ONE_MONTH).expect("Purge failed");
+        let result = queries::purge_soft_deleted_records(&mut conn, ONE_MONTH).expect("Purge failed");
 
         // All should be purged
         assert!(result.licenses > 0, "Purge should have removed licenses");
@@ -1092,25 +1092,25 @@ mod purge_verification {
 
         // Verify nothing remains
         assert!(
-            queries::get_deleted_license_by_id(&conn, &license.id)
+            queries::get_deleted_license_by_id(&mut conn, &license.id)
                 .expect("Query failed")
                 .is_none(),
             "License should be permanently removed after purge"
         );
         assert!(
-            queries::get_deleted_product_by_id(&conn, &product.id)
+            queries::get_deleted_product_by_id(&mut conn, &product.id)
                 .expect("Query failed")
                 .is_none(),
             "Product should be permanently removed after purge"
         );
         assert!(
-            queries::get_deleted_project_by_id(&conn, &project.id)
+            queries::get_deleted_project_by_id(&mut conn, &project.id)
                 .expect("Query failed")
                 .is_none(),
             "Project should be permanently removed after purge"
         );
         assert!(
-            queries::get_deleted_organization_by_id(&conn, &org.id)
+            queries::get_deleted_organization_by_id(&mut conn, &org.id)
                 .expect("Query failed")
                 .is_none(),
             "Organization should be permanently removed after purge"
@@ -1120,13 +1120,13 @@ mod purge_verification {
     /// Purge cleans up users and their cascade-deleted children.
     #[test]
     fn test_purge_users_and_cascaded_children() {
-        let conn = setup_test_db();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = setup_test_db();
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, member, _api_key) =
-            create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Owner);
 
         // Soft delete user (cascades to org_member)
-        queries::soft_delete_user(&conn, &user.id).expect("Soft delete failed");
+        queries::soft_delete_user(&mut conn, &user.id).expect("Soft delete failed");
 
         // Set to old timestamp
         let old_timestamp = now() - (100 * 86400);
@@ -1142,7 +1142,7 @@ mod purge_verification {
         .unwrap();
 
         // Purge
-        let result = queries::purge_soft_deleted_records(&conn, ONE_MONTH).expect("Purge failed");
+        let result = queries::purge_soft_deleted_records(&mut conn, ONE_MONTH).expect("Purge failed");
 
         // Both should be purged
         assert!(result.users > 0, "Purge should have removed users");
@@ -1153,13 +1153,13 @@ mod purge_verification {
 
         // Verify completely gone
         assert!(
-            queries::get_deleted_user_by_id(&conn, &user.id)
+            queries::get_deleted_user_by_id(&mut conn, &user.id)
                 .expect("Query failed")
                 .is_none(),
             "User should be permanently removed after purge"
         );
         assert!(
-            queries::get_deleted_org_member_by_id(&conn, &member.id)
+            queries::get_deleted_org_member_by_id(&mut conn, &member.id)
                 .expect("Query failed")
                 .is_none(),
             "Org member should be permanently removed after purge"
@@ -1177,18 +1177,18 @@ mod list_query_filtering {
     /// Deleted users don't appear in list queries (by default).
     #[test]
     fn test_deleted_users_excluded_from_list() {
-        let conn = setup_test_db();
-        create_test_operator(&conn, "active1@example.com", OperatorRole::Admin);
+        let mut conn = setup_test_db();
+        create_test_operator(&mut conn, "active1@example.com", OperatorRole::Admin);
         let (user_to_delete, _key) =
-            create_test_operator(&conn, "deleted@example.com", OperatorRole::Admin);
-        create_test_operator(&conn, "active2@example.com", OperatorRole::Admin);
+            create_test_operator(&mut conn, "deleted@example.com", OperatorRole::Admin);
+        create_test_operator(&mut conn, "active2@example.com", OperatorRole::Admin);
 
         // Soft delete one user
-        queries::soft_delete_user(&conn, &user_to_delete.id).expect("Soft delete failed");
+        queries::soft_delete_user(&mut conn, &user_to_delete.id).expect("Soft delete failed");
 
         // List should exclude deleted user (include_deleted = false)
         let (users, total) =
-            queries::list_users_paginated(&conn, 100, 0, false).expect("Query failed");
+            queries::list_users_paginated(&mut conn, 100, 0, false).expect("Query failed");
         assert_eq!(
             total, 2,
             "User count should be 2, excluding soft-deleted user"
@@ -1203,17 +1203,17 @@ mod list_query_filtering {
     /// Deleted orgs don't appear in list queries (by default).
     #[test]
     fn test_deleted_orgs_excluded_from_list() {
-        let conn = setup_test_db();
-        create_test_org(&conn, "Active Org 1");
-        let org_to_delete = create_test_org(&conn, "Deleted Org");
-        create_test_org(&conn, "Active Org 2");
+        let mut conn = setup_test_db();
+        create_test_org(&mut conn, "Active Org 1");
+        let org_to_delete = create_test_org(&mut conn, "Deleted Org");
+        create_test_org(&mut conn, "Active Org 2");
 
         // Soft delete one org
-        queries::soft_delete_organization(&conn, &org_to_delete.id).expect("Soft delete failed");
+        queries::soft_delete_organization(&mut conn, &org_to_delete.id).expect("Soft delete failed");
 
         // List should exclude deleted org (include_deleted = false)
         let (orgs, total) =
-            queries::list_organizations_paginated(&conn, 100, 0, false).expect("Query failed");
+            queries::list_organizations_paginated(&mut conn, 100, 0, false).expect("Query failed");
         assert_eq!(
             total, 2,
             "Organization count should be 2, excluding soft-deleted org"
@@ -1228,20 +1228,20 @@ mod list_query_filtering {
     /// Deleted projects don't appear in list queries.
     #[test]
     fn test_deleted_projects_excluded_from_list() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
 
-        create_test_project(&conn, &org.id, "Active Project 1", &master_key);
-        let project_to_delete = create_test_project(&conn, &org.id, "Deleted Project", &master_key);
-        create_test_project(&conn, &org.id, "Active Project 2", &master_key);
+        create_test_project(&mut conn, &org.id, "Active Project 1", &master_key);
+        let project_to_delete = create_test_project(&mut conn, &org.id, "Deleted Project", &master_key);
+        create_test_project(&mut conn, &org.id, "Active Project 2", &master_key);
 
         // Soft delete one project
-        queries::soft_delete_project(&conn, &project_to_delete.id).expect("Soft delete failed");
+        queries::soft_delete_project(&mut conn, &project_to_delete.id).expect("Soft delete failed");
 
         // List should exclude deleted project
         let (projects, total) =
-            queries::list_projects_for_org_paginated(&conn, &org.id, 100, 0).expect("Query failed");
+            queries::list_projects_for_org_paginated(&mut conn, &org.id, 100, 0).expect("Query failed");
         assert_eq!(
             total, 2,
             "Project count should be 2, excluding soft-deleted project"
@@ -1260,21 +1260,21 @@ mod list_query_filtering {
     /// Deleted products don't appear in list queries.
     #[test]
     fn test_deleted_products_excluded_from_list() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
-        create_test_product(&conn, &project.id, "Active Product 1", "free");
-        let product_to_delete = create_test_product(&conn, &project.id, "Deleted Product", "pro");
-        create_test_product(&conn, &project.id, "Active Product 2", "enterprise");
+        create_test_product(&mut conn, &project.id, "Active Product 1", "free");
+        let product_to_delete = create_test_product(&mut conn, &project.id, "Deleted Product", "pro");
+        create_test_product(&mut conn, &project.id, "Active Product 2", "enterprise");
 
         // Soft delete one product
-        queries::soft_delete_product(&conn, &product_to_delete.id).expect("Soft delete failed");
+        queries::soft_delete_product(&mut conn, &product_to_delete.id).expect("Soft delete failed");
 
         // List should exclude deleted product
         let (products, total) =
-            queries::list_products_for_project_paginated(&conn, &project.id, 100, 0)
+            queries::list_products_for_project_paginated(&mut conn, &project.id, 100, 0)
                 .expect("Query failed");
         assert_eq!(
             total, 2,
@@ -1294,11 +1294,11 @@ mod list_query_filtering {
     /// Deleted licenses don't appear in list queries.
     #[test]
     fn test_deleted_licenses_excluded_from_list() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
 
         let license1 = create_test_license(
             &conn,
@@ -1320,12 +1320,12 @@ mod list_query_filtering {
         );
 
         // Soft delete one license
-        queries::soft_delete_license(&conn, &license_to_delete.id).expect("Soft delete failed");
+        queries::soft_delete_license(&mut conn, &license_to_delete.id).expect("Soft delete failed");
 
         // List should exclude deleted license
         // list_licenses_for_project_paginated returns LicenseWithProduct
         let (licenses, total) =
-            queries::list_licenses_for_project_paginated(&conn, &project.id, 100, 0)
+            queries::list_licenses_for_project_paginated(&mut conn, &project.id, 100, 0)
                 .expect("Query failed");
         assert_eq!(
             total, 2,
@@ -1358,17 +1358,17 @@ mod list_query_filtering {
     /// Include deleted flag shows deleted entities in list.
     #[test]
     fn test_include_deleted_shows_deleted_users() {
-        let conn = setup_test_db();
-        create_test_operator(&conn, "active@example.com", OperatorRole::Admin);
+        let mut conn = setup_test_db();
+        create_test_operator(&mut conn, "active@example.com", OperatorRole::Admin);
         let (user_to_delete, _key) =
-            create_test_operator(&conn, "deleted@example.com", OperatorRole::Admin);
+            create_test_operator(&mut conn, "deleted@example.com", OperatorRole::Admin);
 
         // Soft delete one user
-        queries::soft_delete_user(&conn, &user_to_delete.id).expect("Soft delete failed");
+        queries::soft_delete_user(&mut conn, &user_to_delete.id).expect("Soft delete failed");
 
         // List with include_deleted=true should include all users
         let (users, total) =
-            queries::list_users_paginated(&conn, 100, 0, true).expect("Query failed");
+            queries::list_users_paginated(&mut conn, 100, 0, true).expect("Query failed");
         assert_eq!(
             total, 2,
             "Total user count with include_deleted=true should be 2"
@@ -1387,16 +1387,16 @@ mod list_query_filtering {
     /// Include deleted flag shows deleted orgs in list.
     #[test]
     fn test_include_deleted_shows_deleted_orgs() {
-        let conn = setup_test_db();
-        create_test_org(&conn, "Active Org");
-        let org_to_delete = create_test_org(&conn, "Deleted Org");
+        let mut conn = setup_test_db();
+        create_test_org(&mut conn, "Active Org");
+        let org_to_delete = create_test_org(&mut conn, "Deleted Org");
 
         // Soft delete one org
-        queries::soft_delete_organization(&conn, &org_to_delete.id).expect("Soft delete failed");
+        queries::soft_delete_organization(&mut conn, &org_to_delete.id).expect("Soft delete failed");
 
         // List with include_deleted=true should include all orgs
         let (orgs, total) =
-            queries::list_organizations_paginated(&conn, 100, 0, true).expect("Query failed");
+            queries::list_organizations_paginated(&mut conn, 100, 0, true).expect("Query failed");
         assert_eq!(
             total, 2,
             "Total org count with include_deleted=true should be 2"
@@ -1423,12 +1423,12 @@ mod cascade_depth_tracking {
     /// Direct delete sets depth to 0.
     #[test]
     fn test_direct_delete_depth_zero() {
-        let conn = setup_test_db();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = setup_test_db();
+        let org = create_test_org(&mut conn, "Test Org");
 
-        queries::soft_delete_organization(&conn, &org.id).expect("Soft delete failed");
+        queries::soft_delete_organization(&mut conn, &org.id).expect("Soft delete failed");
 
-        let deleted = queries::get_deleted_organization_by_id(&conn, &org.id)
+        let deleted = queries::get_deleted_organization_by_id(&mut conn, &org.id)
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -1442,15 +1442,15 @@ mod cascade_depth_tracking {
     /// Note: Operators are now just users with operator_role, not a separate entity that cascades.
     #[test]
     fn test_user_cascade_depth() {
-        let conn = setup_test_db();
-        let org = create_test_org(&conn, "Test Org");
+        let mut conn = setup_test_db();
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, member, _api_key) =
-            create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Owner);
 
-        queries::soft_delete_user(&conn, &user.id).expect("Soft delete failed");
+        queries::soft_delete_user(&mut conn, &user.id).expect("Soft delete failed");
 
         // User at depth 0
-        let deleted_user = queries::get_deleted_user_by_id(&conn, &user.id)
+        let deleted_user = queries::get_deleted_user_by_id(&mut conn, &user.id)
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -1460,7 +1460,7 @@ mod cascade_depth_tracking {
         );
 
         // Org member at depth 1
-        let deleted_member = queries::get_deleted_org_member_by_id(&conn, &member.id)
+        let deleted_member = queries::get_deleted_org_member_by_id(&mut conn, &member.id)
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -1473,13 +1473,13 @@ mod cascade_depth_tracking {
     /// Cascade from org sets correct depths down the hierarchy.
     #[test]
     fn test_org_cascade_depths() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (_user, member, _api_key) =
-            create_test_org_member(&conn, &org.id, "member@test.com", OrgMemberRole::Owner);
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+            create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Owner);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -1487,11 +1487,11 @@ mod cascade_depth_tracking {
             Some(future_timestamp(LICENSE_VALID_DAYS)),
         );
 
-        queries::soft_delete_organization(&conn, &org.id).expect("Soft delete failed");
+        queries::soft_delete_organization(&mut conn, &org.id).expect("Soft delete failed");
 
         // Org at depth 0
         assert_eq!(
-            queries::get_deleted_organization_by_id(&conn, &org.id)
+            queries::get_deleted_organization_by_id(&mut conn, &org.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -1501,7 +1501,7 @@ mod cascade_depth_tracking {
 
         // Org member at depth 1
         assert_eq!(
-            queries::get_deleted_org_member_by_id(&conn, &member.id)
+            queries::get_deleted_org_member_by_id(&mut conn, &member.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -1511,7 +1511,7 @@ mod cascade_depth_tracking {
 
         // Project at depth 1
         assert_eq!(
-            queries::get_deleted_project_by_id(&conn, &project.id)
+            queries::get_deleted_project_by_id(&mut conn, &project.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -1521,7 +1521,7 @@ mod cascade_depth_tracking {
 
         // Product at depth 2
         assert_eq!(
-            queries::get_deleted_product_by_id(&conn, &product.id)
+            queries::get_deleted_product_by_id(&mut conn, &product.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -1531,7 +1531,7 @@ mod cascade_depth_tracking {
 
         // License at depth 3
         assert_eq!(
-            queries::get_deleted_license_by_id(&conn, &license.id)
+            queries::get_deleted_license_by_id(&mut conn, &license.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -1543,11 +1543,11 @@ mod cascade_depth_tracking {
     /// Cascade from project sets correct depths.
     #[test]
     fn test_project_cascade_depths() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -1555,11 +1555,11 @@ mod cascade_depth_tracking {
             Some(future_timestamp(LICENSE_VALID_DAYS)),
         );
 
-        queries::soft_delete_project(&conn, &project.id).expect("Soft delete failed");
+        queries::soft_delete_project(&mut conn, &project.id).expect("Soft delete failed");
 
         // Project at depth 0
         assert_eq!(
-            queries::get_deleted_project_by_id(&conn, &project.id)
+            queries::get_deleted_project_by_id(&mut conn, &project.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -1569,7 +1569,7 @@ mod cascade_depth_tracking {
 
         // Product at depth 1
         assert_eq!(
-            queries::get_deleted_product_by_id(&conn, &product.id)
+            queries::get_deleted_product_by_id(&mut conn, &product.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -1579,7 +1579,7 @@ mod cascade_depth_tracking {
 
         // License at depth 2
         assert_eq!(
-            queries::get_deleted_license_by_id(&conn, &license.id)
+            queries::get_deleted_license_by_id(&mut conn, &license.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -1591,11 +1591,11 @@ mod cascade_depth_tracking {
     /// Cascade from product sets correct depth for license.
     #[test]
     fn test_product_cascade_depth() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -1603,11 +1603,11 @@ mod cascade_depth_tracking {
             Some(future_timestamp(LICENSE_VALID_DAYS)),
         );
 
-        queries::soft_delete_product(&conn, &product.id).expect("Soft delete failed");
+        queries::soft_delete_product(&mut conn, &product.id).expect("Soft delete failed");
 
         // Product at depth 0
         assert_eq!(
-            queries::get_deleted_product_by_id(&conn, &product.id)
+            queries::get_deleted_product_by_id(&mut conn, &product.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,
@@ -1617,7 +1617,7 @@ mod cascade_depth_tracking {
 
         // License at depth 1
         assert_eq!(
-            queries::get_deleted_license_by_id(&conn, &license.id)
+            queries::get_deleted_license_by_id(&mut conn, &license.id)
                 .unwrap()
                 .unwrap()
                 .deleted_cascade_depth,

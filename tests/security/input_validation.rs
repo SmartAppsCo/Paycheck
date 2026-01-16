@@ -149,10 +149,10 @@ mod sql_injection {
         // Create a valid authenticated user
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Legit Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Legit Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
             api_key = key;
         }
 
@@ -196,12 +196,12 @@ mod sql_injection {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
             // Create a real project so the org exists
-            let _ = create_test_project(&conn, &org.id, "Real Project", &master_key);
+            let _ = create_test_project(&mut conn, &org.id, "Real Project", &master_key);
 
             org_id = org.id;
             api_key = key;
@@ -249,10 +249,10 @@ mod sql_injection {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
 
             org_id = org.id;
             api_key = key;
@@ -303,11 +303,11 @@ mod sql_injection {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             org_id = org.id;
             project_id = project.id;
@@ -357,12 +357,12 @@ mod sql_injection {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&conn, &project.id, "Pro", "pro");
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
             // Create a real license to ensure the endpoint works
             let _ = create_test_license(
                 &conn,
@@ -430,8 +430,8 @@ mod sql_injection {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
             api_key = key;
         }
 
@@ -478,10 +478,10 @@ mod path_traversal {
 
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Legit Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Legit Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
             api_key = key;
         }
 
@@ -525,11 +525,11 @@ mod path_traversal {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
-            let _ = create_test_project(&conn, &org.id, "Real Project", &master_key);
+                create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            let _ = create_test_project(&mut conn, &org.id, "Real Project", &master_key);
 
             org_id = org.id;
             api_key = key;
@@ -577,11 +577,11 @@ mod path_traversal {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             org_id = org.id;
             project_id = project.id;
@@ -632,10 +632,10 @@ mod unicode_attacks {
 
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
             api_key = key;
         }
 
@@ -688,10 +688,10 @@ mod unicode_attacks {
 
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
             api_key = key;
         }
 
@@ -730,11 +730,11 @@ mod unicode_attacks {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             org_id = org.id;
             project_id = project.id;
@@ -791,8 +791,8 @@ mod input_size_limits {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&conn, "owner@test.com", OperatorRole::Owner);
+            let mut conn = state.db.get().unwrap();
+            let (_, key) = create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
             api_key = key;
         }
 
@@ -834,11 +834,11 @@ mod input_size_limits {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             org_id = org.id;
             project_id = project.id;
@@ -889,11 +889,11 @@ mod input_size_limits {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             org_id = org.id;
             project_id = project.id;
@@ -949,10 +949,10 @@ mod input_size_limits {
         let org_id: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
             org_id = org.id;
             api_key = key;
         }
@@ -1001,11 +1001,11 @@ mod input_size_limits {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             org_id = org.id;
             project_id = project.id;
@@ -1052,10 +1052,10 @@ mod special_characters {
 
         let api_key: String;
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+                create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
             api_key = key;
         }
 
@@ -1110,11 +1110,11 @@ mod special_characters {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             org_id = org.id;
             project_id = project.id;
@@ -1178,11 +1178,11 @@ mod special_characters {
         let api_key: String;
 
         {
-            let conn = state.db.get().unwrap();
-            let org = create_test_org(&conn, "Test Org");
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
             let (_, _, key) =
-                create_test_org_member(&conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
             org_id = org.id;
             project_id = project.id;

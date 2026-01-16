@@ -31,7 +31,7 @@ pub async fn create_api_key(
     headers: HeaderMap,
     Json(input): Json<CreateApiKey>,
 ) -> Result<Json<ApiKeyCreated>> {
-    let conn = state.db.get()?;
+    let mut conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     // Verify the target user exists
@@ -41,7 +41,7 @@ pub async fn create_api_key(
     // Create API key for the user
     let user_manageable = input.user_manageable.unwrap_or(true);
     let (key_record, full_key) = queries::create_api_key(
-        &conn,
+        &mut conn,
         &path.user_id,
         &input.name,
         input.expires_in_days,

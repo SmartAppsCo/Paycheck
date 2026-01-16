@@ -128,19 +128,19 @@ mod org_member_isolation {
     #[tokio::test]
     async fn org_a_member_cannot_list_org_b_members() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create two separate organizations
-        let org_a = create_test_org(&conn, "Organization A");
-        let org_b = create_test_org(&conn, "Organization B");
+        let org_a = create_test_org(&mut conn, "Organization A");
+        let org_b = create_test_org(&mut conn, "Organization B");
 
         // Create member in org_a
         let (_user_a, _member_a, key_a) =
-            create_test_org_member(&conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
 
         // Create member in org_b (to ensure it has members to list)
         let (_user_b, _member_b, _key_b) =
-            create_test_org_member(&conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
 
         // Try to access org_b's members with org_a's key
         let response = app
@@ -166,16 +166,16 @@ mod org_member_isolation {
     #[tokio::test]
     async fn org_a_member_cannot_list_org_b_projects() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org_a = create_test_org(&conn, "Organization A");
-        let org_b = create_test_org(&conn, "Organization B");
+        let org_a = create_test_org(&mut conn, "Organization A");
+        let org_b = create_test_org(&mut conn, "Organization B");
 
         // Create projects in org_b
-        let _project_b = create_test_project(&conn, &org_b.id, "Org B Project", &state.master_key);
+        let _project_b = create_test_project(&mut conn, &org_b.id, "Org B Project", &state.master_key);
 
         let (_user_a, _member_a, key_a) =
-            create_test_org_member(&conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
 
         // Try to list org_b's projects with org_a's key
         let response = app
@@ -201,13 +201,13 @@ mod org_member_isolation {
     #[tokio::test]
     async fn org_a_member_cannot_access_org_b_audit_logs() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org_a = create_test_org(&conn, "Organization A");
-        let org_b = create_test_org(&conn, "Organization B");
+        let org_a = create_test_org(&mut conn, "Organization A");
+        let org_b = create_test_org(&mut conn, "Organization B");
 
         let (_user_a, _member_a, key_a) =
-            create_test_org_member(&conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
 
         // Try to access org_b's audit logs
         let response = app
@@ -233,14 +233,14 @@ mod org_member_isolation {
     #[tokio::test]
     async fn multi_org_member_sees_only_requested_org_data() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create two organizations
-        let org_a = create_test_org(&conn, "Organization A");
-        let org_b = create_test_org(&conn, "Organization B");
+        let org_a = create_test_org(&mut conn, "Organization A");
+        let org_b = create_test_org(&mut conn, "Organization B");
 
         // Create a user who is member of both orgs
-        let user = create_test_user(&conn, "multiorg@example.com", "Multi-Org User");
+        let user = create_test_user(&mut conn, "multiorg@example.com", "Multi-Org User");
 
         // Add user to org_a as owner
         queries::create_org_member(
@@ -265,12 +265,12 @@ mod org_member_isolation {
         .unwrap();
 
         // Create projects in each org
-        let _project_a = create_test_project(&conn, &org_a.id, "Project A", &state.master_key);
-        let _project_b = create_test_project(&conn, &org_b.id, "Project B", &state.master_key);
+        let _project_a = create_test_project(&mut conn, &org_a.id, "Project A", &state.master_key);
+        let _project_b = create_test_project(&mut conn, &org_b.id, "Project B", &state.master_key);
 
         // Create API key for the user (unscoped - can access both orgs)
         let (_, api_key) =
-            queries::create_api_key(&conn, &user.id, "Multi-org key", None, true, None)
+            queries::create_api_key(&mut conn, &user.id, "Multi-org key", None, true, None)
                 .expect("Failed to create API key");
 
         // Query org_a's projects
@@ -355,14 +355,14 @@ mod api_key_scope_isolation {
     #[tokio::test]
     async fn api_key_scoped_to_org_a_cannot_access_org_b() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create two organizations
-        let org_a = create_test_org(&conn, "Organization A");
-        let org_b = create_test_org(&conn, "Organization B");
+        let org_a = create_test_org(&mut conn, "Organization A");
+        let org_b = create_test_org(&mut conn, "Organization B");
 
         // Create user as member of both orgs
-        let user = create_test_user(&conn, "user@example.com", "Test User");
+        let user = create_test_user(&mut conn, "user@example.com", "Test User");
         queries::create_org_member(
             &conn,
             &org_a.id,
@@ -384,7 +384,7 @@ mod api_key_scope_isolation {
 
         // Create API key scoped ONLY to org_a
         let scoped_key =
-            create_api_key_with_org_scope(&conn, &user.id, &org_a.id, AccessLevel::Admin);
+            create_api_key_with_org_scope(&mut conn, &user.id, &org_a.id, AccessLevel::Admin);
 
         // Try to access org_b with org_a-scoped key
         let response = app
@@ -410,16 +410,16 @@ mod api_key_scope_isolation {
     #[tokio::test]
     async fn api_key_scoped_to_org_a_can_access_org_a() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org_a = create_test_org(&conn, "Organization A");
+        let org_a = create_test_org(&mut conn, "Organization A");
 
         let (user, _member, _default_key) =
-            create_test_org_member(&conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
 
         // Create API key scoped to org_a
         let scoped_key =
-            create_api_key_with_org_scope(&conn, &user.id, &org_a.id, AccessLevel::Admin);
+            create_api_key_with_org_scope(&mut conn, &user.id, &org_a.id, AccessLevel::Admin);
 
         // Access org_a with org_a-scoped key - should work
         let response = app
@@ -445,13 +445,13 @@ mod api_key_scope_isolation {
     #[tokio::test]
     async fn scoped_key_cannot_write_to_different_org() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org_a = create_test_org(&conn, "Organization A");
-        let org_b = create_test_org(&conn, "Organization B");
+        let org_a = create_test_org(&mut conn, "Organization A");
+        let org_b = create_test_org(&mut conn, "Organization B");
 
         // Create user as owner of both orgs
-        let user = create_test_user(&conn, "owner@example.com", "Owner");
+        let user = create_test_user(&mut conn, "owner@example.com", "Owner");
         queries::create_org_member(
             &conn,
             &org_a.id,
@@ -473,10 +473,10 @@ mod api_key_scope_isolation {
 
         // Create API key scoped ONLY to org_a
         let scoped_key =
-            create_api_key_with_org_scope(&conn, &user.id, &org_a.id, AccessLevel::Admin);
+            create_api_key_with_org_scope(&mut conn, &user.id, &org_a.id, AccessLevel::Admin);
 
         // Create a new user to add as member
-        let new_user = create_test_user(&conn, "new@example.com", "New User");
+        let new_user = create_test_user(&mut conn, "new@example.com", "New User");
 
         // Try to create member in org_b with org_a-scoped key
         let response = app
@@ -514,15 +514,15 @@ mod audit_log_isolation {
     #[tokio::test]
     async fn audit_log_org_id_query_param_cannot_bypass_path_org_id() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
         let audit_conn = state.audit.get().unwrap();
 
         // Create two orgs
-        let org_a = create_test_org(&conn, "Organization A");
-        let org_b = create_test_org(&conn, "Organization B");
+        let org_a = create_test_org(&mut conn, "Organization A");
+        let org_b = create_test_org(&mut conn, "Organization B");
 
         let (_user_a, _member_a, key_a) =
-            create_test_org_member(&conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
 
         // Create audit logs for both orgs
         queries::create_audit_log(
@@ -606,16 +606,16 @@ mod audit_log_isolation {
     #[tokio::test]
     async fn audit_logs_strictly_isolated_between_orgs() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
         let audit_conn = state.audit.get().unwrap();
 
-        let org_a = create_test_org(&conn, "Organization A");
-        let org_b = create_test_org(&conn, "Organization B");
+        let org_a = create_test_org(&mut conn, "Organization A");
+        let org_b = create_test_org(&mut conn, "Organization B");
 
         let (_user_a, _member_a, key_a) =
-            create_test_org_member(&conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
         let (_user_b, _member_b, key_b) =
-            create_test_org_member(&conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
 
         // Create 3 audit logs for org_a
         for i in 1..=3 {
@@ -742,17 +742,17 @@ mod resource_isolation {
     #[tokio::test]
     async fn cross_org_project_access_blocked() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org_a = create_test_org(&conn, "Organization A");
-        let org_b = create_test_org(&conn, "Organization B");
+        let org_a = create_test_org(&mut conn, "Organization A");
+        let org_b = create_test_org(&mut conn, "Organization B");
 
         // Create project in org_a
-        let project_a = create_test_project(&conn, &org_a.id, "Project A", &state.master_key);
+        let project_a = create_test_project(&mut conn, &org_a.id, "Project A", &state.master_key);
 
         // Create member in org_b
         let (_user_b, _member_b, key_b) =
-            create_test_org_member(&conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
 
         // Try to access org_a's project using org_a's path but org_b's key
         // This should fail at auth level (org_b member can't access org_a)
@@ -779,19 +779,19 @@ mod resource_isolation {
     #[tokio::test]
     async fn cross_org_license_lookup_blocked() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org_a = create_test_org(&conn, "Organization A");
-        let org_b = create_test_org(&conn, "Organization B");
+        let org_a = create_test_org(&mut conn, "Organization A");
+        let org_b = create_test_org(&mut conn, "Organization B");
 
         // Create project and license in org_a
-        let project_a = create_test_project(&conn, &org_a.id, "Project A", &state.master_key);
-        let product_a = create_test_product(&conn, &project_a.id, "Product A", "pro");
-        let license_a = create_test_license(&conn, &project_a.id, &product_a.id, None);
+        let project_a = create_test_project(&mut conn, &org_a.id, "Project A", &state.master_key);
+        let product_a = create_test_product(&mut conn, &project_a.id, "Product A", "pro");
+        let license_a = create_test_license(&mut conn, &project_a.id, &product_a.id, None);
 
         // Create member in org_b
         let (_user_b, _member_b, key_b) =
-            create_test_org_member(&conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
 
         // Try to access org_a's license using org_b's key
         let response = app
@@ -820,22 +820,22 @@ mod resource_isolation {
     #[tokio::test]
     async fn multi_org_user_license_isolation() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org_a = create_test_org(&conn, "Organization A");
-        let org_b = create_test_org(&conn, "Organization B");
+        let org_a = create_test_org(&mut conn, "Organization A");
+        let org_b = create_test_org(&mut conn, "Organization B");
 
         // Create projects and licenses in both orgs
-        let project_a = create_test_project(&conn, &org_a.id, "Project A", &state.master_key);
-        let product_a = create_test_product(&conn, &project_a.id, "Product A", "pro");
-        let license_a = create_test_license(&conn, &project_a.id, &product_a.id, None);
+        let project_a = create_test_project(&mut conn, &org_a.id, "Project A", &state.master_key);
+        let product_a = create_test_product(&mut conn, &project_a.id, "Product A", "pro");
+        let license_a = create_test_license(&mut conn, &project_a.id, &product_a.id, None);
 
-        let project_b = create_test_project(&conn, &org_b.id, "Project B", &state.master_key);
-        let product_b = create_test_product(&conn, &project_b.id, "Product B", "pro");
-        let license_b = create_test_license(&conn, &project_b.id, &product_b.id, None);
+        let project_b = create_test_project(&mut conn, &org_b.id, "Project B", &state.master_key);
+        let product_b = create_test_product(&mut conn, &project_b.id, "Product B", "pro");
+        let license_b = create_test_license(&mut conn, &project_b.id, &product_b.id, None);
 
         // Create user as member of both orgs
-        let user = create_test_user(&conn, "multiorg@example.com", "Multi-Org User");
+        let user = create_test_user(&mut conn, "multiorg@example.com", "Multi-Org User");
         queries::create_org_member(
             &conn,
             &org_a.id,
@@ -856,7 +856,7 @@ mod resource_isolation {
         .unwrap();
 
         let (_, api_key) =
-            queries::create_api_key(&conn, &user.id, "Multi-org key", None, true, None)
+            queries::create_api_key(&mut conn, &user.id, "Multi-org key", None, true, None)
                 .expect("Failed to create API key");
 
         // Access org_a's license - should work
@@ -942,18 +942,18 @@ mod operator_isolation {
     #[tokio::test]
     async fn operator_synthetic_access_does_not_leak_cross_org_data() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create an admin operator
         let (_op_user, operator_key) =
-            create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+            create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
         // Create two orgs with different projects
-        let org_a = create_test_org(&conn, "Organization A");
-        let org_b = create_test_org(&conn, "Organization B");
+        let org_a = create_test_org(&mut conn, "Organization A");
+        let org_b = create_test_org(&mut conn, "Organization B");
 
-        let _project_a = create_test_project(&conn, &org_a.id, "Org A Project", &state.master_key);
-        let _project_b = create_test_project(&conn, &org_b.id, "Org B Project", &state.master_key);
+        let _project_a = create_test_project(&mut conn, &org_a.id, "Org A Project", &state.master_key);
+        let _project_b = create_test_project(&mut conn, &org_b.id, "Org B Project", &state.master_key);
 
         // Operator queries org_a's projects
         let response_a = app
@@ -1029,13 +1029,13 @@ mod operator_isolation {
     #[tokio::test]
     async fn view_operator_blocked_from_org_endpoints() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create a view-only operator
         let (_op_user, operator_key) =
-            create_test_operator(&conn, "viewer@platform.com", OperatorRole::View);
+            create_test_operator(&mut conn, "viewer@platform.com", OperatorRole::View);
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
 
         let response = app
             .oneshot(
@@ -1069,17 +1069,17 @@ mod api_key_visibility_isolation {
     #[tokio::test]
     async fn user_only_sees_own_api_keys() {
         let (app, state) = operator_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create two users with API keys
         let (user_a, key_a) =
-            create_test_operator(&conn, "usera@platform.com", OperatorRole::Admin);
+            create_test_operator(&mut conn, "usera@platform.com", OperatorRole::Admin);
         let (_user_b, _key_b) =
-            create_test_operator(&conn, "userb@platform.com", OperatorRole::Admin);
+            create_test_operator(&mut conn, "userb@platform.com", OperatorRole::Admin);
 
         // Create additional API keys for both users with distinctive names
-        queries::create_api_key(&conn, &user_a.id, "User A Extra Key", None, true, None).unwrap();
-        queries::create_api_key(&conn, &_user_b.id, "User B Extra Key", None, true, None).unwrap();
+        queries::create_api_key(&mut conn, &user_a.id, "User A Extra Key", None, true, None).unwrap();
+        queries::create_api_key(&mut conn, &_user_b.id, "User B Extra Key", None, true, None).unwrap();
 
         // User A queries their own API keys
         let response = app
@@ -1129,15 +1129,15 @@ mod api_key_visibility_isolation {
     #[tokio::test]
     async fn user_cannot_view_other_users_api_keys() {
         let (app, state) = operator_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create admin operator (user A)
         let (_user_a, key_a) =
-            create_test_operator(&conn, "admin@platform.com", OperatorRole::Admin);
+            create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
 
         // Create another user (user B) with an API key
         let (user_b, _key_b) =
-            create_test_operator(&conn, "userb@platform.com", OperatorRole::View);
+            create_test_operator(&mut conn, "userb@platform.com", OperatorRole::View);
 
         // Admin tries to view user B's API keys
         // This should work for admins (they manage users)
@@ -1165,15 +1165,15 @@ mod api_key_visibility_isolation {
     #[tokio::test]
     async fn org_member_api_key_isolation() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
 
         // Create two org members
         let (user_a, _member_a, key_a) =
-            create_test_org_member(&conn, &org.id, "usera@org.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "usera@org.com", OrgMemberRole::Owner);
         let (user_b, _member_b, _key_b) =
-            create_test_org_member(&conn, &org.id, "userb@org.com", OrgMemberRole::Member);
+            create_test_org_member(&mut conn, &org.id, "userb@org.com", OrgMemberRole::Member);
 
         // User A queries their own API keys
         let response_own = app
@@ -1221,19 +1221,19 @@ mod api_key_visibility_isolation {
     #[tokio::test]
     async fn member_role_cannot_view_other_member_api_keys() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
 
         // Create owner to satisfy org requirements
         let (_owner_user, _owner_member, _owner_key) =
-            create_test_org_member(&conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
 
         // Create two members with Member role
         let (_user_a, _member_a, key_a) =
-            create_test_org_member(&conn, &org.id, "membera@org.com", OrgMemberRole::Member);
+            create_test_org_member(&mut conn, &org.id, "membera@org.com", OrgMemberRole::Member);
         let (user_b, _member_b, _key_b) =
-            create_test_org_member(&conn, &org.id, "memberb@org.com", OrgMemberRole::Member);
+            create_test_org_member(&mut conn, &org.id, "memberb@org.com", OrgMemberRole::Member);
 
         // Member A tries to view Member B's API keys
         let response = app

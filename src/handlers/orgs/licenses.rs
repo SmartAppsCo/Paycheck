@@ -138,7 +138,7 @@ fn default_count() -> i32 {
 
 #[derive(Debug, Serialize)]
 pub struct CreateLicenseResponse {
-    pub licenses: Vec<CreatedLicense>,
+    pub items: Vec<CreatedLicense>,
 }
 
 #[derive(Debug, Serialize)]
@@ -273,7 +273,7 @@ pub async fn create_license(
     );
 
     Ok(Json(CreateLicenseResponse {
-        licenses: created_licenses,
+        items: created_licenses,
     }))
 }
 
@@ -282,13 +282,6 @@ pub async fn create_license(
 pub struct UpdateLicenseBody {
     /// New email to hash and store (fixes typo'd purchase email)
     pub email: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct UpdateLicenseResponse {
-    #[serde(flatten)]
-    pub license: LicenseWithProduct,
-    pub message: &'static str,
 }
 
 /// PATCH /orgs/{org_id}/projects/{project_id}/licenses/{license_id}
@@ -300,7 +293,7 @@ pub async fn update_license(
     Path(path): Path<LicensePath>,
     headers: HeaderMap,
     Json(body): Json<UpdateLicenseBody>,
-) -> Result<Json<UpdateLicenseResponse>> {
+) -> Result<Json<LicenseWithProduct>> {
     if !ctx.can_write_project() {
         return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
@@ -355,12 +348,9 @@ pub async fn update_license(
     let updated_license = queries::get_license_by_id(&conn, &path.license_id)?
         .or_not_found(msg::LICENSE_NOT_FOUND)?;
 
-    Ok(Json(UpdateLicenseResponse {
-        license: LicenseWithProduct {
-            license: updated_license,
-            product_name: product.name,
-        },
-        message: "License email updated. Customer can now use self-service recovery with the new email.",
+    Ok(Json(LicenseWithProduct {
+        license: updated_license,
+        product_name: product.name,
     }))
 }
 

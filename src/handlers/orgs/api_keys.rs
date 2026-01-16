@@ -39,7 +39,7 @@ pub async fn create_api_key(
         ctx.require_owner()?;
     }
 
-    let conn = state.db.get()?;
+    let mut conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     // Get the target member with user details
@@ -63,7 +63,7 @@ pub async fn create_api_key(
     // Note: org member keys default to user_manageable=true unless explicitly set
     let user_manageable = input.user_manageable.unwrap_or(true);
     let (key_record, full_key) = queries::create_api_key(
-        &conn,
+        &mut conn,
         &path.user_id,
         &input.name,
         input.expires_in_days,

@@ -88,15 +88,15 @@ mod expired_and_revoked_keys {
     #[tokio::test]
     async fn test_expired_api_key_returns_401() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create org and member
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, _member, _valid_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Create an expired API key for the same user
-        let expired_key = create_expired_api_key(&conn, &user.id);
+        let expired_key = create_expired_api_key(&mut conn, &user.id);
 
         // Try to access org endpoint with expired key
         let response = app
@@ -123,15 +123,15 @@ mod expired_and_revoked_keys {
     #[tokio::test]
     async fn test_revoked_api_key_returns_401() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create org and member
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, _member, _valid_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Create a revoked API key for the same user
-        let revoked_key = create_revoked_api_key(&conn, &user.id);
+        let revoked_key = create_revoked_api_key(&mut conn, &user.id);
 
         // Try to access org endpoint with revoked key
         let response = app
@@ -166,14 +166,14 @@ mod scope_enforcement {
     #[tokio::test]
     async fn test_scoped_key_cannot_access_different_org() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create two organizations
-        let org_a = create_test_org(&conn, "Org A");
-        let org_b = create_test_org(&conn, "Org B");
+        let org_a = create_test_org(&mut conn, "Org A");
+        let org_b = create_test_org(&mut conn, "Org B");
 
         // Create user as member of both orgs
-        let user = create_test_user(&conn, "user@test.com", "Test User");
+        let user = create_test_user(&mut conn, "user@test.com", "Test User");
         queries::create_org_member(
             &conn,
             &org_a.id,
@@ -195,7 +195,7 @@ mod scope_enforcement {
 
         // Create API key scoped to org_a only
         let scoped_key =
-            create_api_key_with_org_scope(&conn, &user.id, &org_a.id, AccessLevel::Admin);
+            create_api_key_with_org_scope(&mut conn, &user.id, &org_a.id, AccessLevel::Admin);
 
         // Try to access org_b with org_a-scoped key
         let response = app
@@ -222,20 +222,20 @@ mod scope_enforcement {
     #[tokio::test]
     async fn test_scoped_key_cannot_access_different_project() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create org with two projects
-        let org = create_test_org(&conn, "Test Org");
-        let project_a = create_test_project(&conn, &org.id, "Project A", &state.master_key);
-        let project_b = create_test_project(&conn, &org.id, "Project B", &state.master_key);
+        let org = create_test_org(&mut conn, "Test Org");
+        let project_a = create_test_project(&mut conn, &org.id, "Project A", &state.master_key);
+        let project_b = create_test_project(&mut conn, &org.id, "Project B", &state.master_key);
 
         // Create user as org owner
         let (user, _member, _unscoped_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Create API key scoped to project_a only
         let scoped_key = create_api_key_with_project_scope(
-            &conn,
+            &mut conn,
             &user.id,
             &org.id,
             &project_a.id,
@@ -268,20 +268,20 @@ mod scope_enforcement {
     #[tokio::test]
     async fn test_org_scoped_key_can_access_all_projects_in_org() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create org with multiple projects
-        let org = create_test_org(&conn, "Test Org");
-        let project_a = create_test_project(&conn, &org.id, "Project A", &state.master_key);
-        let project_b = create_test_project(&conn, &org.id, "Project B", &state.master_key);
+        let org = create_test_org(&mut conn, "Test Org");
+        let project_a = create_test_project(&mut conn, &org.id, "Project A", &state.master_key);
+        let project_b = create_test_project(&mut conn, &org.id, "Project B", &state.master_key);
 
         // Create user as org owner
         let (user, _member, _unscoped_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Create API key with org-level scope
         let org_scoped_key =
-            create_api_key_with_org_scope(&conn, &user.id, &org.id, AccessLevel::Admin);
+            create_api_key_with_org_scope(&mut conn, &user.id, &org.id, AccessLevel::Admin);
 
         // Access both projects with org-scoped key
         let app_clone = app.clone();
@@ -327,19 +327,19 @@ mod scope_enforcement {
     #[tokio::test]
     async fn test_project_scoped_key_cannot_access_org_level_endpoints() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create org with a project
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
         // Create user as org owner
         let (user, _member, _unscoped_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Create API key with project-level scope only
         let project_scoped_key = create_api_key_with_project_scope(
-            &conn,
+            &mut conn,
             &user.id,
             &org.id,
             &project.id,
@@ -371,22 +371,22 @@ mod scope_enforcement {
     #[tokio::test]
     async fn test_read_only_scope_cannot_write() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create org and project
-        let org = create_test_org(&conn, "Test Org");
-        let _project = create_test_project(&conn, &org.id, "Test Project", &state.master_key);
+        let org = create_test_org(&mut conn, "Test Org");
+        let _project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
 
         // Create user as org owner
         let (user, _member, _unscoped_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Create a new user to add (for testing the POST)
-        let new_user = create_test_user(&conn, "new@test.com", "New User");
+        let new_user = create_test_user(&mut conn, "new@test.com", "New User");
 
         // Create API key with view-only (read) scope
         let view_only_key =
-            create_api_key_with_org_scope(&conn, &user.id, &org.id, AccessLevel::View);
+            create_api_key_with_org_scope(&mut conn, &user.id, &org.id, AccessLevel::View);
 
         // Try to create a new org member (write operation)
         let response = app
@@ -417,15 +417,15 @@ mod scope_enforcement {
     #[tokio::test]
     async fn test_unscoped_key_has_full_access() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create two organizations
-        let org_a = create_test_org(&conn, "Org A");
-        let org_b = create_test_org(&conn, "Org B");
+        let org_a = create_test_org(&mut conn, "Org A");
+        let org_b = create_test_org(&mut conn, "Org B");
 
         // Create user as member of both orgs (with the default unscoped key)
         let (user, _member_a, unscoped_key) =
-            create_test_org_member(&conn, &org_a.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org_a.id, "user@test.com", OrgMemberRole::Owner);
 
         // Add user to org_b as well
         queries::create_org_member(
@@ -491,12 +491,12 @@ mod deleted_entity_tests {
     #[tokio::test]
     async fn test_api_key_of_deleted_user_returns_unauthorized() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create org and member
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, _member, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Verify the key works before deletion
         let response_before = app
@@ -519,7 +519,7 @@ mod deleted_entity_tests {
         );
 
         // Soft-delete the user
-        queries::soft_delete_user(&conn, &user.id).expect("Failed to soft-delete user");
+        queries::soft_delete_user(&mut conn, &user.id).expect("Failed to soft-delete user");
 
         // Try to use the API key after user deletion
         let response_after = app
@@ -546,18 +546,18 @@ mod deleted_entity_tests {
     #[tokio::test]
     async fn test_api_key_of_deleted_org_member_returns_unauthorized() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create org
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
 
         // Create user and make them an org member
         let (user, member, api_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Create another owner so we can delete the first one
         let (_user2, _member2, _key2) =
-            create_test_org_member(&conn, &org.id, "owner2@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "owner2@test.com", OrgMemberRole::Owner);
 
         // Verify the key works before removal
         let response_before = app
@@ -580,11 +580,11 @@ mod deleted_entity_tests {
         );
 
         // Remove the user from the org (soft-delete the org member)
-        queries::soft_delete_org_member(&conn, &member.id)
+        queries::soft_delete_org_member(&mut conn, &member.id)
             .expect("Failed to soft-delete org member");
 
         // User still exists, but is no longer a member of this org
-        let user_still_exists = queries::get_user_by_id(&conn, &user.id).unwrap();
+        let user_still_exists = queries::get_user_by_id(&mut conn, &user.id).unwrap();
         assert!(
             user_still_exists.is_some(),
             "User record should persist after org membership removal (soft delete removes membership, not user)"
@@ -622,7 +622,7 @@ mod ttl_boundary_tests {
     /// Helper to create an API key with a specific expires_at timestamp.
     /// This bypasses the days-based helper for precise boundary testing.
     fn create_api_key_with_exact_expiration(
-        conn: &rusqlite::Connection,
+        conn: &mut rusqlite::Connection,
         user_id: &str,
         expires_at: Option<i64>,
     ) -> String {
@@ -652,15 +652,15 @@ mod ttl_boundary_tests {
     #[tokio::test]
     async fn test_api_key_expires_at_boundary() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
         // Create org and member
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, _member, _valid_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Create key that expires exactly now
-        let boundary_key = create_api_key_with_exact_expiration(&conn, &user.id, Some(now()));
+        let boundary_key = create_api_key_with_exact_expiration(&mut conn, &user.id, Some(now()));
 
         let response = app
             .oneshot(
@@ -685,14 +685,14 @@ mod ttl_boundary_tests {
     #[tokio::test]
     async fn test_api_key_expires_soon() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, _member, _valid_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Create key that expires 2 seconds from now (buffer for test execution time)
-        let soon_key = create_api_key_with_exact_expiration(&conn, &user.id, Some(now() + 2));
+        let soon_key = create_api_key_with_exact_expiration(&mut conn, &user.id, Some(now() + 2));
 
         let response = app
             .oneshot(
@@ -717,15 +717,15 @@ mod ttl_boundary_tests {
     #[tokio::test]
     async fn test_api_key_just_expired() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, _member, _valid_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Create key that expired 1 second ago
         let just_expired_key =
-            create_api_key_with_exact_expiration(&conn, &user.id, Some(now() - 1));
+            create_api_key_with_exact_expiration(&mut conn, &user.id, Some(now() - 1));
 
         let response = app
             .oneshot(
@@ -750,14 +750,14 @@ mod ttl_boundary_tests {
     #[tokio::test]
     async fn test_api_key_never_expires() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, _member, _valid_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Create key with no expiration (NULL expires_at)
-        let never_expires_key = create_api_key_with_exact_expiration(&conn, &user.id, None);
+        let never_expires_key = create_api_key_with_exact_expiration(&mut conn, &user.id, None);
 
         let response = app
             .oneshot(
@@ -783,19 +783,19 @@ mod ttl_boundary_tests {
     #[tokio::test]
     async fn test_revoked_key_rejected_before_expiry() {
         let (app, state) = org_app();
-        let conn = state.db.get().unwrap();
+        let mut conn = state.db.get().unwrap();
 
-        let org = create_test_org(&conn, "Test Org");
+        let org = create_test_org(&mut conn, "Test Org");
         let (user, _member, _valid_key) =
-            create_test_org_member(&conn, &org.id, "user@test.com", OrgMemberRole::Owner);
+            create_test_org_member(&mut conn, &org.id, "user@test.com", OrgMemberRole::Owner);
 
         // Create key that expires far in the future
         let (key_record, raw_key) =
-            queries::create_api_key(&conn, &user.id, "Far Future", Some(365), true, None)
+            queries::create_api_key(&mut conn, &user.id, "Far Future", Some(365), true, None)
                 .expect("Failed to create API key");
 
         // Revoke it immediately
-        queries::revoke_api_key(&conn, &key_record.id).expect("Failed to revoke API key");
+        queries::revoke_api_key(&mut conn, &key_record.id).expect("Failed to revoke API key");
 
         let response = app
             .oneshot(

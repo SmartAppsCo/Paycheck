@@ -46,11 +46,11 @@ fn org_app_with_audit() -> (Router, AppState) {
 #[tokio::test]
 async fn org_member_can_access_own_audit_logs() {
     let (app, state) = org_app_with_audit();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (_user, _member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let response = app
         .oneshot(
@@ -74,15 +74,15 @@ async fn org_member_can_access_own_audit_logs() {
 #[tokio::test]
 async fn org_member_cannot_access_another_orgs_audit_logs() {
     let (app, state) = org_app_with_audit();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create two orgs
-    let org1 = create_test_org(&conn, "Org 1");
-    let org2 = create_test_org(&conn, "Org 2");
+    let org1 = create_test_org(&mut conn, "Org 1");
+    let org2 = create_test_org(&mut conn, "Org 2");
 
     // Create member in org1
     let (_user, _member1, key1) =
-        create_test_org_member(&conn, &org1.id, "user@org1.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org1.id, "user@org1.com", OrgMemberRole::Owner);
 
     // Try to access org2's audit logs with org1's key
     let response = app
@@ -109,17 +109,17 @@ async fn audit_logs_only_return_own_org_data() {
     use paycheck::models::{ActorType, AuditLogNames};
 
     let (app, state) = org_app_with_audit();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
     let audit_conn = state.audit.get().unwrap();
 
     // Create two orgs with members
-    let org1 = create_test_org(&conn, "Org 1");
-    let org2 = create_test_org(&conn, "Org 2");
+    let org1 = create_test_org(&mut conn, "Org 1");
+    let org2 = create_test_org(&mut conn, "Org 2");
 
     let (_user, _member1, key1) =
-        create_test_org_member(&conn, &org1.id, "user@org1.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org1.id, "user@org1.com", OrgMemberRole::Owner);
     let (_user2, _member2, _key2) =
-        create_test_org_member(&conn, &org2.id, "user@org2.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org2.id, "user@org2.com", OrgMemberRole::Owner);
 
     // Create audit logs for both orgs
     queries::create_audit_log(
@@ -204,15 +204,15 @@ async fn query_param_org_id_cannot_override_path_org_id() {
     use paycheck::models::{ActorType, AuditLogNames};
 
     let (app, state) = org_app_with_audit();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
     let audit_conn = state.audit.get().unwrap();
 
     // Create two orgs
-    let org1 = create_test_org(&conn, "Org 1");
-    let org2 = create_test_org(&conn, "Org 2");
+    let org1 = create_test_org(&mut conn, "Org 1");
+    let org2 = create_test_org(&mut conn, "Org 2");
 
     let (_user, _member1, key1) =
-        create_test_org_member(&conn, &org1.id, "user@org1.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org1.id, "user@org1.com", OrgMemberRole::Owner);
 
     // Create audit logs for both orgs
     queries::create_audit_log(
@@ -296,9 +296,9 @@ async fn query_param_org_id_cannot_override_path_org_id() {
 #[tokio::test]
 async fn missing_token_cannot_access_org_audit_logs() {
     let (app, state) = org_app_with_audit();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     let response = app
         .oneshot(

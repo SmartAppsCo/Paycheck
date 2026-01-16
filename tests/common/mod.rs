@@ -80,7 +80,7 @@ pub fn create_test_user(conn: &Connection, email: &str, name: &str) -> User {
 }
 
 /// Create a test operator with default values (returns User with operator_role and API key)
-pub fn create_test_operator(conn: &Connection, email: &str, role: OperatorRole) -> (User, String) {
+pub fn create_test_operator(conn: &mut Connection, email: &str, role: OperatorRole) -> (User, String) {
     // Create user first
     let user = create_test_user(conn, email, &format!("Test Operator {}", email));
 
@@ -106,7 +106,7 @@ pub fn create_test_org(conn: &Connection, name: &str) -> Organization {
 
 /// Create a test org member with default values (returns User, OrgMember, and API key)
 pub fn create_test_org_member(
-    conn: &Connection,
+    conn: &mut Connection,
     org_id: &str,
     email: &str,
     role: OrgMemberRole,
@@ -409,7 +409,7 @@ pub fn create_test_activation_code(
 
 /// Create an API key with org-level scope restriction
 pub fn create_api_key_with_org_scope(
-    conn: &Connection,
+    conn: &mut Connection,
     user_id: &str,
     org_id: &str,
     access: AccessLevel,
@@ -426,7 +426,7 @@ pub fn create_api_key_with_org_scope(
 
 /// Create an API key with project-level scope restriction
 pub fn create_api_key_with_project_scope(
-    conn: &Connection,
+    conn: &mut Connection,
     user_id: &str,
     org_id: &str,
     project_id: &str,
@@ -443,7 +443,7 @@ pub fn create_api_key_with_project_scope(
 }
 
 /// Create an API key that is already expired
-pub fn create_expired_api_key(conn: &Connection, user_id: &str) -> String {
+pub fn create_expired_api_key(conn: &mut Connection, user_id: &str) -> String {
     // Pass -1 days to create a key that expired 1 day ago
     // The create_api_key function calculates: expires_at = now + days * 86400
     // So -1 gives us: now - 86400 (1 day in the past)
@@ -453,7 +453,7 @@ pub fn create_expired_api_key(conn: &Connection, user_id: &str) -> String {
 }
 
 /// Create an API key and immediately revoke it
-pub fn create_revoked_api_key(conn: &Connection, user_id: &str) -> String {
+pub fn create_revoked_api_key(conn: &mut Connection, user_id: &str) -> String {
     let (api_key_record, raw_key) =
         queries::create_api_key(conn, user_id, "Revoked", None, true, None)
             .expect("Failed to create API key");

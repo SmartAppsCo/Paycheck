@@ -29,14 +29,14 @@ use std::time::Instant;
 #[tokio::test]
 #[ignore]
 async fn test_license_list_large_dataset() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
     let email_hasher = test_email_hasher();
 
     // Setup: Create org, project, product
-    let org = create_test_org(&conn, "Performance Test Org");
-    let project = create_test_project(&conn, &org.id, "Perf Project", &master_key);
-    let product = create_test_product(&conn, &project.id, "Pro", "pro");
+    let org = create_test_org(&mut conn, "Performance Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Perf Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
 
     // Create 1000 licenses (batch insert)
     println!("Creating 1000 licenses...");
@@ -53,7 +53,7 @@ async fn test_license_list_large_dataset() {
             payment_provider_subscription_id: None,
             payment_provider_order_id: None,
         };
-        queries::create_license(&conn, &project.id, &product.id, &input)
+        queries::create_license(&mut conn, &project.id, &product.id, &input)
             .expect("Failed to create license");
     }
 
@@ -65,7 +65,7 @@ async fn test_license_list_large_dataset() {
 
     // Query first page
     let start = Instant::now();
-    let (page1, total) = queries::list_licenses_for_project_paginated(&conn, &project.id, 50, 0)
+    let (page1, total) = queries::list_licenses_for_project_paginated(&mut conn, &project.id, 50, 0)
         .expect("Failed to list licenses page 1");
     let query1_duration = start.elapsed();
     assert_eq!(page1.len(), 50, "First page should have 50 licenses");
@@ -80,7 +80,7 @@ async fn test_license_list_large_dataset() {
     // Query middle page
     let start = Instant::now();
     let (page_middle, _) =
-        queries::list_licenses_for_project_paginated(&conn, &project.id, 50, 500)
+        queries::list_licenses_for_project_paginated(&mut conn, &project.id, 50, 500)
             .expect("Failed to list licenses middle page");
     let query_middle_duration = start.elapsed();
     assert_eq!(page_middle.len(), 50, "Middle page should have 50 licenses");
@@ -96,7 +96,7 @@ async fn test_license_list_large_dataset() {
 
     // Query last page
     let start = Instant::now();
-    let (page_last, _) = queries::list_licenses_for_project_paginated(&conn, &project.id, 50, 950)
+    let (page_last, _) = queries::list_licenses_for_project_paginated(&mut conn, &project.id, 50, 950)
         .expect("Failed to list licenses last page");
     let query_last_duration = start.elapsed();
     assert_eq!(page_last.len(), 50, "Last page should have 50 licenses");
@@ -138,15 +138,15 @@ async fn test_license_list_large_dataset() {
 async fn test_audit_log_large_volume() {
     use rusqlite::params;
 
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let audit_conn = setup_test_audit_db();
     let master_key = test_master_key();
 
     // Setup
-    let org = create_test_org(&conn, "Audit Test Org");
+    let org = create_test_org(&mut conn, "Audit Test Org");
     let (user, _, _) =
-        create_test_org_member(&conn, &org.id, "auditor@test.com", OrgMemberRole::Admin);
-    let project = create_test_project(&conn, &org.id, "Audit Project", &master_key);
+        create_test_org_member(&mut conn, &org.id, "auditor@test.com", OrgMemberRole::Admin);
+    let project = create_test_project(&mut conn, &org.id, "Audit Project", &master_key);
 
     // Generate 10,000 audit log entries using direct SQL for speed
     println!("Creating 10,000 audit log entries...");
@@ -284,12 +284,12 @@ async fn test_audit_log_large_volume() {
 #[tokio::test]
 #[ignore]
 async fn test_license_many_devices() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
 
     // Setup
-    let org = create_test_org(&conn, "Device Test Org");
-    let project = create_test_project(&conn, &org.id, "Device Project", &master_key);
+    let org = create_test_org(&mut conn, "Device Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Device Project", &master_key);
 
     // Create product with unlimited devices
     let input = CreateProduct {
@@ -302,7 +302,7 @@ async fn test_license_many_devices() {
         features: vec!["unlimited_devices".to_string()],
     };
     let product =
-        queries::create_product(&conn, &project.id, &input).expect("Failed to create product");
+        queries::create_product(&mut conn, &project.id, &input).expect("Failed to create product");
 
     // Create license
     let license = create_test_license(
@@ -338,7 +338,7 @@ async fn test_license_many_devices() {
     // Get license with device count
     let start = Instant::now();
     let license_info =
-        queries::get_license_by_id(&conn, &license.id).expect("Failed to get license");
+        queries::get_license_by_id(&mut conn, &license.id).expect("Failed to get license");
     let get_duration = start.elapsed();
     assert!(license_info.is_some(), "License should exist");
     println!("Get license: {:?}", get_duration);
@@ -351,7 +351,7 @@ async fn test_license_many_devices() {
     // List devices for license
     let start = Instant::now();
     let devices =
-        queries::list_devices_for_license(&conn, &license.id).expect("Failed to list devices");
+        queries::list_devices_for_license(&mut conn, &license.id).expect("Failed to list devices");
     let list_duration = start.elapsed();
     assert_eq!(devices.len(), 500, "Should have 500 devices");
     println!("List 500 devices: {:?}", list_duration);
@@ -364,7 +364,7 @@ async fn test_license_many_devices() {
     // Deactivate a device
     let start = Instant::now();
     let device_to_deactivate = &devices[250];
-    queries::delete_device(&conn, &device_to_deactivate.id).expect("Failed to deactivate device");
+    queries::delete_device(&mut conn, &device_to_deactivate.id).expect("Failed to deactivate device");
     let deactivate_duration = start.elapsed();
     println!("Deactivate device: {:?}", deactivate_duration);
     assert!(
@@ -375,7 +375,7 @@ async fn test_license_many_devices() {
 
     // Verify device count after deactivation
     let start = Instant::now();
-    let active_devices = queries::list_devices_for_license(&conn, &license.id)
+    let active_devices = queries::list_devices_for_license(&mut conn, &license.id)
         .expect("Failed to list devices after deactivation");
     let recount_duration = start.elapsed();
     assert_eq!(active_devices.len(), 499, "Should have 499 active devices");
@@ -389,10 +389,10 @@ async fn test_license_many_devices() {
 #[tokio::test]
 #[ignore]
 async fn test_user_many_api_keys() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
 
     // Create user
-    let user = create_test_user(&conn, "apikey-test@example.com", "API Key Test User");
+    let user = create_test_user(&mut conn, "apikey-test@example.com", "API Key Test User");
 
     // Create 100 API keys (mix of active and revoked)
     println!("Creating 100 API keys...");
@@ -401,7 +401,7 @@ async fn test_user_many_api_keys() {
     let mut active_keys = Vec::new();
     for i in 0..100 {
         let (key_record, raw_key) = queries::create_api_key(
-            &conn,
+        &mut conn,
             &user.id,
             &format!("Key {}", i),
             Some(365), // 1 year expiry
@@ -412,7 +412,7 @@ async fn test_user_many_api_keys() {
 
         // Revoke every other key
         if i % 2 == 1 {
-            queries::revoke_api_key(&conn, &key_record.id).expect("Failed to revoke API key");
+            queries::revoke_api_key(&mut conn, &key_record.id).expect("Failed to revoke API key");
         } else {
             active_keys.push(raw_key);
         }
@@ -426,7 +426,7 @@ async fn test_user_many_api_keys() {
 
     // List API keys for user
     let start = Instant::now();
-    let keys = queries::list_api_keys(&conn, &user.id, false).expect("Failed to list API keys");
+    let keys = queries::list_api_keys(&mut conn, &user.id, false).expect("Failed to list API keys");
     let list_duration = start.elapsed();
     assert_eq!(keys.len(), 50, "Should have 50 active keys (50 revoked)");
     println!("List API keys: {:?}", list_duration);
@@ -439,7 +439,7 @@ async fn test_user_many_api_keys() {
     // Authenticate with one of the keys
     let test_key = &active_keys[25];
     let start = Instant::now();
-    let auth_result = queries::get_user_by_api_key(&conn, test_key);
+    let auth_result = queries::get_user_by_api_key(&mut conn, test_key);
     let auth_duration = start.elapsed();
     assert!(auth_result.is_ok(), "Authentication should succeed");
     let (auth_user, auth_key) = auth_result.unwrap().expect("Should find user by API key");
@@ -456,7 +456,7 @@ async fn test_user_many_api_keys() {
 
     // Verify last_used_at was updated
     let start = Instant::now();
-    let keys_after = queries::list_api_keys(&conn, &user.id, false).expect("Failed to list keys");
+    let keys_after = queries::list_api_keys(&mut conn, &user.id, false).expect("Failed to list keys");
     let key_record = keys_after.iter().find(|k| k.id == auth_key.id);
     assert!(
         key_record.unwrap().last_used_at.is_some(),
@@ -473,11 +473,11 @@ async fn test_user_many_api_keys() {
 #[tokio::test]
 #[ignore]
 async fn test_org_many_projects() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let master_key = test_master_key();
 
     // Create org
-    let org = create_test_org(&conn, "Many Projects Org");
+    let org = create_test_org(&mut conn, "Many Projects Org");
 
     // Create 100 projects
     println!("Creating 100 projects...");
@@ -511,7 +511,7 @@ async fn test_org_many_projects() {
     println!("\nTesting project listing...");
 
     let start = Instant::now();
-    let projects = queries::list_projects_for_org(&conn, &org.id).expect("Failed to list projects");
+    let projects = queries::list_projects_for_org(&mut conn, &org.id).expect("Failed to list projects");
     let list_duration = start.elapsed();
     assert_eq!(projects.len(), 100, "Should have 100 projects");
     println!("List 100 projects: {:?}", list_duration);

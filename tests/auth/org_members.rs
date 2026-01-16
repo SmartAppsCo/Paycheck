@@ -7,9 +7,9 @@ use super::helpers::*;
 #[tokio::test]
 async fn missing_token_returns_401() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     let response = app
         .oneshot(
@@ -32,9 +32,9 @@ async fn missing_token_returns_401() {
 #[tokio::test]
 async fn invalid_token_returns_401() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     let response = app
         .oneshot(
@@ -62,15 +62,15 @@ async fn invalid_token_returns_401() {
 #[tokio::test]
 async fn cannot_access_another_orgs_members() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
     // Create two orgs
-    let org1 = create_test_org(&conn, "Org 1");
-    let org2 = create_test_org(&conn, "Org 2");
+    let org1 = create_test_org(&mut conn, "Org 1");
+    let org2 = create_test_org(&mut conn, "Org 2");
 
     // Create member in org1
     let (_user, _member1, key1) =
-        create_test_org_member(&conn, &org1.id, "user@org1.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org1.id, "user@org1.com", OrgMemberRole::Owner);
 
     // Try to access org2's members with org1's key
     let response = app
@@ -95,16 +95,16 @@ async fn cannot_access_another_orgs_members() {
 #[tokio::test]
 async fn cannot_access_another_orgs_projects() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org1 = create_test_org(&conn, "Org 1");
-    let org2 = create_test_org(&conn, "Org 2");
+    let org1 = create_test_org(&mut conn, "Org 1");
+    let org2 = create_test_org(&mut conn, "Org 2");
 
     let (_user, _member1, key1) =
-        create_test_org_member(&conn, &org1.id, "user@org1.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org1.id, "user@org1.com", OrgMemberRole::Owner);
 
     // Create a project in org2
-    let project2 = create_test_project(&conn, &org2.id, "Org2 Project", &state.master_key);
+    let project2 = create_test_project(&mut conn, &org2.id, "Org2 Project", &state.master_key);
 
     // Try to access org2's project with org1's key
     let response = app
@@ -133,14 +133,14 @@ async fn cannot_access_another_orgs_projects() {
 #[tokio::test]
 async fn member_role_cannot_create_org_member() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (_user, _member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     // Create a user to add as org member
-    let new_user = create_test_user(&conn, "new@org.com", "New Member");
+    let new_user = create_test_user(&mut conn, "new@org.com", "New Member");
 
     let response = app
         .oneshot(
@@ -168,14 +168,14 @@ async fn member_role_cannot_create_org_member() {
 #[tokio::test]
 async fn admin_role_cannot_create_org_member() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (_user, _admin, admin_key) =
-        create_test_org_member(&conn, &org.id, "admin@org.com", OrgMemberRole::Admin);
+        create_test_org_member(&mut conn, &org.id, "admin@org.com", OrgMemberRole::Admin);
 
     // Create a user to add as org member
-    let new_user = create_test_user(&conn, "new@org.com", "New Member");
+    let new_user = create_test_user(&mut conn, "new@org.com", "New Member");
 
     let response = app
         .oneshot(
@@ -203,14 +203,14 @@ async fn admin_role_cannot_create_org_member() {
 #[tokio::test]
 async fn owner_role_can_create_org_member() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (_user, _owner, owner_key) =
-        create_test_org_member(&conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
+        create_test_org_member(&mut conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
 
     // Create a user to add as org member
-    let new_user = create_test_user(&conn, "new@org.com", "New Member");
+    let new_user = create_test_user(&mut conn, "new@org.com", "New Member");
 
     let response = app
         .oneshot(
@@ -238,13 +238,13 @@ async fn owner_role_can_create_org_member() {
 #[tokio::test]
 async fn member_cannot_update_org_member() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (_user1, target, _target_key) =
-        create_test_org_member(&conn, &org.id, "target@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "target@org.com", OrgMemberRole::Member);
     let (_user, _member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let response = app
         .oneshot(
@@ -269,13 +269,13 @@ async fn member_cannot_update_org_member() {
 #[tokio::test]
 async fn member_cannot_delete_org_member() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (_user1, target, _target_key) =
-        create_test_org_member(&conn, &org.id, "target@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "target@org.com", OrgMemberRole::Member);
     let (_user, _member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let response = app
         .oneshot(
@@ -303,11 +303,11 @@ async fn member_cannot_delete_org_member() {
 #[tokio::test]
 async fn member_role_cannot_create_project() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (_user, _member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let response = app
             .oneshot(
@@ -334,11 +334,11 @@ async fn member_role_cannot_create_project() {
 #[tokio::test]
 async fn admin_role_can_create_project() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (_user, _admin, admin_key) =
-        create_test_org_member(&conn, &org.id, "admin@org.com", OrgMemberRole::Admin);
+        create_test_org_member(&mut conn, &org.id, "admin@org.com", OrgMemberRole::Admin);
 
     let response = app
             .oneshot(
@@ -369,11 +369,11 @@ async fn admin_role_can_create_project() {
 #[tokio::test]
 async fn member_can_list_org_members() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (_user, _member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let response = app
         .oneshot(
@@ -397,11 +397,11 @@ async fn member_can_list_org_members() {
 #[tokio::test]
 async fn member_can_list_projects() {
     let (app, state) = org_app();
-    let conn = state.db.get().unwrap();
+    let mut conn = state.db.get().unwrap();
 
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
     let (_user, _member, member_key) =
-        create_test_org_member(&conn, &org.id, "member@org.com", OrgMemberRole::Member);
+        create_test_org_member(&mut conn, &org.id, "member@org.com", OrgMemberRole::Member);
 
     let response = app
         .oneshot(

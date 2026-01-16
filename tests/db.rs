@@ -14,3 +14,6 @@ mod soft_delete;
 
 #[path = "db/from_row_panic.rs"]
 mod from_row_panic;
+
+#[path = "db/api_key_atomicity.rs"]
+mod api_key_atomicity;

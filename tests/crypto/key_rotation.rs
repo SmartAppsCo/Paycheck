@@ -103,12 +103,12 @@ fn rotate_org_payment_configs(
 
 #[test]
 fn test_project_private_key_reencrypts_with_new_master_key() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let old_key = MasterKey::from_bytes(OLD_KEY_BYTES);
     let new_key = MasterKey::from_bytes(NEW_KEY_BYTES);
 
     // Create org and project with old key
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     // Create project - encryption happens internally with correct project ID
     let (private_key_bytes, public_key) = jwt::generate_keypair();
@@ -131,7 +131,7 @@ fn test_project_private_key_reencrypts_with_new_master_key() {
     .expect("Failed to create project");
 
     // Verify we can decrypt with old key
-    let fetched = queries::get_project_by_id(&conn, &project.id)
+    let fetched = queries::get_project_by_id(&mut conn, &project.id)
         .unwrap()
         .unwrap();
     let decrypted = old_key
@@ -143,10 +143,10 @@ fn test_project_private_key_reencrypts_with_new_master_key() {
     );
 
     // Rotate the key
-    rotate_project_key(&conn, &project.id, &old_key, &new_key).expect("Rotation should succeed");
+    rotate_project_key(&mut conn, &project.id, &old_key, &new_key).expect("Rotation should succeed");
 
     // Verify old key no longer works
-    let fetched = queries::get_project_by_id(&conn, &project.id)
+    let fetched = queries::get_project_by_id(&mut conn, &project.id)
         .unwrap()
         .unwrap();
     let result = old_key.decrypt_private_key(&project.id, &fetched.private_key);
@@ -169,12 +169,12 @@ fn test_project_private_key_reencrypts_with_new_master_key() {
 
 #[test]
 fn test_org_stripe_config_reencrypts_with_new_master_key() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let old_key = MasterKey::from_bytes(OLD_KEY_BYTES);
     let new_key = MasterKey::from_bytes(NEW_KEY_BYTES);
 
     // Create org
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     // Set up Stripe config with old key
     let stripe_config = r#"{"api_key":"sk_test_123","webhook_secret":"whsec_123"}"#;
@@ -192,7 +192,7 @@ fn test_org_stripe_config_reencrypts_with_new_master_key() {
     .unwrap();
 
     // Verify we can decrypt with old key
-    let fetched = queries::get_organization_by_id(&conn, &org.id)
+    let fetched = queries::get_organization_by_id(&mut conn, &org.id)
         .unwrap()
         .unwrap();
     let decrypted = old_key
@@ -205,11 +205,11 @@ fn test_org_stripe_config_reencrypts_with_new_master_key() {
     );
 
     // Rotate the key
-    rotate_org_payment_configs(&conn, &org.id, &old_key, &new_key)
+    rotate_org_payment_configs(&mut conn, &org.id, &old_key, &new_key)
         .expect("Rotation should succeed");
 
     // Verify old key no longer works
-    let fetched = queries::get_organization_by_id(&conn, &org.id)
+    let fetched = queries::get_organization_by_id(&mut conn, &org.id)
         .unwrap()
         .unwrap();
     let result =
@@ -232,12 +232,12 @@ fn test_org_stripe_config_reencrypts_with_new_master_key() {
 
 #[test]
 fn test_org_lemonsqueezy_config_reencrypts_with_new_master_key() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let old_key = MasterKey::from_bytes(OLD_KEY_BYTES);
     let new_key = MasterKey::from_bytes(NEW_KEY_BYTES);
 
     // Create org
-    let org = create_test_org(&conn, "Test Org");
+    let org = create_test_org(&mut conn, "Test Org");
 
     // Set up LemonSqueezy config with old key
     let ls_config = r#"{"api_key":"ls_test_123","webhook_secret":"lswhsec_123"}"#;
@@ -245,11 +245,11 @@ fn test_org_lemonsqueezy_config_reencrypts_with_new_master_key() {
         .encrypt_private_key(&org.id, ls_config.as_bytes())
         .unwrap();
 
-    queries::update_organization_encrypted_configs(&conn, &org.id, None, Some(&encrypted_ls), None)
+    queries::update_organization_encrypted_configs(&mut conn, &org.id, None, Some(&encrypted_ls), None)
         .unwrap();
 
     // Verify we can decrypt with old key
-    let fetched = queries::get_organization_by_id(&conn, &org.id)
+    let fetched = queries::get_organization_by_id(&mut conn, &org.id)
         .unwrap()
         .unwrap();
     let decrypted = old_key
@@ -262,11 +262,11 @@ fn test_org_lemonsqueezy_config_reencrypts_with_new_master_key() {
     );
 
     // Rotate the key
-    rotate_org_payment_configs(&conn, &org.id, &old_key, &new_key)
+    rotate_org_payment_configs(&mut conn, &org.id, &old_key, &new_key)
         .expect("Rotation should succeed");
 
     // Verify old key no longer works
-    let fetched = queries::get_organization_by_id(&conn, &org.id)
+    let fetched = queries::get_organization_by_id(&mut conn, &org.id)
         .unwrap()
         .unwrap();
     let result =
@@ -326,7 +326,7 @@ fn rotate_email_hmac_key(
 /// - The fix is to store the HMAC key encrypted (not derived from master key)
 #[test]
 fn test_email_hash_survives_master_key_rotation() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let old_key = MasterKey::from_bytes(OLD_KEY_BYTES);
     let new_key = MasterKey::from_bytes(NEW_KEY_BYTES);
 
@@ -336,7 +336,7 @@ fn test_email_hash_survives_master_key_rotation() {
         .encrypt_private_key("system-config", &hmac_key)
         .expect("Failed to encrypt HMAC key");
 
-    queries::set_system_config(&conn, EmailHasher::CONFIG_KEY, &encrypted_hmac)
+    queries::set_system_config(&mut conn, EmailHasher::CONFIG_KEY, &encrypted_hmac)
         .expect("Failed to store HMAC key");
 
     // Create email hasher and hash a test email
@@ -345,10 +345,10 @@ fn test_email_hash_survives_master_key_rotation() {
     let hash_before = hasher_before.hash(test_email);
 
     // Perform master key rotation
-    rotate_email_hmac_key(&conn, &old_key, &new_key).expect("Rotation should succeed");
+    rotate_email_hmac_key(&mut conn, &old_key, &new_key).expect("Rotation should succeed");
 
     // Load the rotated HMAC key with new master key
-    let rotated_encrypted = queries::get_system_config(&conn, EmailHasher::CONFIG_KEY)
+    let rotated_encrypted = queries::get_system_config(&mut conn, EmailHasher::CONFIG_KEY)
         .expect("Failed to load rotated HMAC key")
         .expect("HMAC key should exist after rotation");
 
@@ -379,7 +379,7 @@ fn test_email_hash_survives_master_key_rotation() {
 /// Test that old master key cannot decrypt HMAC key after rotation.
 #[test]
 fn test_old_key_cannot_decrypt_hmac_after_rotation() {
-    let conn = setup_test_db();
+    let mut conn = setup_test_db();
     let old_key = MasterKey::from_bytes(OLD_KEY_BYTES);
     let new_key = MasterKey::from_bytes(NEW_KEY_BYTES);
 
@@ -389,14 +389,14 @@ fn test_old_key_cannot_decrypt_hmac_after_rotation() {
         .encrypt_private_key("system-config", &hmac_key)
         .expect("Failed to encrypt HMAC key");
 
-    queries::set_system_config(&conn, EmailHasher::CONFIG_KEY, &encrypted_hmac)
+    queries::set_system_config(&mut conn, EmailHasher::CONFIG_KEY, &encrypted_hmac)
         .expect("Failed to store HMAC key");
 
     // Rotate
-    rotate_email_hmac_key(&conn, &old_key, &new_key).expect("Rotation should succeed");
+    rotate_email_hmac_key(&mut conn, &old_key, &new_key).expect("Rotation should succeed");
 
     // Old key should fail
-    let rotated_encrypted = queries::get_system_config(&conn, EmailHasher::CONFIG_KEY)
+    let rotated_encrypted = queries::get_system_config(&mut conn, EmailHasher::CONFIG_KEY)
         .expect("Failed to load HMAC key")
         .expect("HMAC key should exist");
 

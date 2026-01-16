@@ -125,7 +125,8 @@ pub async fn update_project(
     let existing = queries::get_project_by_id(&conn, &path.project_id)?
         .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
-    queries::update_project(&conn, &path.project_id, &input)?;
+    let project = queries::update_project(&conn, &path.project_id, &input)?
+        .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))
@@ -137,9 +138,6 @@ pub async fn update_project(
         .names(&ctx.audit_names().resource(existing.name).org(org.name))
         .auth_method(&ctx.auth_method)
         .save()?;
-
-    let project = queries::get_project_by_id(&conn, &path.project_id)?
-        .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
     Ok(Json(project.into()))
 }

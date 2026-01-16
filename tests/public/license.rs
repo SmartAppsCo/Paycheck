@@ -60,17 +60,17 @@ fn setup_license_test() -> (axum::Router, paycheck::db::AppState, String, String
     let public_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(future_timestamp(ONE_YEAR)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
         token = create_test_jwt(&project, &product, &license.id, &device);
         public_key = project.public_key.clone();
@@ -153,10 +153,10 @@ async fn test_license_with_devices_returns_device_list() {
     let public_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
@@ -165,8 +165,8 @@ async fn test_license_with_devices_returns_device_list() {
         );
 
         // Add some devices
-        let device1 = create_test_device(&conn, &license.id, "device-1", DeviceType::Uuid);
-        let _device2 = create_test_device(&conn, &license.id, "device-2", DeviceType::Machine);
+        let device1 = create_test_device(&mut conn, &license.id, "device-1", DeviceType::Uuid);
+        let _device2 = create_test_device(&mut conn, &license.id, "device-2", DeviceType::Machine);
 
         token = create_test_jwt(&project, &product, &license.id, &device1);
         public_key = project.public_key.clone();
@@ -293,23 +293,23 @@ async fn test_license_revoked_shows_revoked_status() {
     let public_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(future_timestamp(ONE_YEAR)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
         token = create_test_jwt(&project, &product, &license.id, &device);
         public_key = project.public_key.clone();
 
         // Revoke the license
-        queries::revoke_license(&conn, &license.id).unwrap();
+        queries::revoke_license(&mut conn, &license.id).unwrap();
     }
 
     let app = public_app(state);
@@ -355,17 +355,17 @@ async fn test_license_expired_shows_expired_status() {
     let public_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             Some(past_timestamp(ONE_DAY)), // Expired 1 day ago
         );
-        let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
         token = create_test_jwt(&project, &product, &license.id, &device);
         public_key = project.public_key.clone();
@@ -414,17 +414,17 @@ async fn test_license_perpetual_shows_active_status() {
     let public_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
-        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
         let license = create_test_license(
             &conn,
             &project.id,
             &product.id,
             None, // Perpetual license
         );
-        let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
         token = create_test_jwt(&project, &product, &license.id, &device);
         public_key = project.public_key.clone();
@@ -500,9 +500,9 @@ async fn test_license_shows_correct_limits() {
     let public_key: String;
 
     {
-        let conn = state.db.get().unwrap();
-        let org = create_test_org(&conn, "Test Org");
-        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
         // Create product with specific limits
         let input = CreateProduct {
@@ -515,7 +515,7 @@ async fn test_license_shows_correct_limits() {
             features: vec![],
         };
         let product =
-            queries::create_product(&conn, &project.id, &input).expect("Failed to create product");
+            queries::create_product(&mut conn, &project.id, &input).expect("Failed to create product");
 
         let license = create_test_license(
             &conn,
@@ -523,7 +523,7 @@ async fn test_license_shows_correct_limits() {
             &product.id,
             Some(future_timestamp(ONE_YEAR)),
         );
-        let device = create_test_device(&conn, &license.id, "test-device", DeviceType::Uuid);
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
         token = create_test_jwt(&project, &product, &license.id, &device);
         public_key = project.public_key.clone();
