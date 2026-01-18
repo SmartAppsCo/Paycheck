@@ -193,7 +193,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_licenses_provider_order ON licenses(payment_provider, payment_provider_order_id);
         CREATE INDEX IF NOT EXISTS idx_licenses_active ON licenses(id) WHERE deleted_at IS NULL;
 
-        -- Activation codes (short-lived codes in PREFIX-XXXX-XXXX-XXXX-XXXX format)
+        -- Activation codes (short-lived codes in PREFIX-XXXX-XXXX format, 40 bits entropy)
         CREATE TABLE IF NOT EXISTS activation_codes (
             code_hash TEXT PRIMARY KEY,
             license_id TEXT NOT NULL REFERENCES licenses(id) ON DELETE CASCADE,

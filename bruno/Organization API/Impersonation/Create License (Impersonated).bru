@@ -48,7 +48,7 @@ docs {
   {
     "licenses": [{
       "id": "lic_xxx",
-      "activation_code": "PREFIX-XXXX-XXXX-XXXX-XXXX",
+      "activation_code": "PREFIX-XXXX-XXXX",
       "activation_code_expires_at": 1735693200,
       "expires_at": 1767229200,
       "updates_expires_at": 1767229200
@@ -58,7 +58,7 @@ docs {
   The activation_code:
   - Expires in 30 minutes
   - Can be redeemed via POST /redeem with code, device_id, device_type in JSON body
-  - Format: PREFIX-XXXX-XXXX-XXXX-XXXX (prefix from project's license_key_prefix)
+  - Format: PREFIX-XXXX-XXXX (prefix from project's license_key_prefix)
 
   If email is provided:
   - User can request new activation codes via POST /activation/request-code

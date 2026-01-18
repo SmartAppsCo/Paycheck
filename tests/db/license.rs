@@ -482,7 +482,7 @@ fn test_create_activation_code() {
     assert!(
         code.code.starts_with("TEST-"),
         "activation code should start with PREFIX-"
-    ); // PREFIX-XXXX-XXXX-XXXX-XXXX format
+    ); // PREFIX-XXXX-XXXX format
     assert_eq!(
         code.license_id, license.id,
         "activation code should be linked to the license"
@@ -509,7 +509,7 @@ fn test_activation_code_format() {
     let code = queries::create_activation_code(&mut conn, &license.id, "MYAPP")
         .expect("Failed to create activation code");
 
-    // Format should be PREFIX-XXXX-XXXX-XXXX-XXXX
+    // Format should be PREFIX-XXXX-XXXX (40 bits entropy)
     assert!(
         code.code.starts_with("MYAPP-"),
         "code should start with the specified prefix"
@@ -517,8 +517,8 @@ fn test_activation_code_format() {
     let parts: Vec<&str> = code.code.split('-').collect();
     assert_eq!(
         parts.len(),
-        5,
-        "code should have 5 parts separated by dashes"
+        3,
+        "code should have 3 parts separated by dashes"
     );
     assert_eq!(parts[0], "MYAPP", "first part should be the prefix");
     for (i, part) in parts[1..].iter().enumerate() {

@@ -492,7 +492,7 @@ mod standard_rate_limit {
                         .uri("/redeem")
                         .header("content-type", "application/json")
                         .body(Body::from(
-                            r#"{"code": "TEST-XXXX-XXXX-XXXX-XXXX", "device_id": "test", "device_type": "uuid"}"#,
+                            r#"{"code": "TEST-XXXX-XXXX", "device_id": "test", "device_type": "uuid"}"#,
                         ))
                         .unwrap(),
                 )
@@ -515,7 +515,7 @@ mod standard_rate_limit {
                     .uri("/redeem")
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        r#"{"code": "TEST-XXXX-XXXX-XXXX-XXXX", "device_id": "test", "device_type": "uuid"}"#,
+                        r#"{"code": "TEST-XXXX-XXXX", "device_id": "test", "device_type": "uuid"}"#,
                     ))
                     .unwrap(),
             )

@@ -1,5 +1,37 @@
+# Build artifacts
 target/
-node_modules
+node_modules/
 dist/
+
+# Environment and secrets
 .env
-Production.*
+*.key
+
+# Databases
+*.db
+*.db-wal
+*.db-shm
+
+# Bruno environments (contain API keys and IDs)
+bruno/environments/
+
+# Internal (deploy configs, planning docs, etc.)
+internal/
+
+# IDE
+.vscode
+.idea/
+
+# Claude Code
+.claude/
+.mcp.json
+
+# Shell config (sandbox artifacts)
+.bash_profile
+.bashrc
+.profile
+.zprofile
+.zshrc
+.gitconfig
+.gitmodules
+.ripgreprc

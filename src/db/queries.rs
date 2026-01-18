@@ -2578,7 +2578,10 @@ pub fn list_products_with_config_paginated(
 
 // ============ Licenses ============
 
-/// Generate an activation code in the familiar license key format: PREFIX-XXXX-XXXX-XXXX-XXXX
+/// Generate a short-lived activation code: PREFIX-XXXX-XXXX (40 bits entropy)
+///
+/// With 30-min TTL and rate limiting, 40 bits provides adequate security
+/// (~4 billion codes, making brute force economically unviable).
 pub fn generate_activation_code(prefix: &str) -> String {
     use rand::Rng;
     let mut rng = rand::thread_rng();
@@ -2590,7 +2593,7 @@ pub fn generate_activation_code(prefix: &str) -> String {
             .collect()
     };
 
-    format!("{}-{}-{}-{}-{}", prefix, part(), part(), part(), part())
+    format!("{}-{}-{}", prefix, part(), part())
 }
 
 /// Create a new license (no user-facing key - email hash is the identity)
@@ -3067,7 +3070,7 @@ pub fn extend_license_expiration(
 
 const ACTIVATION_CODE_TTL_SECONDS: i64 = 30 * 60; // 30 minutes
 
-/// Create an activation code in PREFIX-XXXX-XXXX-XXXX-XXXX format
+/// Create an activation code in PREFIX-XXXX-XXXX format (40 bits entropy)
 pub fn create_activation_code(
     conn: &Connection,
     license_id: &str,

@@ -1,0 +1,36 @@
+# Build artifacts
+target/
+debug/
+
+# Databases
+*.db
+*.db-wal
+*.db-shm
+
+# Secrets
+*.key
+.env
+.env.*
+
+# Documentation (not needed in image)
+docs/
+*.md
+!README.md
+
+# Development/Testing
+bruno/
+tests/
+sdk/
+
+# Internal (deploy, planning, etc.)
+internal/
+
+# Other non-runtime files
+landing/
+logo/
+.git/
+.github/
+.gitignore
+.claude/
+.idea/
+.vscode/

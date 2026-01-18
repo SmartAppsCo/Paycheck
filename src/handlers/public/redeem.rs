@@ -22,7 +22,7 @@ const MAX_DEVICE_NAME_LEN: usize = 256;
 pub struct RedeemRequest {
     /// Public key - identifies the project
     pub public_key: String,
-    /// Short-lived activation code (PREFIX-XXXX-XXXX-XXXX-XXXX format)
+    /// Short-lived activation code (PREFIX-XXXX-XXXX format)
     pub code: String,
     pub device_id: String,
     pub device_type: String,
@@ -81,7 +81,7 @@ pub struct RedeemResponse {
 
 /// POST /redeem - Redeem using a short-lived activation code
 ///
-/// The activation code is in PREFIX-XXXX-XXXX-XXXX-XXXX format and expires after 30 minutes.
+/// The activation code is in PREFIX-XXXX-XXXX format and expires after 30 minutes.
 /// After successful redemption, a fresh activation code is returned for future use.
 pub async fn redeem_with_code(
     State(state): State<AppState>,

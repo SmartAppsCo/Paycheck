@@ -65,7 +65,7 @@ export interface CheckoutResult {
 export interface CallbackResult {
   /** Payment status */
   status: 'success' | 'pending';
-  /** Short-lived activation code (PREFIX-XXXX-XXXX-XXXX-XXXX format, 30 min TTL) */
+  /** Short-lived activation code (PREFIX-XXXX-XXXX format, 30 min TTL) */
   code?: string;
   /** Project ID (needed for activation) */
   projectId?: string;
@@ -93,7 +93,7 @@ export interface ActivationResult {
   tier: string;
   /** Enabled features */
   features: string[];
-  /** Short-lived activation code for future activations (PREFIX-XXXX-XXXX-XXXX-XXXX format) */
+  /** Short-lived activation code for future activations (PREFIX-XXXX-XXXX format) */
   activationCode: string;
   /** When activation code expires (30 minutes from creation) */
   activationCodeExpiresAt: number;

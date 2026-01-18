@@ -16,7 +16,7 @@ pub struct CallbackQuery {
 /// which the user must then use via /redeem with their device info.
 ///
 /// Query params appended to redirect:
-/// - code: A short-lived activation code (PREFIX-XXXX-XXXX-XXXX-XXXX format)
+/// - code: A short-lived activation code (PREFIX-XXXX-XXXX format)
 /// - status: "success" or "pending"
 /// - project_id: The project ID (needed for activation)
 ///
@@ -64,7 +64,7 @@ pub async fn payment_callback(
     let license = queries::get_license_by_id(&conn, &license_id)?
         .ok_or_else(|| AppError::Internal(msg::LICENSE_NOT_FOUND.into()))?;
 
-    // Create a short-lived activation code (PREFIX-XXXX-XXXX-XXXX-XXXX format)
+    // Create a short-lived activation code (PREFIX-XXXX-XXXX format)
     let activation_code =
         queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)?;
 

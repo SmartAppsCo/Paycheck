@@ -275,14 +275,18 @@ impl Paycheck {
             }
         };
 
-        let url = format!(
-            "{}/validate?public_key={}&jti={}",
-            self.base_url,
-            urlencoding::encode(&self.public_key),
-            claims.jti
-        );
+        #[derive(Serialize)]
+        struct ValidateRequest {
+            public_key: String,
+            jti: String,
+        }
 
-        match self.get::<ValidateResponse>(&url).await {
+        let body = ValidateRequest {
+            public_key: self.public_key.clone(),
+            jti: claims.jti,
+        };
+
+        match self.post::<ValidateResponse, _>("/validate", &body).await {
             Ok(r) => Ok(r.into()),
             Err(_) => Ok(ValidateResult {
                 valid: false,
@@ -367,14 +371,18 @@ impl Paycheck {
         }
 
         // Try to sync with server
-        let url = format!(
-            "{}/validate?public_key={}&jti={}",
-            self.base_url,
-            urlencoding::encode(&self.public_key),
-            claims.jti
-        );
+        #[derive(Serialize)]
+        struct ValidateRequest {
+            public_key: String,
+            jti: String,
+        }
 
-        match self.get::<ValidateResponse>(&url).await {
+        let body = ValidateRequest {
+            public_key: self.public_key.clone(),
+            jti: claims.jti.clone(),
+        };
+
+        match self.post::<ValidateResponse, _>("/validate", &body).await {
             Ok(response) => {
                 if !response.valid {
                     return SyncResult {
@@ -509,22 +517,57 @@ impl Paycheck {
         code: &str,
         options: Option<DeviceInfo>,
     ) -> Result<ActivationResult> {
-        let mut url = format!(
-            "{}/redeem?public_key={}&code={}&device_id={}&device_type={}",
-            self.base_url,
-            urlencoding::encode(&self.public_key),
-            code,
-            self.device_id,
-            self.device_type
-        );
-
-        if let Some(name) = options.and_then(|d| d.device_name) {
-            url.push_str(&format!("&device_name={}", urlencoding::encode(&name)));
+        #[derive(Serialize)]
+        struct RedeemRequest {
+            public_key: String,
+            code: String,
+            device_id: String,
+            device_type: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            device_name: Option<String>,
         }
 
-        let response: RedeemResponse = self.get(&url).await?;
+        let body = RedeemRequest {
+            public_key: self.public_key.clone(),
+            code: code.to_string(),
+            device_id: self.device_id.clone(),
+            device_type: self.device_type.to_string(),
+            device_name: options.and_then(|d| d.device_name),
+        };
+
+        let response: RedeemResponse = self.post("/redeem", &body).await?;
 
         self.storage.set(keys::TOKEN, &response.token);
+
+        Ok(response.into())
+    }
+
+    /// Request an activation code to be sent to the purchase email.
+    ///
+    /// Use this for license recovery when a user needs to activate on a new device.
+    /// The server will send a short-lived activation code (30 min TTL) to the email
+    /// associated with the license purchase.
+    ///
+    /// Note: The response is always a generic success message to prevent email enumeration.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let result = paycheck.request_activation_code("user@example.com").await?;
+    /// println!("{}", result.message);
+    /// ```
+    pub async fn request_activation_code(&self, email: &str) -> Result<RequestCodeResult> {
+        #[derive(Serialize)]
+        struct RequestCodeRequest {
+            email: String,
+            public_key: String,
+        }
+
+        let body = RequestCodeRequest {
+            email: email.to_string(),
+            public_key: self.public_key.clone(),
+        };
+
+        let response: RequestCodeResponse = self.post("/activation/request-code", &body).await?;
 
         Ok(response.into())
     }
@@ -678,17 +721,6 @@ impl Paycheck {
         }
 
         Ok(token)
-    }
-
-    async fn get<T: for<'de> Deserialize<'de>>(&self, url: &str) -> Result<T> {
-        let response = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| PaycheckError::network(e.to_string()))?;
-
-        self.handle_response(response).await
     }
 
     async fn get_with_auth<T: for<'de> Deserialize<'de>>(

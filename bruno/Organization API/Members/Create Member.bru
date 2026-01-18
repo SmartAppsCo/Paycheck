@@ -36,12 +36,14 @@ docs {
   - user_id: Required. ID of existing user to link as member
   - role: Required. One of "owner", "admin", "member"
 
-  Returns the member record:
+  Returns the member record with user details:
   {
-    "id": "...",
     "user_id": "...",
+    "email": "member@example.com",
+    "name": "Member Name",
     "org_id": "...",
     "role": "member",
-    "created_at": 1234567890
+    "created_at": 1234567890,
+    "updated_at": 1234567890
   }
 }

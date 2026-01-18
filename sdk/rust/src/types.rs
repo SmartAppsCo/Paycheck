@@ -53,7 +53,7 @@ pub struct CheckoutResult {
 pub struct CallbackResult {
     /// Payment status
     pub status: CallbackStatus,
-    /// Short-lived activation code for URL-safe activation (PREFIX-XXXX-XXXX-XXXX-XXXX format)
+    /// Short-lived activation code for URL-safe activation (PREFIX-XXXX-XXXX format)
     pub code: Option<String>,
     /// Project ID (needed for activation)
     pub project_id: Option<String>,
@@ -88,7 +88,7 @@ pub struct ActivationResult {
     pub tier: String,
     /// Enabled features
     pub features: Vec<String>,
-    /// Short-lived code for future activations (PREFIX-XXXX-XXXX-XXXX-XXXX format)
+    /// Short-lived code for future activations (PREFIX-XXXX-XXXX format)
     pub activation_code: String,
     /// When activation code expires (30 minutes from creation)
     pub activation_code_expires_at: i64,
@@ -287,6 +287,25 @@ pub struct DeactivateResult {
     pub deactivated: bool,
     /// Number of remaining active devices
     pub remaining_devices: i32,
+}
+
+/// Result from requesting activation code
+#[derive(Debug, Clone)]
+pub struct RequestCodeResult {
+    /// Message from the server (always a generic success message for security)
+    pub message: String,
+}
+
+/// API response for request activation code endpoint
+#[derive(Debug, Deserialize)]
+pub(crate) struct RequestCodeResponse {
+    pub message: String,
+}
+
+impl From<RequestCodeResponse> for RequestCodeResult {
+    fn from(r: RequestCodeResponse) -> Self {
+        Self { message: r.message }
+    }
 }
 
 /// API response for deactivate endpoint

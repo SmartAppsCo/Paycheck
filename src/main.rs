@@ -950,10 +950,30 @@ async fn main() {
         .with_state(state);
 
     // Start the server
-    let addr = config.addr();
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .expect("Failed to bind to address");
+    // In dev mode, try successive ports if the default is taken
+    let (listener, actual_port) = if config.dev_mode {
+        let mut port = config.port;
+        loop {
+            let addr = format!("{}:{}", config.host, port);
+            match tokio::net::TcpListener::bind(&addr).await {
+                Ok(l) => break (l, port),
+                Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                    tracing::debug!("Port {} in use, trying {}", port, port + 1);
+                    port += 1;
+                    if port > config.port + 100 {
+                        panic!("Could not find available port after 100 attempts");
+                    }
+                }
+                Err(e) => panic!("Failed to bind to address: {}", e),
+            }
+        }
+    } else {
+        let addr = config.addr();
+        let listener = tokio::net::TcpListener::bind(&addr)
+            .await
+            .expect("Failed to bind to address");
+        (listener, config.port)
+    };
 
     // Track if we should clean up on exit
     let cleanup_on_exit = cli.ephemeral && config.dev_mode;
@@ -964,7 +984,15 @@ async fn main() {
         tracing::info!("EPHEMERAL MODE: databases will be deleted on exit");
     }
 
-    tracing::info!("Paycheck server listening on {}", addr);
+    let actual_addr = format!("{}:{}", config.host, actual_port);
+    if actual_port != config.port {
+        tracing::info!(
+            "Port {} was in use, using port {} instead",
+            config.port,
+            actual_port
+        );
+    }
+    tracing::info!("Paycheck server listening on {}", actual_addr);
 
     // Run server with graceful shutdown
     // Use into_make_service_with_connect_info to enable IP-based rate limiting

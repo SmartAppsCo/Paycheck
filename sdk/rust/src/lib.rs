@@ -75,7 +75,7 @@ pub use storage::{MemoryStorage, StorageAdapter};
 pub use types::{
     ActivationResult, CallbackResult, CallbackStatus, CheckoutParams, CheckoutResult,
     DeactivateResult, DeviceInfo, DeviceType, LicenseClaims, LicenseDeviceInfo, LicenseInfo,
-    LicenseStatus, ValidateResult,
+    LicenseStatus, RequestCodeResult, ValidateResult,
 };
 
 // Re-export storage implementations

@@ -7,7 +7,6 @@ import type {
   DeviceInfo,
   ActivationResult,
   LicenseClaims,
-  ValidateResult,
   LicenseInfo,
   DeactivateResult,
   RequestCodeResult,
@@ -21,7 +20,6 @@ import {
 import {
   decodeToken,
   verifyToken,
-  verifyAndDecodeToken,
   isJwtExpired,
   isLicenseExpired,
   coversVersion as checkCoversVersion,
@@ -218,36 +216,34 @@ export class Paycheck {
       ...options.headers,
     };
 
+    let response: Response;
     try {
-      const response = await fetch(url, {
+      response = await fetch(url, {
         method,
         headers,
         body: options.body ? JSON.stringify(options.body) : undefined,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errorObj = errorData as { error?: string; details?: string };
-        const message = errorObj.details
-          ? `${errorObj.error}: ${errorObj.details}`
-          : errorObj.error || `Request failed: ${response.status}`;
-        throw new PaycheckError(
-          mapStatusToErrorCode(response.status, message),
-          message,
-          response.status
-        );
-      }
-
-      return (await response.json()) as T;
     } catch (error) {
-      if (error instanceof PaycheckError) {
-        throw error;
-      }
       throw new PaycheckError(
         'NETWORK_ERROR',
         error instanceof Error ? error.message : 'Network request failed'
       );
     }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const errorObj = errorData as { error?: string; details?: string };
+      const message = errorObj.details
+        ? `${errorObj.error}: ${errorObj.details}`
+        : errorObj.error || `Request failed: ${response.status}`;
+      throw new PaycheckError(
+        mapStatusToErrorCode(response.status, message),
+        message,
+        response.status
+      );
+    }
+
+    return (await response.json()) as T;
   }
 
   private async ensureFreshToken(): Promise<string> {
@@ -348,10 +344,10 @@ export class Paycheck {
         }
 
         const response = await this.apiRequest<ValidateResponse>(
-          'GET',
+          'POST',
           '/validate',
           {
-            query: {
+            body: {
               public_key: this.publicKey,
               jti: claims.jti,
             },
@@ -451,10 +447,10 @@ export class Paycheck {
       }
 
       const response = await this.apiRequest<ValidateResponse>(
-        'GET',
+        'POST',
         '/validate',
         {
-          query: {
+          body: {
             public_key: this.publicKey,
             jti: claims.jti,
           },
@@ -529,13 +525,13 @@ export class Paycheck {
   /**
    * Activate using an activation code.
    *
-   * Activation codes are short-lived (30 min TTL) and in PREFIX-XXXX-XXXX-XXXX-XXXX format.
+   * Activation codes are short-lived (30 min TTL) and in PREFIX-XXXX-XXXX format.
    * They're returned from:
    * - Payment callback URL (after successful purchase)
    * - Email recovery flow (POST /activation/request-code)
    * - Admin API (POST /orgs/.../licenses/{id}/send-code)
    *
-   * @param code - Activation code (PREFIX-XXXX-XXXX-XXXX-XXXX format)
+   * @param code - Activation code (PREFIX-XXXX-XXXX format)
    * @param options - Optional device info
    * @returns Activation result with token
    */
