@@ -4,7 +4,7 @@
 
 We're in an era where you can ship real software in a weekend. But when it comes time to actually charge for it? Suddenly you're knee-deep in payment integrations, license key management, and activation flows. That's a weekend you're not building.
 
-Paycheck is licensing infrastructure for developers who move fast. One integration, and your software can accept payments and validate licenses offline—no phone-home required. Built for the honest majority who just want a convenient way to pay and prove it.
+Paycheck is licensing infrastructure for developers who move fast. One integration to accept payments and manage licenses. Validate licenses offline—no phone-home required. Built for the honest majority who just want a convenient way to pay and prove it.
 
 ## How It Works
 
