@@ -1,0 +1,32 @@
+services:
+  paycheck:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: paycheck
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4242:4242"
+    volumes:
+      # Database persistence
+      - paycheck-data:/var/lib/paycheck
+      # Master key (read-only)
+      - ./master.key:/etc/paycheck/master.key:ro
+    environment:
+      - PAYCHECK_MASTER_KEY_FILE=/etc/paycheck/master.key
+      - BASE_URL=https://api.yourdomain.com
+      - BOOTSTRAP_OPERATOR_EMAIL=admin@yourdomain.com
+      - PAYCHECK_CONSOLE_ORIGINS=https://console.yourdomain.com
+      # Optional
+      # - PAYCHECK_RESEND_API_KEY=re_xxxxx
+      # - PAYCHECK_DEFAULT_FROM_EMAIL=noreply@yourdomain.com
+      # - PUBLIC_AUDIT_LOG_RETENTION_DAYS=0
+    healthcheck:
+      test: ["CMD", "sqlite3", "/var/lib/paycheck/paycheck.db", "SELECT 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  paycheck-data:
