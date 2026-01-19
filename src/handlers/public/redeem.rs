@@ -1,4 +1,7 @@
-use axum::extract::State;
+use axum::{
+    extract::State,
+    http::HeaderMap,
+};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -8,8 +11,8 @@ use crate::db::{AppState, queries};
 use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::Json;
 use crate::jwt::{self, LicenseClaims};
-use crate::models::DeviceType;
-use crate::util::LicenseExpirations;
+use crate::models::{ActorType, AuditAction, AuditLogNames, DeviceType};
+use crate::util::{AuditLogBuilder, LicenseExpirations};
 
 // Input length limits to prevent storage exhaustion and oversized JWTs
 const MAX_PUBLIC_KEY_LEN: usize = 256;
@@ -85,6 +88,7 @@ pub struct RedeemResponse {
 /// After successful redemption, a fresh activation code is returned for future use.
 pub async fn redeem_with_code(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<RedeemRequest>,
 ) -> Result<Json<RedeemResponse>> {
     // Validate input lengths first (cheap check before any DB operations)
@@ -95,7 +99,13 @@ pub async fn redeem_with_code(
     // Look up project by public key
     let project = queries::get_project_by_public_key(&conn, &req.public_key)?
         .or_not_found(msg::PROJECT_NOT_FOUND)?;
-    let project_id = project.id;
+    let project_id = project.id.clone();
+    let project_name = project.name.clone();
+    let org_id = project.org_id.clone();
+
+    // Get org name for audit logging
+    let org = queries::get_organization_by_id(&conn, &org_id)?
+        .ok_or_else(|| AppError::Internal(msg::ORG_NOT_FOUND.into()))?;
 
     // Validate device type
     let device_type = req
@@ -112,9 +122,11 @@ pub async fn redeem_with_code(
     // Get the license
     let license = queries::get_license_by_id(&conn, &activation_code.license_id)?
         .ok_or_else(|| AppError::Internal(msg::LICENSE_NOT_FOUND.into()))?;
+    let license_id = license.id.clone();
+    let product_id = license.product_id.clone();
 
     // Proceed with normal redemption logic
-    redeem_license_internal(
+    let result = redeem_license_internal(
         &mut conn,
         &state.master_key,
         &license,
@@ -122,7 +134,34 @@ pub async fn redeem_with_code(
         &req.device_id,
         device_type,
         req.device_name.as_deref(),
-    )
+    )?;
+
+    // Audit log successful device activation
+    let audit_conn = state.audit.get()?;
+    if let Err(e) = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
+        .actor(ActorType::Public, None)
+        .action(AuditAction::ActivateDevice)
+        .resource("device", &req.device_id)
+        .details(&serde_json::json!({
+            "license_id": license_id,
+            "product_id": product_id,
+            "device_type": req.device_type,
+            "device_name": req.device_name,
+        }))
+        .org(&org_id)
+        .project(&project_id)
+        .names(&AuditLogNames {
+            resource_name: req.device_name.clone(),
+            org_name: Some(org.name),
+            project_name: Some(project_name),
+            ..Default::default()
+        })
+        .save()
+    {
+        tracing::warn!("Failed to write activation audit log: {}", e);
+    }
+
+    Ok(result)
 }
 
 /// Internal function that handles the actual license redemption logic

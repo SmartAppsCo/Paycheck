@@ -1467,6 +1467,24 @@ mod impersonation_logging {
             imp["email"], operator_email,
             "impersonator.email should be the operator's email"
         );
+
+        // Verify the formatted string shows impersonation clearly
+        let formatted = log["formatted"].as_str().expect("formatted field should exist");
+        assert!(
+            formatted.contains("[IMP]"),
+            "formatted should show [IMP] type, got: {}",
+            formatted
+        );
+        assert!(
+            formatted.contains(operator_email),
+            "formatted should contain operator email, got: {}",
+            formatted
+        );
+        assert!(
+            formatted.contains(" as "),
+            "formatted should show 'as' between operator and member, got: {}",
+            formatted
+        );
     }
 
     /// Verify that license creation via impersonation logs the impersonator.
@@ -1580,6 +1598,19 @@ mod impersonation_logging {
         assert_eq!(
             imp["email"], operator_email,
             "impersonator.email should be the operator's email"
+        );
+
+        // Verify the formatted string shows impersonation clearly
+        let formatted = log["formatted"].as_str().expect("formatted field should exist");
+        assert!(
+            formatted.contains("[IMP]"),
+            "formatted should show [IMP] type, got: {}",
+            formatted
+        );
+        assert!(
+            formatted.contains(operator_email),
+            "formatted should contain operator email, got: {}",
+            formatted
         );
     }
 
@@ -1938,6 +1969,19 @@ mod impersonation_logging {
         assert_eq!(
             imp["email"], operator_email,
             "impersonator.email should be the operator's email"
+        );
+
+        // Verify the formatted string shows impersonation clearly
+        let formatted = log["formatted"].as_str().expect("formatted field should exist");
+        assert!(
+            formatted.contains("[IMP]"),
+            "formatted should show [IMP] type, got: {}",
+            formatted
+        );
+        assert!(
+            formatted.contains(operator_email),
+            "formatted should contain operator email, got: {}",
+            formatted
         );
     }
 

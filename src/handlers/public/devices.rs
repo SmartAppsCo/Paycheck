@@ -1,4 +1,4 @@
-use axum::extract::State;
+use axum::{extract::State, http::HeaderMap};
 use axum_extra::{
     TypedHeader,
     headers::{Authorization, authorization::Bearer},
@@ -9,6 +9,8 @@ use crate::db::{AppState, queries};
 use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::Json;
 use crate::jwt;
+use crate::models::{ActorType, AuditAction, AuditLogNames};
+use crate::util::AuditLogBuilder;
 
 #[derive(Debug, Serialize)]
 pub struct DeactivateResponse {
@@ -21,6 +23,7 @@ pub struct DeactivateResponse {
 /// For remote deactivation of lost devices, use the org admin API
 pub async fn deactivate_device(
     State(state): State<AppState>,
+    headers: HeaderMap,
     TypedHeader(auth): TypedHeader<Authorization<Bearer>>,
 ) -> Result<Json<DeactivateResponse>> {
     let conn = state.db.get()?;
@@ -38,6 +41,10 @@ pub async fn deactivate_device(
     let project = queries::get_project_by_id(&conn, &product.project_id)?
         .ok_or_else(|| AppError::Internal(msg::PROJECT_NOT_FOUND.into()))?;
 
+    // Get org for audit logging
+    let org = queries::get_organization_by_id(&conn, &project.org_id)?
+        .ok_or_else(|| AppError::Internal(msg::ORG_NOT_FOUND.into()))?;
+
     // Now verify the JWT signature with the project's public key
     // Also validates issuer ("paycheck")
     let verified_claims = jwt::verify_token(token, &project.public_key)?;
@@ -50,6 +57,8 @@ pub async fn deactivate_device(
     // Look up the device by JTI
     let device = queries::get_device_by_jti(&conn, &jti)?
         .or_not_found(msg::DEVICE_NOT_FOUND_OR_DEACTIVATED)?;
+    let device_id = device.id.clone();
+    let device_name = device.name.clone();
 
     // Get the license to add revoked JTI
     let license = queries::get_license_by_id(&conn, &device.license_id)?
@@ -70,6 +79,30 @@ pub async fn deactivate_device(
 
     // Get remaining device count
     let remaining = queries::count_devices_for_license(&conn, &license.id)?;
+
+    // Audit log the self-deactivation
+    let audit_conn = state.audit.get()?;
+    if let Err(e) = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
+        .actor(ActorType::Public, None)
+        .action(AuditAction::DeactivateDevice)
+        .resource("device", &device_id)
+        .details(&serde_json::json!({
+            "license_id": license.id,
+            "product_id": product.id,
+            "self_deactivated": true,
+        }))
+        .org(&org.id)
+        .project(&project.id)
+        .names(&AuditLogNames {
+            resource_name: device_name,
+            org_name: Some(org.name),
+            project_name: Some(project.name),
+            ..Default::default()
+        })
+        .save()
+    {
+        tracing::warn!("Failed to write device deactivation audit log: {}", e);
+    }
 
     Ok(Json(DeactivateResponse {
         deactivated: true,

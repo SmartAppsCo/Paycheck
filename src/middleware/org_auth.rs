@@ -187,6 +187,7 @@ impl OrgMemberContext {
         self.impersonator.as_ref().map(|i| {
             serde_json::json!({
                 "user_id": i.user_id,
+                "name": i.name,
                 "email": i.email
             })
         })

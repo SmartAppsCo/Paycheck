@@ -71,6 +71,15 @@ pub enum AuditAction {
     // Token operations
     RefreshToken,
 
+    // Public activation actions
+    ActivateDevice,
+    RequestActivationCode,
+
+    // Webhook events
+    ReceiveCheckoutWebhook,
+    ReceiveRenewalWebhook,
+    ReceiveCancellationWebhook,
+
     // API key management
     CreateApiKey,
     RevokeApiKey,
@@ -230,10 +239,12 @@ impl AuditLog {
     ///
     /// Uses backticks around dynamic values for clean markdown rendering.
     /// IDs are truncated to 8 characters (like git short hashes).
+    /// Actor types use 3-letter codes: [USR], [PUB], [SYS], [IMP]
     ///
     /// Examples:
-    /// - `[2024-01-15 14:32:05] [User] `John Smith <john@example.com>` created organization `Acme Corp``
-    /// - `[2024-01-15 14:32:05] [System] seeded operator `Dev Operator``
+    /// - `[2024-01-15 14:32:05] [USR] `John Smith <john@example.com>` created organization `Acme Corp``
+    /// - `[2024-01-15 14:32:05] [SYS] seeded operator `Dev Operator``
+    /// - `[2024-01-15 14:32:05] [IMP] `Admin <operator@admin.com>` as `John Smith <john@example.com>` created project `My App``
     pub fn formatted(&self) -> String {
         use chrono::{TimeZone, Utc};
 
@@ -244,23 +255,66 @@ impl AuditLog {
             .map(|dt| format!("[{}]", dt.format("%Y-%m-%d %H:%M:%S")))
             .unwrap_or_else(|| format!("[{}]", self.timestamp));
 
-        // Actor type in brackets - fixed width for alignment
-        let actor_type = match self.actor_type {
-            ActorType::User => "[User]  ",
-            ActorType::Public => "[Public]",
-            ActorType::System => "[System]",
+        // Check for impersonation in details
+        let impersonator = self
+            .details
+            .as_ref()
+            .and_then(|d| d.get("impersonator"))
+            .filter(|imp| !imp.is_null());
+
+        // Actor type in brackets - 3-letter codes for compactness
+        // Show [IMP] when an operator impersonated a user
+        let actor_type = if impersonator.is_some() {
+            "[IMP]"
+        } else {
+            match self.actor_type {
+                ActorType::User => "[USR]",
+                ActorType::Public => "[PUB]",
+                ActorType::System => "[SYS]",
+            }
         };
 
         // User display: Name <email> format for disambiguation
-        let user_display = match (&self.user_name, &self.user_email) {
-            (Some(name), Some(email)) => format!("`{} <{}>`", name, email),
-            (Some(name), None) => format!("`{}`", name),
-            (None, Some(email)) => format!("`{}`", email),
-            (None, None) => self
-                .user_id
-                .as_ref()
-                .map(|id| format!("`(user:{})`", &Self::truncate_id(id)))
-                .unwrap_or_default(),
+        // For impersonation: show "Operator as Member" format
+        let user_display = if let Some(imp) = impersonator {
+            // Impersonation: show operator first, then the impersonated user
+            let operator_name = imp.get("name").and_then(|n| n.as_str());
+            let operator_email = imp.get("email").and_then(|e| e.as_str());
+            let operator_id = imp.get("user_id").and_then(|u| u.as_str());
+
+            let operator_display = match (operator_name, operator_email) {
+                (Some(name), Some(email)) => format!("`{} <{}>`", name, email),
+                (Some(name), None) => format!("`{}`", name),
+                (None, Some(email)) => format!("`{}`", email),
+                (None, None) => operator_id
+                    .map(|id| format!("`(user:{})`", Self::truncate_id(id)))
+                    .unwrap_or_else(|| "`(unknown operator)`".to_string()),
+            };
+
+            let member_display = match (&self.user_name, &self.user_email) {
+                (Some(name), Some(email)) => format!("`{} <{}>`", name, email),
+                (Some(name), None) => format!("`{}`", name),
+                (None, Some(email)) => format!("`{}`", email),
+                (None, None) => self
+                    .user_id
+                    .as_ref()
+                    .map(|id| format!("`(user:{})`", Self::truncate_id(id)))
+                    .unwrap_or_default(),
+            };
+
+            format!("{} as {}", operator_display, member_display)
+        } else {
+            // Normal user display
+            match (&self.user_name, &self.user_email) {
+                (Some(name), Some(email)) => format!("`{} <{}>`", name, email),
+                (Some(name), None) => format!("`{}`", name),
+                (None, Some(email)) => format!("`{}`", email),
+                (None, None) => self
+                    .user_id
+                    .as_ref()
+                    .map(|id| format!("`(user:{})`", &Self::truncate_id(id)))
+                    .unwrap_or_default(),
+            }
         };
 
         // Convert action to past-tense verb + object
@@ -355,6 +409,7 @@ impl AuditLog {
             "list" => "listed",
             "get" => "retrieved",
             "request" => "requested",
+            "receive" => "received",
             "extend" => "extended",
             "activate" => "activated",
             "mark" => "marked",
@@ -415,9 +470,9 @@ mod tests {
         };
 
         let formatted = log.formatted();
-        // Expected: [2024-01-01 00:00:00] [User]   `John Smith <john@example.com>` created organization `Acme Corp`
+        // Expected: [2024-01-01 00:00:00] [USR] `John Smith <john@example.com>` created organization `Acme Corp`
         assert!(formatted.contains("[2024-01-01 00:00:00]"));
-        assert!(formatted.contains("[User]"));
+        assert!(formatted.contains("[USR]"));
         assert!(formatted.contains("`John Smith <john@example.com>`"));
         assert!(formatted.contains("created organization"));
         assert!(formatted.contains("`Acme Corp`"));
@@ -449,8 +504,8 @@ mod tests {
         };
 
         let formatted = log.formatted();
-        // Expected: [2024-01-01 00:00:00] [System] seeded operator `Dev Operator`
-        assert!(formatted.contains("[System]"));
+        // Expected: [2024-01-01 00:00:00] [SYS] seeded operator `Dev Operator`
+        assert!(formatted.contains("[SYS]"));
         assert!(formatted.contains("seeded operator"));
         assert!(formatted.contains("`Dev Operator`"));
     }
@@ -523,6 +578,118 @@ mod tests {
     }
 
     #[test]
+    fn test_formatted_impersonation() {
+        let log = AuditLog {
+            id: "log12345678".to_string(),
+            timestamp: 1704067200, // 2024-01-01T00:00:00Z
+            actor_type: ActorType::User,
+            user_id: Some("member123".to_string()),
+            user_email: Some("member@test.com".to_string()),
+            user_name: Some("Member User".to_string()),
+            action: "create_project".to_string(),
+            resource_type: "project".to_string(),
+            resource_id: "proj456".to_string(),
+            resource_name: Some("My App".to_string()),
+            resource_email: None,
+            details: Some(serde_json::json!({
+                "name": "My App",
+                "impersonator": {
+                    "user_id": "operator123",
+                    "name": "Admin Operator",
+                    "email": "operator@admin.com"
+                }
+            })),
+            org_id: Some("org789".to_string()),
+            org_name: Some("Acme Corp".to_string()),
+            project_id: Some("proj456".to_string()),
+            project_name: Some("My App".to_string()),
+            ip_address: Some("192.168.1.1".to_string()),
+            user_agent: Some("test-agent".to_string()),
+            auth_type: None,
+            auth_credential: None,
+        };
+
+        let formatted = log.formatted();
+        // Should show [IMP] type
+        assert!(
+            formatted.contains("[IMP]"),
+            "Should show [IMP] type, got: {}",
+            formatted
+        );
+        // Should show operator with Name <email> format
+        assert!(
+            formatted.contains("`Admin Operator <operator@admin.com>`"),
+            "Should show operator with Name <email> format, got: {}",
+            formatted
+        );
+        // Should show "as" to connect operator to impersonated user
+        assert!(
+            formatted.contains(" as "),
+            "Should show 'as' between operator and member, got: {}",
+            formatted
+        );
+        // Should show member info
+        assert!(
+            formatted.contains("`Member User <member@test.com>`"),
+            "Should show impersonated member, got: {}",
+            formatted
+        );
+        // Verify the order: operator comes before member
+        let operator_pos = formatted.find("`Admin Operator").unwrap();
+        let member_pos = formatted.find("`Member User").unwrap();
+        assert!(
+            operator_pos < member_pos,
+            "Operator should appear before member in formatted string"
+        );
+    }
+
+    #[test]
+    fn test_formatted_impersonation_null_is_ignored() {
+        // When impersonator is null (non-impersonated action), should show normal [User] format
+        let log = AuditLog {
+            id: "log12345678".to_string(),
+            timestamp: 1704067200,
+            actor_type: ActorType::User,
+            user_id: Some("user123".to_string()),
+            user_email: Some("user@test.com".to_string()),
+            user_name: Some("Regular User".to_string()),
+            action: "create_project".to_string(),
+            resource_type: "project".to_string(),
+            resource_id: "proj456".to_string(),
+            resource_name: Some("My App".to_string()),
+            resource_email: None,
+            details: Some(serde_json::json!({
+                "name": "My App",
+                "impersonator": null
+            })),
+            org_id: None,
+            org_name: None,
+            project_id: None,
+            project_name: None,
+            ip_address: None,
+            user_agent: None,
+            auth_type: None,
+            auth_credential: None,
+        };
+
+        let formatted = log.formatted();
+        // Should show [USR] not [IMP] when impersonator is null
+        assert!(
+            formatted.contains("[USR]"),
+            "Should show [USR] when impersonator is null, got: {}",
+            formatted
+        );
+        assert!(
+            !formatted.contains("[IMP]"),
+            "Should NOT show [IMP] when impersonator is null"
+        );
+        assert!(
+            !formatted.contains(" as "),
+            "Should NOT show 'as' when not impersonating"
+        );
+    }
+
+    #[test]
     fn test_action_to_verb_phrase() {
         assert_eq!(
             AuditLog::action_to_verb_phrase("create_organization", "organization"),
@@ -568,7 +735,7 @@ mod tests {
         };
 
         let response: AuditLogResponse = log.into();
-        assert!(response.formatted.contains("[User]"));
+        assert!(response.formatted.contains("[USR]"));
         assert!(
             response
                 .formatted

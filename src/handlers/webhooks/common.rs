@@ -12,8 +12,11 @@ use rusqlite::Connection;
 use crate::crypto::{EmailHasher, MasterKey};
 use crate::db::{AppState, queries};
 use crate::error::AppError;
-use crate::models::{CreateLicense, License, Organization, PaymentSession, Product, Project};
-use crate::util::LicenseExpirations;
+use crate::models::{
+    ActorType, AuditAction, AuditLogNames, CreateLicense, License, Organization, PaymentSession,
+    Product, Project,
+};
+use crate::util::{AuditLogBuilder, LicenseExpirations};
 
 /// Helper to unwrap DB query results with consistent error handling.
 fn db_lookup<T>(
@@ -306,17 +309,17 @@ pub async fn handle_webhook<P: WebhookProvider>(
     // Handle based on event type
     match event {
         WebhookEvent::CheckoutCompleted(data) => {
-            handle_checkout(provider, state, &body, &signature, data)
+            handle_checkout(provider, state, &headers, &body, &signature, data)
                 .await
                 .unwrap_or_else(|e| e)
         }
         WebhookEvent::SubscriptionRenewed(data) => {
-            handle_renewal(provider, state, &body, &signature, data)
+            handle_renewal(provider, state, &headers, &body, &signature, data)
                 .await
                 .unwrap_or_else(|e| e)
         }
         WebhookEvent::SubscriptionCancelled(data) => {
-            handle_cancellation(provider, state, &body, &signature, data)
+            handle_cancellation(provider, state, &headers, &body, &signature, data)
                 .await
                 .unwrap_or_else(|e| e)
         }
@@ -327,6 +330,7 @@ pub async fn handle_webhook<P: WebhookProvider>(
 async fn handle_checkout<P: WebhookProvider>(
     provider: &P,
     state: &AppState,
+    headers: &HeaderMap,
     body: &Bytes,
     signature: &str,
     data: CheckoutData,
@@ -363,7 +367,7 @@ async fn handle_checkout<P: WebhookProvider>(
         "Product not found",
     )?;
 
-    Ok(process_checkout(
+    let result = process_checkout(
         &mut conn,
         &state.email_hasher,
         provider.provider_name(),
@@ -371,12 +375,52 @@ async fn handle_checkout<P: WebhookProvider>(
         &payment_session,
         &product,
         &data,
-    ))
+    );
+
+    // Audit log on successful checkout (license created)
+    if result.0 == StatusCode::OK && result.1 == "OK" {
+        // Re-fetch session to get the linked license_id
+        if let Ok(Some(updated_session)) = queries::get_payment_session(&conn, &data.session_id) {
+            if let Some(license_id) = updated_session.license_id {
+                let audit_conn = state.audit.get().map_err(|e| {
+                    tracing::error!("Audit DB connection error: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+                })?;
+
+                if let Err(e) = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, headers)
+                    .actor(ActorType::Public, None)
+                    .action(AuditAction::ReceiveCheckoutWebhook)
+                    .resource("license", &license_id)
+                    .details(&serde_json::json!({
+                        "provider": provider.provider_name(),
+                        "session_id": data.session_id,
+                        "product_id": product.id,
+                        "customer_email": data.customer_email,
+                        "subscription_id": data.subscription_id,
+                        "order_id": data.order_id,
+                    }))
+                    .org(&org.id)
+                    .project(&project.id)
+                    .names(&AuditLogNames {
+                        org_name: Some(org.name.clone()),
+                        project_name: Some(project.name.clone()),
+                        ..Default::default()
+                    })
+                    .save()
+                {
+                    tracing::warn!("Failed to write checkout audit log: {}", e);
+                }
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 async fn handle_renewal<P: WebhookProvider>(
     provider: &P,
     state: &AppState,
+    headers: &HeaderMap,
     body: &Bytes,
     signature: &str,
     data: RenewalData,
@@ -416,19 +460,58 @@ async fn handle_renewal<P: WebhookProvider>(
         Err(e) => return Err(e),
     }
 
-    Ok(process_renewal(
+    let result = process_renewal(
         &conn,
         provider.provider_name(),
         &product,
         &license.id,
         &data.subscription_id,
         data.event_id.as_deref(),
-    ))
+    );
+
+    // Audit log on successful renewal
+    if result.0 == StatusCode::OK && result.1 == "OK" {
+        let audit_conn = state.audit.get().map_err(|e| {
+            tracing::error!("Audit DB connection error: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?;
+
+        // Compute new expirations for logging
+        let now = chrono::Utc::now().timestamp();
+        let exps = LicenseExpirations::from_product(&product, now);
+
+        if let Err(e) = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, headers)
+            .actor(ActorType::Public, None)
+            .action(AuditAction::ReceiveRenewalWebhook)
+            .resource("license", &license.id)
+            .details(&serde_json::json!({
+                "provider": provider.provider_name(),
+                "subscription_id": data.subscription_id,
+                "event_id": data.event_id,
+                "product_id": product.id,
+                "new_expires_at": exps.license_exp,
+                "new_updates_expires_at": exps.updates_exp,
+            }))
+            .org(&org.id)
+            .project(&project.id)
+            .names(&AuditLogNames {
+                org_name: Some(org.name.clone()),
+                project_name: Some(project.name.clone()),
+                ..Default::default()
+            })
+            .save()
+        {
+            tracing::warn!("Failed to write renewal audit log: {}", e);
+        }
+    }
+
+    Ok(result)
 }
 
 async fn handle_cancellation<P: WebhookProvider>(
     provider: &P,
     state: &AppState,
+    headers: &HeaderMap,
     body: &Bytes,
     signature: &str,
     data: CancellationData,
@@ -459,10 +542,42 @@ async fn handle_cancellation<P: WebhookProvider>(
         Err(e) => return Err(e),
     }
 
-    Ok(process_cancellation(
+    let result = process_cancellation(
         provider.provider_name(),
         &license.id,
         license.expires_at,
         &data.subscription_id,
-    ))
+    );
+
+    // Audit log on successful cancellation
+    if result.0 == StatusCode::OK {
+        let audit_conn = state.audit.get().map_err(|e| {
+            tracing::error!("Audit DB connection error: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?;
+
+        if let Err(e) = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, headers)
+            .actor(ActorType::Public, None)
+            .action(AuditAction::ReceiveCancellationWebhook)
+            .resource("license", &license.id)
+            .details(&serde_json::json!({
+                "provider": provider.provider_name(),
+                "subscription_id": data.subscription_id,
+                "product_id": product.id,
+                "expires_at": license.expires_at,
+            }))
+            .org(&org.id)
+            .project(&project.id)
+            .names(&AuditLogNames {
+                org_name: Some(org.name.clone()),
+                project_name: Some(project.name.clone()),
+                ..Default::default()
+            })
+            .save()
+        {
+            tracing::warn!("Failed to write cancellation audit log: {}", e);
+        }
+    }
+
+    Ok(result)
 }

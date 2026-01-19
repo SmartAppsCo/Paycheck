@@ -6,13 +6,15 @@
 
 use std::collections::HashMap;
 
-use axum::extract::State;
+use axum::{extract::State, http::HeaderMap};
 use serde::{Deserialize, Serialize};
 
 use crate::db::{AppState, queries};
 use crate::email::{EmailSendConfig, EmailTrigger, LicenseCodeInfo, MultiLicenseEmailConfig};
 use crate::error::Result;
 use crate::extractors::Json;
+use crate::models::{ActorType, AuditAction, AuditLogNames};
+use crate::util::AuditLogBuilder;
 
 #[derive(Debug, Deserialize)]
 pub struct RequestCodeBody {
@@ -37,6 +39,7 @@ pub struct RequestCodeResponse {
 /// Rate limited to 3 requests per email per hour.
 pub async fn request_activation_code(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<RequestCodeBody>,
 ) -> Result<Json<RequestCodeResponse>> {
     let conn = state.db.get()?;
@@ -119,6 +122,30 @@ pub async fn request_activation_code(
             license_id: license.id.clone(),
             purchased_at: license.created_at,
         });
+    }
+
+    // Audit log the activation code request (only when we actually found licenses)
+    let audit_conn = state.audit.get()?;
+    let org_name = org.as_ref().map(|o| o.name.clone());
+    if let Err(e) = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
+        .actor(ActorType::Public, None)
+        .action(AuditAction::RequestActivationCode)
+        .resource("license", &active_licenses[0].id) // Use first license as resource
+        .details(&serde_json::json!({
+            "email": body.email,
+            "licenses_found": active_licenses.len(),
+            "license_ids": active_licenses.iter().map(|l| &l.id).collect::<Vec<_>>(),
+        }))
+        .org(&project.org_id)
+        .project(&project.id)
+        .names(&AuditLogNames {
+            org_name,
+            project_name: Some(project.name.clone()),
+            ..Default::default()
+        })
+        .save()
+    {
+        tracing::warn!("Failed to write activation code request audit log: {}", e);
     }
 
     // Send email - use single-license format for 1, multi-license for 2+
