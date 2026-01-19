@@ -32,13 +32,20 @@ body:json {
 
 docs {
   Create a product using operator impersonation.
-  
+
   Requirements:
   - Operator must have admin or owner role
   - X-On-Behalf-Of must be a user_id of a member with owner/admin role in the org
-  
-  Modify the body for each tier:
-  - Free: license_exp_days=null, device_limit=1
-  - Pro: license_exp_days=30, device_limit=5
-  - Enterprise: license_exp_days=365, device_limit=0 (unlimited)
+
+  IMPORTANT: license_exp_days and updates_exp_days
+  - null = perpetual license (never expires) - use for one-time purchases
+  - 365 = expires 365 days after purchase
+  - 30 = expires 30 days after purchase (subscriptions)
+  - 0 = expires IMMEDIATELY (don't use this!)
+
+  Examples:
+  - One-time perpetual: license_exp_days=null, updates_exp_days=null
+  - One-time with 1yr updates: license_exp_days=null, updates_exp_days=365
+  - Monthly subscription: license_exp_days=30, updates_exp_days=30
+  - Annual subscription: license_exp_days=365, updates_exp_days=365
 }

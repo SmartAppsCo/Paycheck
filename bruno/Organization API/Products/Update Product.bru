@@ -32,9 +32,14 @@ docs {
   - tier: Tier identifier
   - price_cents: Price in cents (for display/reference)
   - currency: Currency code (e.g., "usd")
-  - license_exp_days: When license expires (null = never)
-  - updates_exp_days: When update access ends (null = never)
+  - license_exp_days: Days until license expires (null = perpetual)
+  - updates_exp_days: Days until update access ends (null = perpetual)
   - activation_limit: Max activations (0 = unlimited)
   - device_limit: Max concurrent devices (0 = unlimited)
   - features: Array of feature flags
+
+  IMPORTANT: license_exp_days and updates_exp_days
+  - null = perpetual license (never expires)
+  - 0 = expires IMMEDIATELY (don't use this!)
+  - Positive number = expires in that many days
 }

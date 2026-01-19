@@ -36,9 +36,21 @@ docs {
   - tier: Tier identifier (used in JWT claims)
   - price_cents: Price in cents (for display/reference)
   - currency: Currency code (e.g., "usd")
-  - license_exp_days: When license expires (null = never)
-  - updates_exp_days: When update access ends (null = never)
+  - license_exp_days: Days until license expires (null = perpetual, never expires)
+  - updates_exp_days: Days until update access ends (null = perpetual)
   - activation_limit: Max activations (0 = unlimited)
   - device_limit: Max concurrent devices (0 = unlimited)
   - features: Array of feature flags for hasFeature() checks
+
+  IMPORTANT: license_exp_days and updates_exp_days
+  - null = perpetual license (never expires) - use for one-time purchases
+  - 365 = expires 365 days after purchase
+  - 30 = expires 30 days after purchase (subscriptions)
+  - 0 = expires IMMEDIATELY (don't use this!)
+
+  Examples:
+  - One-time perpetual: license_exp_days=null, updates_exp_days=null
+  - One-time with 1yr updates: license_exp_days=null, updates_exp_days=365
+  - Monthly subscription: license_exp_days=30, updates_exp_days=30
+  - Annual subscription: license_exp_days=365, updates_exp_days=365
 }
