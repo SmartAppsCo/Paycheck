@@ -112,7 +112,9 @@ pub struct OrganizationPublic {
     /// Configured external services grouped by category
     /// e.g. { "payment": ["stripe", "lemonsqueezy"], "email": ["resend"] }
     pub configured_services: std::collections::HashMap<String, Vec<String>>,
-    pub payment_provider: Option<String>,
+    /// Default providers by category
+    /// e.g. { "payment": "stripe" }
+    pub defaults: std::collections::HashMap<String, String>,
     pub created_at: i64,
     pub updated_at: i64,
     /// Soft delete timestamp (None = active, Some = deleted at this time)
@@ -124,16 +126,17 @@ pub struct OrganizationPublic {
 }
 
 impl OrganizationPublic {
-    /// Create OrganizationPublic with configured services map
+    /// Create OrganizationPublic with configured services and defaults
     pub fn from_with_configs(
         org: Organization,
         configured_services: std::collections::HashMap<String, Vec<String>>,
+        defaults: std::collections::HashMap<String, String>,
     ) -> Self {
         Self {
             id: org.id,
             name: org.name,
             configured_services,
-            payment_provider: org.payment_provider,
+            defaults,
             created_at: org.created_at,
             updated_at: org.updated_at,
             deleted_at: org.deleted_at,

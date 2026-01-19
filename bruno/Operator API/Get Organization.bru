@@ -18,7 +18,9 @@ docs {
   Get a specific organization by ID.
 
   Response includes:
-  - id, name, payment_provider, created_at, updated_at
+  - id, name, created_at, updated_at
   - configured_services: Map of category to provider arrays
     e.g. { "payment": ["stripe"], "email": ["resend"] }
+  - defaults: Map of category to default provider
+    e.g. { "payment": "stripe" }
 }

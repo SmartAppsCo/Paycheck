@@ -880,8 +880,8 @@ mod organization_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         assert_eq!(
-            json["payment_provider"], "stripe",
-            "Payment provider should be updated to stripe"
+            json["defaults"]["payment"], "stripe",
+            "Default payment provider should be updated to stripe"
         );
     }
 

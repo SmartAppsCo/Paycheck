@@ -30,7 +30,13 @@ fn org_to_public(conn: &Connection, org: Organization) -> Result<OrganizationPub
             .push(config.provider.as_str().to_string());
     }
 
-    Ok(OrganizationPublic::from_with_configs(org, configured_services))
+    // Build defaults map from org's payment_provider
+    let mut defaults: HashMap<String, String> = HashMap::new();
+    if let Some(ref provider) = org.payment_provider {
+        defaults.insert("payment".to_string(), provider.clone());
+    }
+
+    Ok(OrganizationPublic::from_with_configs(org, configured_services, defaults))
 }
 
 /// Helper to convert multiple Organizations to OrganizationPublic
