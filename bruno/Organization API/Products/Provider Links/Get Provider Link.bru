@@ -1,0 +1,19 @@
+meta {
+  name: Get Provider Link
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/products/{{product_id}}/provider-links/{{link_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_member_api_key}}
+}
+
+docs {
+  Get a specific provider link by ID.
+}

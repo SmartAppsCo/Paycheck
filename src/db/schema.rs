@@ -133,6 +133,8 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             activation_limit INTEGER NOT NULL DEFAULT 0,
             device_limit INTEGER NOT NULL DEFAULT 0,
             features TEXT NOT NULL DEFAULT '[]',
+            price_cents INTEGER,
+            currency TEXT,
             created_at INTEGER NOT NULL,
             deleted_at INTEGER,
             deleted_cascade_depth INTEGER,
@@ -141,26 +143,17 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_products_project ON products(project_id);
         CREATE INDEX IF NOT EXISTS idx_products_active ON products(id) WHERE deleted_at IS NULL;
 
-        -- Product payment config (payment provider settings per product)
-        CREATE TABLE IF NOT EXISTS product_payment_config (
+        -- Product provider links (maps products to payment provider price/variant IDs)
+        CREATE TABLE IF NOT EXISTS product_provider_links (
             id TEXT PRIMARY KEY,
             product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
             provider TEXT NOT NULL CHECK (provider IN ('stripe', 'lemonsqueezy')),
-
-            -- Stripe fields
-            stripe_price_id TEXT,
-            price_cents INTEGER,
-            currency TEXT,
-
-            -- LemonSqueezy fields
-            ls_variant_id TEXT,
-
+            linked_id TEXT NOT NULL,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
-
             UNIQUE(product_id, provider)
         );
-        CREATE INDEX IF NOT EXISTS idx_payment_config_product ON product_payment_config(product_id);
+        CREATE INDEX IF NOT EXISTS idx_provider_links_product ON product_provider_links(product_id);
 
         -- Licenses (no user-facing keys - email hash is the identity)
         -- email_hash: SHA-256 hash of purchase email (no PII stored)

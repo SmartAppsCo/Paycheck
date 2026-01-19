@@ -1,7 +1,7 @@
 //! Tests for payment config endpoints.
 //!
-//! - Org endpoint: GET /orgs/{org_id}/payment-config (masked, for customers)
-//! - Operator endpoint: GET /operators/organizations/{org_id}/payment-config (full, for support)
+//! - Org endpoint: GET /orgs/{org_id}/payment-provider (masked, for customers)
+//! - Operator endpoint: GET /operators/organizations/{org_id}/payment-provider (full, for support)
 
 use axum::{
     Router,
@@ -90,7 +90,7 @@ fn operator_app_with_payment_configs() -> (Router, String) {
     // Note: Testing without auth middleware - auth is tested separately
     let app = Router::new()
         .route(
-            "/operators/organizations/{org_id}/payment-config",
+            "/operators/organizations/{org_id}/payment-provider",
             get(get_org_payment_config),
         )
         .with_state(state);
@@ -107,7 +107,7 @@ async fn test_operator_get_payment_config_full_unmasked() {
             Request::builder()
                 .method("GET")
                 .uri(format!(
-                    "/operators/organizations/{}/payment-config",
+                    "/operators/organizations/{}/payment-provider",
                     org_id
                 ))
                 .body(Body::empty())
@@ -146,7 +146,7 @@ async fn test_operator_get_payment_config_nonexistent_org() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/operators/organizations/nonexistent-id/payment-config")
+                .uri("/operators/organizations/nonexistent-id/payment-provider")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -207,7 +207,7 @@ async fn test_operator_get_payment_config_no_configs() {
 
     let app = Router::new()
         .route(
-            "/operators/organizations/{org_id}/payment-config",
+            "/operators/organizations/{org_id}/payment-provider",
             get(get_org_payment_config),
         )
         .with_state(state);
@@ -217,7 +217,7 @@ async fn test_operator_get_payment_config_no_configs() {
             Request::builder()
                 .method("GET")
                 .uri(format!(
-                    "/operators/organizations/{}/payment-config",
+                    "/operators/organizations/{}/payment-provider",
                     org_id
                 ))
                 .body(Body::empty())

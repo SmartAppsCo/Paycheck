@@ -1,0 +1,20 @@
+meta {
+  name: List Provider Links
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/products/{{product_id}}/provider-links
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_member_api_key}}
+}
+
+docs {
+  List all provider links for a product.
+  Returns links for each provider (stripe, lemonsqueezy) if configured.
+}

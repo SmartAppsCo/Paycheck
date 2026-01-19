@@ -669,6 +669,8 @@ fn test_checkout_creates_license_with_product_expirations() {
     let input = CreateProduct {
         name: "Pro Plan".to_string(),
         tier: "pro".to_string(),
+        price_cents: None,
+        currency: None,
         license_exp_days: Some(ONE_MONTH as i32),
         updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
         activation_limit: 5,
@@ -758,6 +760,8 @@ fn test_checkout_perpetual_license() {
     let input = CreateProduct {
         name: "Lifetime".to_string(),
         tier: "lifetime".to_string(),
+        price_cents: None,
+        currency: None,
         license_exp_days: None, // Perpetual
         updates_exp_days: None,
         activation_limit: 5,

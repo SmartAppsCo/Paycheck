@@ -46,11 +46,11 @@ Follows the customer journey:
 |-----|--------|----------|
 | 1 | Members | Org member CRUD + API keys |
 | 2 | Projects | Project CRUD + project members |
-| 3 | Products | Product CRUD + Payment Config subfolder |
+| 3 | Products | Product CRUD + Provider Links subfolder |
 | 4 | Licenses | License CRUD + Revoke, Send Code, Deactivate |
 | 5 | Audit Logs | Query audit logs |
 | 6 | Impersonation | Operator impersonation examples |
-| 7 | (root file) | Get Payment Config (Masked) |
+| 7 | (root file) | Get Payment Provider Config (Masked) |
 
 ## Operator API Grouping
 

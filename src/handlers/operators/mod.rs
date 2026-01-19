@@ -70,7 +70,7 @@ pub fn router(state: AppState) -> Router<AppState> {
                 )
                 // Support endpoints (admin+)
                 .route(
-                    "/operators/organizations/{org_id}/payment-config",
+                    "/operators/organizations/{org_id}/payment-provider",
                     get(get_org_payment_config),
                 )
                 .route(

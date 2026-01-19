@@ -93,15 +93,15 @@ pub async fn initiate_buy(
         }
     };
 
-    // Get payment config for this product and provider
+    // Get provider link for this product and provider
     let provider_str = match provider {
         PaymentProvider::Stripe => "stripe",
         PaymentProvider::LemonSqueezy => "lemonsqueezy",
     };
-    let payment_config = queries::get_payment_config(&conn, &product.id, provider_str)?
+    let provider_link = queries::get_provider_link(&conn, &product.id, provider_str)?
         .ok_or_else(|| {
             AppError::BadRequest(format!(
-                "No payment config for provider '{}' on this product",
+                "No {} link configured for this product",
                 provider_str
             ))
         })?;
@@ -119,19 +119,12 @@ pub async fn initiate_buy(
     let callback_url = format!("{}/callback?session={}", state.base_url, session.id);
     let cancel_url = format!("{}/cancel", state.base_url);
 
-    // Create checkout with the appropriate provider, using payment config
+    // Create checkout with the appropriate provider using the linked_id
     let checkout_url = match provider {
         PaymentProvider::Stripe => {
             let config = org
                 .decrypt_stripe_config(&state.master_key)?
                 .ok_or_else(|| AppError::BadRequest(msg::STRIPE_NOT_CONFIGURED.into()))?;
-
-            // Get price from payment config
-            let price_cents = payment_config
-                .price_cents
-                .ok_or_else(|| AppError::BadRequest(msg::NO_PRICE_CONFIGURED.into()))?
-                as u64;
-            let currency = payment_config.currency.as_deref().unwrap_or("usd");
 
             let client = StripeClient::new(&config);
             let (_, url) = client
@@ -139,9 +132,7 @@ pub async fn initiate_buy(
                     &session.id,
                     &product.project_id,
                     &product.id,
-                    &product.name,
-                    price_cents,
-                    currency,
+                    &provider_link.linked_id, // Stripe Price ID (e.g., "price_1ABC...")
                     &callback_url,
                     &cancel_url,
                 )
@@ -153,19 +144,13 @@ pub async fn initiate_buy(
                 .decrypt_ls_config(&state.master_key)?
                 .ok_or_else(|| AppError::BadRequest(msg::LS_NOT_CONFIGURED.into()))?;
 
-            // Get variant ID from payment config
-            let variant_id = payment_config
-                .ls_variant_id
-                .as_ref()
-                .ok_or_else(|| AppError::BadRequest(msg::NO_VARIANT_CONFIGURED.into()))?;
-
             let client = LemonSqueezyClient::new(&config);
             let (_, url) = client
                 .create_checkout(
                     &session.id,
                     &product.project_id,
                     &product.id,
-                    variant_id,
+                    &provider_link.linked_id, // LemonSqueezy Variant ID
                     &callback_url,
                 )
                 .await?;

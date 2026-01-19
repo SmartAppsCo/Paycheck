@@ -477,6 +477,8 @@ async fn test_redeem_device_limit_exceeded_returns_error() {
         let input = CreateProduct {
             name: "Limited Plan".to_string(),
             tier: "limited".to_string(),
+            price_cents: None,
+            currency: None,
             license_exp_days: Some(ONE_YEAR as i32),
             updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
             activation_limit: 10,
@@ -1052,6 +1054,8 @@ mod device_limit_enforcement {
             let input = CreateProduct {
                 name: "Limited Plan".to_string(),
                 tier: "limited".to_string(),
+                price_cents: None,
+                currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
                 activation_limit: 10,
@@ -1119,6 +1123,8 @@ mod device_limit_enforcement {
             let input = CreateProduct {
                 name: "Single Device Plan".to_string(),
                 tier: "single".to_string(),
+                price_cents: None,
+                currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
                 activation_limit: 10,
@@ -1193,6 +1199,8 @@ mod device_limit_enforcement {
             let input = CreateProduct {
                 name: "Unlimited Device Plan".to_string(),
                 tier: "unlimited".to_string(),
+                price_cents: None,
+                currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
                 activation_limit: 10,
@@ -1263,6 +1271,8 @@ mod device_limit_enforcement {
             let input = CreateProduct {
                 name: "Single Device Plan".to_string(),
                 tier: "single".to_string(),
+                price_cents: None,
+                currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
                 activation_limit: 10,
@@ -1345,6 +1355,8 @@ mod activation_limit_enforcement {
             let input = CreateProduct {
                 name: "Limited Activations".to_string(),
                 tier: "limited".to_string(),
+                price_cents: None,
+                currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
                 activation_limit: 2, // Only 2 activations ever
@@ -1422,6 +1434,8 @@ mod activation_limit_enforcement {
             let input = CreateProduct {
                 name: "Limited Activations".to_string(),
                 tier: "limited".to_string(),
+                price_cents: None,
+                currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
                 activation_limit: 2, // Only 2 activations ever
@@ -1564,6 +1578,8 @@ mod activation_limit_enforcement {
             let input = CreateProduct {
                 name: "Single Device".to_string(),
                 tier: "single".to_string(),
+                price_cents: None,
+                currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
                 activation_limit: 100, // High activation limit
@@ -1688,6 +1704,8 @@ mod activation_limit_enforcement {
             let input = CreateProduct {
                 name: "Limited Activations".to_string(),
                 tier: "limited".to_string(),
+                price_cents: None,
+                currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
                 activation_limit: 2, // Only 2 activations ever!
@@ -1811,6 +1829,8 @@ mod activation_limit_enforcement {
             let input = CreateProduct {
                 name: "Unlimited".to_string(),
                 tier: "unlimited".to_string(),
+                price_cents: None,
+                currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
                 activation_limit: 100,

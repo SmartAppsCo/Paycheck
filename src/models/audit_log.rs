@@ -52,10 +52,10 @@ pub enum AuditAction {
     UpdateProduct,
     DeleteProduct,
 
-    // Payment config management
-    CreatePaymentConfig,
-    UpdatePaymentConfig,
-    DeletePaymentConfig,
+    // Provider link management
+    CreateProviderLink,
+    UpdateProviderLink,
+    DeleteProviderLink,
 
     // License management
     CreateLicense,

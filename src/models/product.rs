@@ -13,6 +13,12 @@ pub struct Product {
     pub activation_limit: i32,
     pub device_limit: i32,
     pub features: Vec<String>,
+    /// Canonical price in cents (for display and future provider sync)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub price_cents: Option<i64>,
+    /// Currency code (e.g., "usd")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
     pub created_at: i64,
     /// Soft delete timestamp (None = active, Some = deleted at this time)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -36,6 +42,10 @@ pub struct CreateProduct {
     pub device_limit: i32,
     #[serde(default)]
     pub features: Vec<String>,
+    #[serde(default)]
+    pub price_cents: Option<i64>,
+    #[serde(default)]
+    pub currency: Option<String>,
 }
 
 impl CreateProduct {
@@ -59,6 +69,8 @@ pub struct UpdateProduct {
     pub activation_limit: Option<i32>,
     pub device_limit: Option<i32>,
     pub features: Option<Vec<String>>,
+    pub price_cents: Option<Option<i64>>,
+    pub currency: Option<Option<String>>,
 }
 
 impl UpdateProduct {

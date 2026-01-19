@@ -159,30 +159,25 @@ pub fn create_test_product(conn: &Connection, project_id: &str, name: &str, tier
         activation_limit: 5,
         device_limit: 3,
         features: vec!["feature1".to_string(), "feature2".to_string()],
+        price_cents: Some(4999),
+        currency: Some("usd".to_string()),
     };
     queries::create_product(conn, project_id, &input).expect("Failed to create test product")
 }
 
-/// Create a test payment config for a product
-pub fn create_test_payment_config(
+/// Create a test provider link for a product
+pub fn create_test_provider_link(
     conn: &Connection,
     product_id: &str,
     provider: &str,
-    price_cents: Option<i64>,
-) -> ProductPaymentConfig {
-    let input = CreatePaymentConfig {
+    linked_id: &str,
+) -> ProductProviderLink {
+    let input = CreateProviderLink {
         provider: provider.to_string(),
-        stripe_price_id: None,
-        price_cents,
-        currency: Some("usd".to_string()),
-        ls_variant_id: if provider == "lemonsqueezy" {
-            Some("test_variant_123".to_string())
-        } else {
-            None
-        },
+        linked_id: linked_id.to_string(),
     };
-    queries::create_payment_config(conn, product_id, &input)
-        .expect("Failed to create test payment config")
+    queries::create_provider_link(conn, product_id, &input)
+        .expect("Failed to create test provider link")
 }
 
 /// Create a test license (uses master key for secure email hashing)

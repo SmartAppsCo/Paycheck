@@ -756,6 +756,8 @@ async fn test_refresh_with_expired_license_exp_fails() {
         let input = paycheck::models::CreateProduct {
             name: "Short License".to_string(),
             tier: "pro".to_string(),
+            price_cents: None,
+            currency: None,
             license_exp_days: Some(1), // License expires 1 day after activation
             updates_exp_days: Some(365),
             activation_limit: 5,

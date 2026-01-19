@@ -1,0 +1,28 @@
+meta {
+  name: Update Provider Link
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/products/{{product_id}}/provider-links/{{link_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_member_api_key}}
+}
+
+body:json {
+  {
+    "linked_id": "price_updated_1234567890"
+  }
+}
+
+docs {
+  Update a provider link.
+
+  Fields:
+  - linked_id: Provider's price/variant ID
+}

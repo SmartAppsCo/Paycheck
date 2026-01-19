@@ -295,6 +295,8 @@ async fn test_license_many_devices() {
     let input = CreateProduct {
         name: "Unlimited".to_string(),
         tier: "enterprise".to_string(),
+        price_cents: Some(9999),
+        currency: Some("usd".to_string()),
         license_exp_days: Some(365),
         updates_exp_days: Some(365),
         activation_limit: 1000, // High activation limit

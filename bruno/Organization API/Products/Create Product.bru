@@ -18,6 +18,8 @@ body:json {
   {
     "name": "Pro License",
     "tier": "pro",
+    "price_cents": 2999,
+    "currency": "usd",
     "license_exp_days": 365,
     "updates_exp_days": 365,
     "activation_limit": 0,
@@ -32,6 +34,8 @@ docs {
   Fields:
   - name: Display name
   - tier: Tier identifier (used in JWT claims)
+  - price_cents: Price in cents (for display/reference)
+  - currency: Currency code (e.g., "usd")
   - license_exp_days: When license expires (null = never)
   - updates_exp_days: When update access ends (null = never)
   - activation_limit: Max activations (0 = unlimited)

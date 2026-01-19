@@ -1,6 +1,6 @@
 use hmac::{Hmac, Mac};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
@@ -9,39 +9,9 @@ use crate::models::StripeConfig;
 
 type HmacSha256 = Hmac<Sha256>;
 
-#[derive(Debug, Serialize)]
-struct CreateCheckoutSessionRequest<'a> {
-    mode: &'a str,
-    success_url: &'a str,
-    cancel_url: &'a str,
-    line_items: Vec<LineItem<'a>>,
-    metadata: CheckoutMetadata<'a>,
-}
-
-#[derive(Debug, Serialize)]
-struct LineItem<'a> {
-    price_data: PriceData<'a>,
-    quantity: u32,
-}
-
-#[derive(Debug, Serialize)]
-struct PriceData<'a> {
-    currency: &'a str,
-    unit_amount: u64,
-    product_data: ProductData<'a>,
-}
-
-#[derive(Debug, Serialize)]
-struct ProductData<'a> {
-    name: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-struct CheckoutMetadata<'a> {
-    paycheck_session_id: &'a str,
-    project_id: &'a str,
-    product_id: &'a str,
-}
+// Note: We use Stripe's pre-configured prices (linked_id = price_xxx)
+// instead of ad-hoc price_data. This keeps all payment products
+// organized in the Stripe dashboard.
 
 #[derive(Debug, Deserialize)]
 struct CreateCheckoutSessionResponse {
@@ -65,54 +35,29 @@ impl StripeClient {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Create a Stripe checkout session using a pre-configured price.
+    ///
+    /// `price_id` is the Stripe Price ID (e.g., "price_1ABC...") configured in
+    /// your Stripe dashboard. This creates organized payments in Stripe instead
+    /// of ad-hoc "one-time" charges scattered across the dashboard.
     pub async fn create_checkout_session(
         &self,
         session_id: &str,
         project_id: &str,
         product_id: &str,
-        product_name: &str,
-        price_cents: u64,
-        currency: &str,
+        price_id: &str,
         success_url: &str,
         cancel_url: &str,
     ) -> Result<(String, String)> {
-        let request = CreateCheckoutSessionRequest {
-            mode: "payment",
-            success_url,
-            cancel_url,
-            line_items: vec![LineItem {
-                price_data: PriceData {
-                    currency,
-                    unit_amount: price_cents,
-                    product_data: ProductData { name: product_name },
-                },
-                quantity: 1,
-            }],
-            metadata: CheckoutMetadata {
-                paycheck_session_id: session_id,
-                project_id,
-                product_id,
-            },
-        };
-
         let response = self
             .client
             .post("https://api.stripe.com/v1/checkout/sessions")
             .basic_auth(&self.secret_key, None::<&str>)
             .form(&[
-                ("mode", request.mode),
-                ("success_url", request.success_url),
-                ("cancel_url", request.cancel_url),
-                ("line_items[0][price_data][currency]", currency),
-                (
-                    "line_items[0][price_data][unit_amount]",
-                    &price_cents.to_string(),
-                ),
-                (
-                    "line_items[0][price_data][product_data][name]",
-                    product_name,
-                ),
+                ("mode", "payment"),
+                ("success_url", success_url),
+                ("cancel_url", cancel_url),
+                ("line_items[0][price]", price_id),
                 ("line_items[0][quantity]", "1"),
                 ("metadata[paycheck_session_id]", session_id),
                 ("metadata[project_id]", project_id),

@@ -206,7 +206,7 @@ mod rate_limit_headers {
             setup_stripe_config(&mut conn, &org.id, &state.master_key);
             let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
             let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
-            create_test_payment_config(&mut conn, &product.id, "stripe", Some(999));
+            create_test_provider_link(&mut conn, &product.id, "stripe", "price_test_123");
         }
 
         // First request should succeed or fail due to missing Stripe (not rate limit)
@@ -284,7 +284,7 @@ mod strict_rate_limit {
             setup_stripe_config(&mut conn, &org.id, &state.master_key);
             let project = create_test_project(&mut conn, &org.id, "Test Project", &state.master_key);
             let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
-            create_test_payment_config(&mut conn, &product.id, "stripe", Some(999));
+            create_test_provider_link(&mut conn, &product.id, "stripe", "price_test_123");
         }
 
         // Make requests up to the limit

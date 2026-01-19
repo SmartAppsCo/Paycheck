@@ -1,0 +1,34 @@
+meta {
+  name: Create Provider Link
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/products/{{product_id}}/provider-links
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_member_api_key}}
+}
+
+body:json {
+  {
+    "provider": "stripe",
+    "linked_id": "price_1234567890"
+  }
+}
+
+docs {
+  Create a provider link for a product.
+
+  Each product can have one link per provider (stripe or lemonsqueezy).
+
+  Fields:
+  - provider: "stripe" or "lemonsqueezy" (required)
+  - linked_id: Provider's price/variant ID (required)
+    - For Stripe: Price ID (e.g., "price_1ABC...")
+    - For LemonSqueezy: Variant ID
+}

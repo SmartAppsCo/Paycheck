@@ -213,7 +213,7 @@ Manage products and licenses. Requires org member API key.
 | CRUD | `/orgs/{org}/projects` | Project management |
 | CRUD | `/orgs/{org}/projects/{proj}/members` | Project member management |
 | CRUD | `/orgs/{org}/projects/{proj}/products` | Product management |
-| CRUD | `/orgs/{org}/projects/{proj}/products/{prod}/payment-config` | Payment config per provider |
+| CRUD | `/orgs/{org}/projects/{proj}/products/{prod}/provider-links` | Provider link per provider |
 | GET | `/orgs/{org}/projects/{proj}/licenses` | List licenses (filter by email or order ID) |
 | POST | `/orgs/{org}/projects/{proj}/licenses` | Create license(s) directly |
 | GET | `/orgs/{org}/projects/{proj}/licenses/{id}` | Get license with devices |
@@ -265,15 +265,17 @@ PUT /operators/organizations/{id}
 }
 ```
 
-**Product pricing** (per product, per provider):
+**Product provider links** (per product, per provider):
 ```json
-POST /orgs/{org}/projects/{proj}/products/{prod}/payment-config
+POST /orgs/{org}/projects/{proj}/products/{prod}/provider-links
 {
   "provider": "stripe",
-  "price_cents": 2999,
-  "currency": "usd"
+  "linked_id": "price_1ABC..."
 }
 ```
+
+Note: `linked_id` is the provider's price/variant ID (Stripe Price ID or LemonSqueezy Variant ID).
+Product pricing (`price_cents`, `currency`) is stored on the Product for display purposes.
 
 ## JWT Structure
 

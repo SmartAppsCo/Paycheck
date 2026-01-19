@@ -739,6 +739,8 @@ mod license_tests {
             let input = paycheck::models::CreateProduct {
                 name: "Lifetime".to_string(),
                 tier: "lifetime".to_string(),
+                price_cents: None,
+                currency: None,
                 license_exp_days: None,
                 updates_exp_days: None,
                 activation_limit: 5,
@@ -1686,7 +1688,7 @@ mod project_tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri(format!("/orgs/{}/payment-config", org_id))
+                    .uri(format!("/orgs/{}/payment-provider", org_id))
                     .header("Authorization", format!("Bearer {}", api_key))
                     .body(Body::empty())
                     .unwrap(),
@@ -1758,7 +1760,7 @@ mod project_tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri(format!("/orgs/{}/payment-config", org_id))
+                    .uri(format!("/orgs/{}/payment-provider", org_id))
                     .header("Authorization", format!("Bearer {}", api_key))
                     .body(Body::empty())
                     .unwrap(),
@@ -1809,7 +1811,7 @@ mod project_tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri(format!("/orgs/{}/payment-config", org_id))
+                    .uri(format!("/orgs/{}/payment-provider", org_id))
                     .header("Authorization", format!("Bearer {}", member_api_key))
                     .body(Body::empty())
                     .unwrap(),
@@ -2838,11 +2840,11 @@ mod project_member_tests {
 // PAYMENT CONFIG CRUD TESTS
 // ============================================================================
 
-mod payment_config_tests {
+mod provider_link_tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_create_payment_config_stripe() {
+    async fn test_create_provider_link_stripe() {
         let (app, state) = org_app();
         let master_key = test_master_key();
 
@@ -2867,9 +2869,7 @@ mod payment_config_tests {
 
         let body = json!({
             "provider": "stripe",
-            "stripe_price_id": "price_12345",
-            "price_cents": 9999,
-            "currency": "usd"
+            "linked_id": "price_12345"
         });
 
         let response = app
@@ -2877,7 +2877,7 @@ mod payment_config_tests {
                 Request::builder()
                     .method("POST")
                     .uri(format!(
-                        "/orgs/{}/projects/{}/products/{}/payment-config",
+                        "/orgs/{}/projects/{}/products/{}/provider-links",
                         org_id, project_id, product_id
                     ))
                     .header("Authorization", format!("Bearer {}", api_key))
@@ -2891,7 +2891,7 @@ mod payment_config_tests {
         assert_eq!(
             response.status(),
             200,
-            "create stripe payment config should return 200 OK"
+            "create stripe provider link should return 200 OK"
         );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -2899,18 +2899,16 @@ mod payment_config_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert!(json["id"].is_string(), "response should include config ID");
+        assert!(json["id"].is_string(), "response should include link ID");
         assert_eq!(json["provider"], "stripe", "provider should be stripe");
         assert_eq!(
-            json["stripe_price_id"], "price_12345",
-            "stripe_price_id should match input"
+            json["linked_id"], "price_12345",
+            "linked_id should match input"
         );
-        assert_eq!(json["price_cents"], 9999, "price_cents should match input");
-        assert_eq!(json["currency"], "usd", "currency should match input");
     }
 
     #[tokio::test]
-    async fn test_create_payment_config_lemonsqueezy() {
+    async fn test_create_provider_link_lemonsqueezy() {
         let (app, state) = org_app();
         let master_key = test_master_key();
 
@@ -2935,9 +2933,7 @@ mod payment_config_tests {
 
         let body = json!({
             "provider": "lemonsqueezy",
-            "ls_variant_id": "variant_abc123",
-            "price_cents": 4999,
-            "currency": "usd"
+            "linked_id": "variant_abc123"
         });
 
         let response = app
@@ -2945,7 +2941,7 @@ mod payment_config_tests {
                 Request::builder()
                     .method("POST")
                     .uri(format!(
-                        "/orgs/{}/projects/{}/products/{}/payment-config",
+                        "/orgs/{}/projects/{}/products/{}/provider-links",
                         org_id, project_id, product_id
                     ))
                     .header("Authorization", format!("Bearer {}", api_key))
@@ -2959,7 +2955,7 @@ mod payment_config_tests {
         assert_eq!(
             response.status(),
             200,
-            "create LemonSqueezy payment config should return 200 OK"
+            "create LemonSqueezy provider link should return 200 OK"
         );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -2967,19 +2963,19 @@ mod payment_config_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert!(json["id"].is_string(), "response should include config ID");
+        assert!(json["id"].is_string(), "response should include link ID");
         assert_eq!(
             json["provider"], "lemonsqueezy",
             "provider should be lemonsqueezy"
         );
         assert_eq!(
-            json["ls_variant_id"], "variant_abc123",
-            "ls_variant_id should match input"
+            json["linked_id"], "variant_abc123",
+            "linked_id should match input"
         );
     }
 
     #[tokio::test]
-    async fn test_create_payment_config_duplicate_provider_fails() {
+    async fn test_create_provider_link_duplicate_provider_fails() {
         let (app, state) = org_app();
         let master_key = test_master_key();
 
@@ -2996,21 +2992,8 @@ mod payment_config_tests {
             let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
-            // Create first config
-            use paycheck::db::queries;
-            use paycheck::models::CreatePaymentConfig;
-            queries::create_payment_config(
-                &conn,
-                &product.id,
-                &CreatePaymentConfig {
-                    provider: "stripe".to_string(),
-                    stripe_price_id: Some("price_123".to_string()),
-                    price_cents: None,
-                    currency: None,
-                    ls_variant_id: None,
-                },
-            )
-            .unwrap();
+            // Create first link
+            create_test_provider_link(&mut conn, &product.id, "stripe", "price_123");
 
             org_id = org.id;
             project_id = project.id;
@@ -3018,10 +3001,10 @@ mod payment_config_tests {
             api_key = key;
         }
 
-        // Try to create another stripe config - should fail
+        // Try to create another stripe link - should fail
         let body = json!({
             "provider": "stripe",
-            "stripe_price_id": "price_different"
+            "linked_id": "price_different"
         });
 
         let response = app
@@ -3029,7 +3012,7 @@ mod payment_config_tests {
                 Request::builder()
                     .method("POST")
                     .uri(format!(
-                        "/orgs/{}/projects/{}/products/{}/payment-config",
+                        "/orgs/{}/projects/{}/products/{}/provider-links",
                         org_id, project_id, product_id
                     ))
                     .header("Authorization", format!("Bearer {}", api_key))
@@ -3043,22 +3026,21 @@ mod payment_config_tests {
         assert_eq!(
             response.status(),
             400,
-            "duplicate provider config should return 400"
+            "duplicate provider link should return 400"
         );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
-        // Error details are in "details" field, not "error"
         assert!(
             json["details"].as_str().unwrap().contains("already exists"),
-            "error should mention config already exists"
+            "error should mention link already exists"
         );
     }
 
     #[tokio::test]
-    async fn test_create_payment_config_product_not_found() {
+    async fn test_create_provider_link_product_not_found() {
         let (app, state) = org_app();
         let master_key = test_master_key();
 
@@ -3080,7 +3062,7 @@ mod payment_config_tests {
 
         let body = json!({
             "provider": "stripe",
-            "stripe_price_id": "price_12345"
+            "linked_id": "price_12345"
         });
 
         let response = app
@@ -3088,7 +3070,7 @@ mod payment_config_tests {
                 Request::builder()
                     .method("POST")
                     .uri(format!(
-                        "/orgs/{}/projects/{}/products/nonexistent-product/payment-config",
+                        "/orgs/{}/projects/{}/products/nonexistent-product/provider-links",
                         org_id, project_id
                     ))
                     .header("Authorization", format!("Bearer {}", api_key))
@@ -3102,12 +3084,12 @@ mod payment_config_tests {
         assert_eq!(
             response.status(),
             404,
-            "creating config for nonexistent product should return 404"
+            "creating link for nonexistent product should return 404"
         );
     }
 
     #[tokio::test]
-    async fn test_list_payment_configs() {
+    async fn test_list_provider_links() {
         let (app, state) = org_app();
         let master_key = test_master_key();
 
@@ -3124,33 +3106,9 @@ mod payment_config_tests {
             let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
-            // Create two configs
-            use paycheck::db::queries;
-            use paycheck::models::CreatePaymentConfig;
-            queries::create_payment_config(
-                &conn,
-                &product.id,
-                &CreatePaymentConfig {
-                    provider: "stripe".to_string(),
-                    stripe_price_id: Some("price_123".to_string()),
-                    price_cents: None,
-                    currency: None,
-                    ls_variant_id: None,
-                },
-            )
-            .unwrap();
-            queries::create_payment_config(
-                &conn,
-                &product.id,
-                &CreatePaymentConfig {
-                    provider: "lemonsqueezy".to_string(),
-                    stripe_price_id: None,
-                    price_cents: None,
-                    currency: None,
-                    ls_variant_id: Some("variant_abc".to_string()),
-                },
-            )
-            .unwrap();
+            // Create two links
+            create_test_provider_link(&mut conn, &product.id, "stripe", "price_123");
+            create_test_provider_link(&mut conn, &product.id, "lemonsqueezy", "variant_abc");
 
             org_id = org.id;
             project_id = project.id;
@@ -3163,7 +3121,7 @@ mod payment_config_tests {
                 Request::builder()
                     .method("GET")
                     .uri(format!(
-                        "/orgs/{}/projects/{}/products/{}/payment-config",
+                        "/orgs/{}/projects/{}/products/{}/provider-links",
                         org_id, project_id, product_id
                     ))
                     .header("Authorization", format!("Bearer {}", api_key))
@@ -3176,7 +3134,7 @@ mod payment_config_tests {
         assert_eq!(
             response.status(),
             200,
-            "list payment configs should return 200 OK"
+            "list provider links should return 200 OK"
         );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -3184,19 +3142,19 @@ mod payment_config_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        let configs = json.as_array().unwrap();
-        assert_eq!(configs.len(), 2, "should return both payment configs");
+        let links = json.as_array().unwrap();
+        assert_eq!(links.len(), 2, "should return both provider links");
     }
 
     #[tokio::test]
-    async fn test_get_payment_config() {
+    async fn test_get_provider_link() {
         let (app, state) = org_app();
         let master_key = test_master_key();
 
         let org_id: String;
         let project_id: String;
         let product_id: String;
-        let config_id: String;
+        let link_id: String;
         let api_key: String;
 
         {
@@ -3207,25 +3165,12 @@ mod payment_config_tests {
             let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
-            use paycheck::db::queries;
-            use paycheck::models::CreatePaymentConfig;
-            let config = queries::create_payment_config(
-                &conn,
-                &product.id,
-                &CreatePaymentConfig {
-                    provider: "stripe".to_string(),
-                    stripe_price_id: Some("price_123".to_string()),
-                    price_cents: Some(999),
-                    currency: Some("usd".to_string()),
-                    ls_variant_id: None,
-                },
-            )
-            .unwrap();
+            let link = create_test_provider_link(&mut conn, &product.id, "stripe", "price_123");
 
             org_id = org.id;
             project_id = project.id;
             product_id = product.id;
-            config_id = config.id;
+            link_id = link.id;
             api_key = key;
         }
 
@@ -3234,8 +3179,8 @@ mod payment_config_tests {
                 Request::builder()
                     .method("GET")
                     .uri(format!(
-                        "/orgs/{}/projects/{}/products/{}/payment-config/{}",
-                        org_id, project_id, product_id, config_id
+                        "/orgs/{}/projects/{}/products/{}/provider-links/{}",
+                        org_id, project_id, product_id, link_id
                     ))
                     .header("Authorization", format!("Bearer {}", api_key))
                     .body(Body::empty())
@@ -3247,7 +3192,7 @@ mod payment_config_tests {
         assert_eq!(
             response.status(),
             200,
-            "get payment config should return 200 OK"
+            "get provider link should return 200 OK"
         );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -3255,24 +3200,20 @@ mod payment_config_tests {
             .unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["id"], config_id, "config ID should match requested ID");
+        assert_eq!(json["id"], link_id, "link ID should match requested ID");
         assert_eq!(json["provider"], "stripe", "provider should match");
-        assert_eq!(
-            json["stripe_price_id"], "price_123",
-            "stripe_price_id should match"
-        );
-        assert_eq!(json["price_cents"], 999, "price_cents should match");
+        assert_eq!(json["linked_id"], "price_123", "linked_id should match");
     }
 
     #[tokio::test]
-    async fn test_get_payment_config_wrong_product_returns_404() {
+    async fn test_get_provider_link_wrong_product_returns_404() {
         let (app, state) = org_app();
         let master_key = test_master_key();
 
         let org_id: String;
         let project_id: String;
         let other_product_id: String;
-        let config_id: String;
+        let link_id: String;
         let api_key: String;
 
         {
@@ -3284,36 +3225,23 @@ mod payment_config_tests {
             let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
             let other_product = create_test_product(&mut conn, &project.id, "Other Plan", "enterprise");
 
-            use paycheck::db::queries;
-            use paycheck::models::CreatePaymentConfig;
-            let config = queries::create_payment_config(
-                &conn,
-                &product.id,
-                &CreatePaymentConfig {
-                    provider: "stripe".to_string(),
-                    stripe_price_id: Some("price_123".to_string()),
-                    price_cents: None,
-                    currency: None,
-                    ls_variant_id: None,
-                },
-            )
-            .unwrap();
+            let link = create_test_provider_link(&mut conn, &product.id, "stripe", "price_123");
 
             org_id = org.id;
             project_id = project.id;
             other_product_id = other_product.id;
-            config_id = config.id;
+            link_id = link.id;
             api_key = key;
         }
 
-        // Try to get config under wrong product
+        // Try to get link under wrong product
         let response = app
             .oneshot(
                 Request::builder()
                     .method("GET")
                     .uri(format!(
-                        "/orgs/{}/projects/{}/products/{}/payment-config/{}",
-                        org_id, project_id, other_product_id, config_id
+                        "/orgs/{}/projects/{}/products/{}/provider-links/{}",
+                        org_id, project_id, other_product_id, link_id
                     ))
                     .header("Authorization", format!("Bearer {}", api_key))
                     .body(Body::empty())
@@ -3325,19 +3253,19 @@ mod payment_config_tests {
         assert_eq!(
             response.status(),
             404,
-            "accessing config from wrong product should return 404"
+            "accessing link from wrong product should return 404"
         );
     }
 
     #[tokio::test]
-    async fn test_update_payment_config() {
+    async fn test_update_provider_link() {
         let (app, state) = org_app();
         let master_key = test_master_key();
 
         let org_id: String;
         let project_id: String;
         let product_id: String;
-        let config_id: String;
+        let link_id: String;
         let api_key: String;
 
         {
@@ -3348,31 +3276,17 @@ mod payment_config_tests {
             let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
-            use paycheck::db::queries;
-            use paycheck::models::CreatePaymentConfig;
-            let config = queries::create_payment_config(
-                &conn,
-                &product.id,
-                &CreatePaymentConfig {
-                    provider: "stripe".to_string(),
-                    stripe_price_id: Some("price_old".to_string()),
-                    price_cents: Some(999),
-                    currency: Some("usd".to_string()),
-                    ls_variant_id: None,
-                },
-            )
-            .unwrap();
+            let link = create_test_provider_link(&mut conn, &product.id, "stripe", "price_old");
 
             org_id = org.id;
             project_id = project.id;
             product_id = product.id;
-            config_id = config.id;
+            link_id = link.id;
             api_key = key;
         }
 
         let body = json!({
-            "stripe_price_id": "price_new",
-            "price_cents": 1999
+            "linked_id": "price_new"
         });
 
         let response = app
@@ -3380,8 +3294,8 @@ mod payment_config_tests {
                 Request::builder()
                     .method("PUT")
                     .uri(format!(
-                        "/orgs/{}/projects/{}/products/{}/payment-config/{}",
-                        org_id, project_id, product_id, config_id
+                        "/orgs/{}/projects/{}/products/{}/provider-links/{}",
+                        org_id, project_id, product_id, link_id
                     ))
                     .header("Authorization", format!("Bearer {}", api_key))
                     .header("Content-Type", "application/json")
@@ -3394,7 +3308,7 @@ mod payment_config_tests {
         assert_eq!(
             response.status(),
             200,
-            "update payment config should return 200 OK"
+            "update provider link should return 200 OK"
         );
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -3403,24 +3317,22 @@ mod payment_config_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         assert_eq!(
-            json["stripe_price_id"], "price_new",
-            "stripe_price_id should be updated"
+            json["linked_id"], "price_new",
+            "linked_id should be updated"
         );
-        assert_eq!(json["price_cents"], 1999, "price_cents should be updated");
-        // Currency should remain unchanged
-        assert_eq!(json["currency"], "usd", "currency should remain unchanged");
+        // Provider should remain unchanged
+        assert_eq!(json["provider"], "stripe", "provider should remain unchanged");
     }
 
     #[tokio::test]
-    async fn test_update_payment_config_partial_update_preserves_other_fields() {
-        // Tests that updating one field doesn't affect others
+    async fn test_delete_provider_link() {
         let (app, state) = org_app();
         let master_key = test_master_key();
 
         let org_id: String;
         let project_id: String;
         let product_id: String;
-        let config_id: String;
+        let link_id: String;
         let api_key: String;
 
         {
@@ -3431,114 +3343,12 @@ mod payment_config_tests {
             let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
             let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
 
-            use paycheck::db::queries;
-            use paycheck::models::CreatePaymentConfig;
-            let config = queries::create_payment_config(
-                &conn,
-                &product.id,
-                &CreatePaymentConfig {
-                    provider: "stripe".to_string(),
-                    stripe_price_id: Some("price_123".to_string()),
-                    price_cents: Some(999),
-                    currency: Some("usd".to_string()),
-                    ls_variant_id: None,
-                },
-            )
-            .unwrap();
+            let link = create_test_provider_link(&mut conn, &product.id, "stripe", "price_123");
 
             org_id = org.id;
             project_id = project.id;
             product_id = product.id;
-            config_id = config.id;
-            api_key = key;
-        }
-
-        // Update only stripe_price_id, not touching other fields
-        let body = json!({
-            "stripe_price_id": "price_new"
-        });
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri(format!(
-                        "/orgs/{}/projects/{}/products/{}/payment-config/{}",
-                        org_id, project_id, product_id, config_id
-                    ))
-                    .header("Authorization", format!("Bearer {}", api_key))
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(body.to_string()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            response.status(),
-            200,
-            "partial update should return 200 OK"
-        );
-
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-
-        // Updated field changed
-        assert_eq!(
-            json["stripe_price_id"], "price_new",
-            "updated field should change"
-        );
-        // Other fields unchanged
-        assert_eq!(
-            json["price_cents"], 999,
-            "unspecified price_cents should remain unchanged"
-        );
-        assert_eq!(
-            json["currency"], "usd",
-            "unspecified currency should remain unchanged"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_delete_payment_config() {
-        let (app, state) = org_app();
-        let master_key = test_master_key();
-
-        let org_id: String;
-        let project_id: String;
-        let product_id: String;
-        let config_id: String;
-        let api_key: String;
-
-        {
-            let mut conn = state.db.get().unwrap();
-            let org = create_test_org(&mut conn, "Test Org");
-            let (_, _, key) =
-                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
-            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
-            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
-
-            use paycheck::db::queries;
-            use paycheck::models::CreatePaymentConfig;
-            let config = queries::create_payment_config(
-                &conn,
-                &product.id,
-                &CreatePaymentConfig {
-                    provider: "stripe".to_string(),
-                    stripe_price_id: Some("price_123".to_string()),
-                    price_cents: None,
-                    currency: None,
-                    ls_variant_id: None,
-                },
-            )
-            .unwrap();
-
-            org_id = org.id;
-            project_id = project.id;
-            product_id = product.id;
-            config_id = config.id.clone();
+            link_id = link.id.clone();
             api_key = key;
         }
 
@@ -3547,8 +3357,8 @@ mod payment_config_tests {
                 Request::builder()
                     .method("DELETE")
                     .uri(format!(
-                        "/orgs/{}/projects/{}/products/{}/payment-config/{}",
-                        org_id, project_id, product_id, config_id
+                        "/orgs/{}/projects/{}/products/{}/provider-links/{}",
+                        org_id, project_id, product_id, link_id
                     ))
                     .header("Authorization", format!("Bearer {}", api_key))
                     .body(Body::empty())
@@ -3560,21 +3370,18 @@ mod payment_config_tests {
         assert_eq!(
             response.status(),
             200,
-            "delete payment config should return 200 OK"
+            "delete provider link should return 200 OK"
         );
 
-        // Verify config is deleted
+        // Verify link is deleted
         let mut conn = state.db.get().unwrap();
         use paycheck::db::queries;
-        let config = queries::get_payment_config_by_id(&mut conn, &config_id).unwrap();
-        assert!(
-            config.is_none(),
-            "config should no longer exist in database"
-        );
+        let link = queries::get_provider_link_by_id(&mut conn, &link_id).unwrap();
+        assert!(link.is_none(), "link should no longer exist in database");
     }
 
     #[tokio::test]
-    async fn test_delete_payment_config_not_found() {
+    async fn test_delete_provider_link_not_found() {
         let (app, state) = org_app();
         let master_key = test_master_key();
 
@@ -3602,7 +3409,7 @@ mod payment_config_tests {
                 Request::builder()
                     .method("DELETE")
                     .uri(format!(
-                        "/orgs/{}/projects/{}/products/{}/payment-config/nonexistent-id",
+                        "/orgs/{}/projects/{}/products/{}/provider-links/nonexistent-id",
                         org_id, project_id, product_id
                     ))
                     .header("Authorization", format!("Bearer {}", api_key))
@@ -3615,12 +3422,12 @@ mod payment_config_tests {
         assert_eq!(
             response.status(),
             404,
-            "deleting nonexistent config should return 404"
+            "deleting nonexistent link should return 404"
         );
     }
 
     #[tokio::test]
-    async fn test_payment_config_requires_write_permission() {
+    async fn test_provider_link_requires_write_permission() {
         let (app, state) = org_app();
         let master_key = test_master_key();
 
@@ -3654,10 +3461,10 @@ mod payment_config_tests {
             api_key = key;
         }
 
-        // Try to create payment config - should fail
+        // Try to create provider link - should fail
         let body = json!({
             "provider": "stripe",
-            "stripe_price_id": "price_123"
+            "linked_id": "price_123"
         });
 
         let response = app
@@ -3665,7 +3472,7 @@ mod payment_config_tests {
                 Request::builder()
                     .method("POST")
                     .uri(format!(
-                        "/orgs/{}/projects/{}/products/{}/payment-config",
+                        "/orgs/{}/projects/{}/products/{}/provider-links",
                         org_id, project_id, product_id
                     ))
                     .header("Authorization", format!("Bearer {}", api_key))
@@ -3679,7 +3486,7 @@ mod payment_config_tests {
         assert_eq!(
             response.status(),
             403,
-            "view-only access should not be able to create payment config"
+            "view-only access should not be able to create provider link"
         );
     }
 }

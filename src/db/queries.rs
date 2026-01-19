@@ -8,8 +8,8 @@ use crate::models::*;
 
 use super::from_row::{
     ACTIVATION_CODE_COLS, API_KEY_COLS, API_KEY_SCOPE_COLS, DEVICE_COLS, LICENSE_COLS,
-    ORG_MEMBER_COLS, ORG_MEMBER_WITH_USER_COLS, ORGANIZATION_COLS, PAYMENT_CONFIG_COLS,
-    PAYMENT_SESSION_COLS, PRODUCT_COLS, PROJECT_COLS, PROJECT_MEMBER_COLS, USER_COLS, query_all,
+    ORG_MEMBER_COLS, ORG_MEMBER_WITH_USER_COLS, ORGANIZATION_COLS, PAYMENT_SESSION_COLS,
+    PRODUCT_COLS, PROJECT_COLS, PROJECT_MEMBER_COLS, PROVIDER_LINK_COLS, USER_COLS, query_all,
     query_one,
 };
 
@@ -2168,8 +2168,8 @@ pub fn create_product(
     let features_json = serde_json::to_string(&input.features)?;
 
     conn.execute(
-        "INSERT INTO products (id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, features, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO products (id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, features, price_cents, currency, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             &id,
             project_id,
@@ -2180,6 +2180,8 @@ pub fn create_product(
             input.activation_limit,
             input.device_limit,
             &features_json,
+            input.price_cents,
+            &input.currency,
             now
         ],
     )?;
@@ -2194,6 +2196,8 @@ pub fn create_product(
         activation_limit: input.activation_limit,
         device_limit: input.device_limit,
         features: input.features.clone(),
+        price_cents: input.price_cents,
+        currency: input.currency.clone(),
         created_at: now,
         deleted_at: None,
         deleted_cascade_depth: None,
@@ -2277,6 +2281,8 @@ pub fn update_product(conn: &Connection, id: &str, input: &UpdateProduct) -> Res
         .set_opt("activation_limit", input.activation_limit)
         .set_opt("device_limit", input.device_limit)
         .set_opt("features", features_json)
+        .set_opt("price_cents", input.price_cents)
+        .set_opt("currency", input.currency.clone())
         .execute_returning(conn, PRODUCT_COLS)
 }
 
@@ -2334,140 +2340,124 @@ pub fn restore_product(conn: &Connection, id: &str, force: bool) -> Result<bool>
     Ok(true)
 }
 
-// ============ Product Payment Config ============
+// ============ Product Provider Links ============
 
-pub fn create_payment_config(
+pub fn create_provider_link(
     conn: &Connection,
     product_id: &str,
-    input: &CreatePaymentConfig,
-) -> Result<ProductPaymentConfig> {
+    input: &CreateProviderLink,
+) -> Result<ProductProviderLink> {
     let id = gen_id();
     let now = now();
 
     conn.execute(
-        "INSERT INTO product_payment_config (id, product_id, provider, stripe_price_id, price_cents, currency, ls_variant_id, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![
-            &id,
-            product_id,
-            &input.provider,
-            &input.stripe_price_id,
-            input.price_cents,
-            &input.currency,
-            &input.ls_variant_id,
-            now,
-            now
-        ],
+        "INSERT INTO product_provider_links (id, product_id, provider, linked_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![&id, product_id, &input.provider, &input.linked_id, now, now],
     )?;
 
-    Ok(ProductPaymentConfig {
+    Ok(ProductProviderLink {
         id,
         product_id: product_id.to_string(),
         provider: input.provider.clone(),
-        stripe_price_id: input.stripe_price_id.clone(),
-        price_cents: input.price_cents,
-        currency: input.currency.clone(),
-        ls_variant_id: input.ls_variant_id.clone(),
+        linked_id: input.linked_id.clone(),
         created_at: now,
         updated_at: now,
     })
 }
 
-pub fn get_payment_config(
+pub fn get_provider_link(
     conn: &Connection,
     product_id: &str,
     provider: &str,
-) -> Result<Option<ProductPaymentConfig>> {
+) -> Result<Option<ProductProviderLink>> {
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM product_payment_config WHERE product_id = ?1 AND provider = ?2",
-            PAYMENT_CONFIG_COLS
+            "SELECT {} FROM product_provider_links WHERE product_id = ?1 AND provider = ?2",
+            PROVIDER_LINK_COLS
         ),
         &[&product_id, &provider],
     )
 }
 
-pub fn get_payment_config_by_id(
+pub fn get_provider_link_by_id(
     conn: &Connection,
     id: &str,
-) -> Result<Option<ProductPaymentConfig>> {
+) -> Result<Option<ProductProviderLink>> {
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM product_payment_config WHERE id = ?1",
-            PAYMENT_CONFIG_COLS
+            "SELECT {} FROM product_provider_links WHERE id = ?1",
+            PROVIDER_LINK_COLS
         ),
         &[&id],
     )
 }
 
-pub fn get_payment_configs_for_product(
+pub fn get_provider_links_for_product(
     conn: &Connection,
     product_id: &str,
-) -> Result<Vec<ProductPaymentConfig>> {
+) -> Result<Vec<ProductProviderLink>> {
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM product_payment_config WHERE product_id = ?1 ORDER BY created_at",
-            PAYMENT_CONFIG_COLS
+            "SELECT {} FROM product_provider_links WHERE product_id = ?1 ORDER BY created_at",
+            PROVIDER_LINK_COLS
         ),
         &[&product_id],
     )
 }
 
-pub fn update_payment_config(
+pub fn update_provider_link(
     conn: &Connection,
     id: &str,
-    input: &UpdatePaymentConfig,
+    input: &UpdateProviderLink,
 ) -> Result<bool> {
-    UpdateBuilder::new("product_payment_config", id)
+    UpdateBuilder::new("product_provider_links", id)
         .with_updated_at()
-        .set_opt("stripe_price_id", input.stripe_price_id.clone())
-        .set_opt("price_cents", input.price_cents)
-        .set_opt("currency", input.currency.clone())
-        .set_opt("ls_variant_id", input.ls_variant_id.clone())
+        .set_opt("linked_id", input.linked_id.clone())
         .execute(conn)
 }
 
-pub fn delete_payment_config(conn: &Connection, id: &str) -> Result<bool> {
+pub fn delete_provider_link(conn: &Connection, id: &str) -> Result<bool> {
     let deleted = conn.execute(
-        "DELETE FROM product_payment_config WHERE id = ?1",
+        "DELETE FROM product_provider_links WHERE id = ?1",
         params![id],
     )?;
     Ok(deleted > 0)
 }
 
-/// Product with its payment configurations included inline.
+/// Product with its provider links included inline.
 /// Used for API responses to avoid N+1 queries.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct ProductWithPaymentConfig {
+pub struct ProductWithProviderLinks {
     #[serde(flatten)]
     pub product: Product,
-    pub payment_config: Vec<ProductPaymentConfig>,
+    pub provider_links: Vec<ProductProviderLink>,
 }
 
-pub fn get_product_with_config(
+pub fn get_product_with_links(
     conn: &Connection,
     id: &str,
-) -> Result<Option<ProductWithPaymentConfig>> {
+) -> Result<Option<ProductWithProviderLinks>> {
     let product = get_product_by_id(conn, id)?;
     match product {
         Some(product) => {
-            let payment_config = get_payment_configs_for_product(conn, &product.id)?;
-            Ok(Some(ProductWithPaymentConfig {
+            let provider_links = get_provider_links_for_product(conn, &product.id)?;
+            Ok(Some(ProductWithProviderLinks {
                 product,
-                payment_config,
+                provider_links,
             }))
         }
         None => Ok(None),
     }
 }
 
-pub fn list_products_with_config(
+pub fn list_products_with_links(
     conn: &Connection,
     project_id: &str,
-) -> Result<Vec<ProductWithPaymentConfig>> {
+) -> Result<Vec<ProductWithProviderLinks>> {
     // Get all products for the project
     let products = list_products_for_project(conn, project_id)?;
 
@@ -2475,12 +2465,12 @@ pub fn list_products_with_config(
         return Ok(vec![]);
     }
 
-    // Get all payment configs for these products in one query
+    // Get all provider links for these products in one query
     let product_ids: Vec<&str> = products.iter().map(|p| p.id.as_str()).collect();
     let placeholders: Vec<String> = (1..=product_ids.len()).map(|i| format!("?{}", i)).collect();
     let sql = format!(
-        "SELECT {} FROM product_payment_config WHERE product_id IN ({}) ORDER BY product_id, created_at",
-        PAYMENT_CONFIG_COLS,
+        "SELECT {} FROM product_provider_links WHERE product_id IN ({}) ORDER BY product_id, created_at",
+        PROVIDER_LINK_COLS,
         placeholders.join(", ")
     );
 
@@ -2489,26 +2479,26 @@ pub fn list_products_with_config(
         .map(|id| id as &dyn rusqlite::ToSql)
         .collect();
 
-    let configs: Vec<ProductPaymentConfig> = query_all(conn, &sql, &params)?;
+    let links: Vec<ProductProviderLink> = query_all(conn, &sql, &params)?;
 
-    // Group configs by product_id
-    let mut config_map: std::collections::HashMap<String, Vec<ProductPaymentConfig>> =
+    // Group links by product_id
+    let mut link_map: std::collections::HashMap<String, Vec<ProductProviderLink>> =
         std::collections::HashMap::new();
-    for config in configs {
-        config_map
-            .entry(config.product_id.clone())
+    for link in links {
+        link_map
+            .entry(link.product_id.clone())
             .or_default()
-            .push(config);
+            .push(link);
     }
 
     // Build result
     let result = products
         .into_iter()
         .map(|product| {
-            let payment_config = config_map.remove(&product.id).unwrap_or_default();
-            ProductWithPaymentConfig {
+            let provider_links = link_map.remove(&product.id).unwrap_or_default();
+            ProductWithProviderLinks {
                 product,
-                payment_config,
+                provider_links,
             }
         })
         .collect();
@@ -2516,12 +2506,12 @@ pub fn list_products_with_config(
     Ok(result)
 }
 
-pub fn list_products_with_config_paginated(
+pub fn list_products_with_links_paginated(
     conn: &Connection,
     project_id: &str,
     limit: i64,
     offset: i64,
-) -> Result<(Vec<ProductWithPaymentConfig>, i64)> {
+) -> Result<(Vec<ProductWithProviderLinks>, i64)> {
     // Get paginated products for the project
     let (products, total) = list_products_for_project_paginated(conn, project_id, limit, offset)?;
 
@@ -2529,12 +2519,12 @@ pub fn list_products_with_config_paginated(
         return Ok((vec![], total));
     }
 
-    // Get all payment configs for these products in one query
+    // Get all provider links for these products in one query
     let product_ids: Vec<&str> = products.iter().map(|p| p.id.as_str()).collect();
     let placeholders: Vec<String> = (1..=product_ids.len()).map(|i| format!("?{}", i)).collect();
     let sql = format!(
-        "SELECT {} FROM product_payment_config WHERE product_id IN ({}) ORDER BY product_id, created_at",
-        PAYMENT_CONFIG_COLS,
+        "SELECT {} FROM product_provider_links WHERE product_id IN ({}) ORDER BY product_id, created_at",
+        PROVIDER_LINK_COLS,
         placeholders.join(", ")
     );
 
@@ -2543,26 +2533,26 @@ pub fn list_products_with_config_paginated(
         .map(|id| id as &dyn rusqlite::ToSql)
         .collect();
 
-    let configs: Vec<ProductPaymentConfig> = query_all(conn, &sql, &params)?;
+    let links: Vec<ProductProviderLink> = query_all(conn, &sql, &params)?;
 
-    // Group configs by product_id
-    let mut config_map: std::collections::HashMap<String, Vec<ProductPaymentConfig>> =
+    // Group links by product_id
+    let mut link_map: std::collections::HashMap<String, Vec<ProductProviderLink>> =
         std::collections::HashMap::new();
-    for config in configs {
-        config_map
-            .entry(config.product_id.clone())
+    for link in links {
+        link_map
+            .entry(link.product_id.clone())
             .or_default()
-            .push(config);
+            .push(link);
     }
 
     // Build result
     let result = products
         .into_iter()
         .map(|product| {
-            let payment_config = config_map.remove(&product.id).unwrap_or_default();
-            ProductWithPaymentConfig {
+            let provider_links = link_map.remove(&product.id).unwrap_or_default();
+            ProductWithProviderLinks {
                 product,
-                payment_config,
+                provider_links,
             }
         })
         .collect();

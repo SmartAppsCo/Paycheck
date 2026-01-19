@@ -997,7 +997,7 @@ mod payment_config_tests {
                 Request::builder()
                     .method("GET")
                     .uri(format!(
-                        "/operators/organizations/{}/payment-config",
+                        "/operators/organizations/{}/payment-provider",
                         org_id
                     ))
                     .header("Authorization", format!("Bearer {}", api_key))
@@ -1063,7 +1063,7 @@ mod payment_config_tests {
                 Request::builder()
                     .method("GET")
                     .uri(format!(
-                        "/operators/organizations/{}/payment-config",
+                        "/operators/organizations/{}/payment-provider",
                         org_id
                     ))
                     .header("Authorization", format!("Bearer {}", api_key))
@@ -1124,7 +1124,7 @@ mod payment_config_tests {
                 Request::builder()
                     .method("GET")
                     .uri(format!(
-                        "/operators/organizations/{}/payment-config",
+                        "/operators/organizations/{}/payment-provider",
                         org_id
                     ))
                     .header("Authorization", format!("Bearer {}", api_key))
@@ -1171,7 +1171,7 @@ mod payment_config_tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri("/operators/organizations/nonexistent-id/payment-config")
+                    .uri("/operators/organizations/nonexistent-id/payment-provider")
                     .header("Authorization", format!("Bearer {}", api_key))
                     .body(Body::empty())
                     .unwrap(),

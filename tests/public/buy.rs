@@ -238,8 +238,8 @@ async fn test_buy_accepts_optional_fields() {
         let org = create_test_org(&mut conn, "Test Org");
         let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
         let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
-        // Create payment config so we get past payment config check and fail on Stripe config
-        create_test_payment_config(&mut conn, &product.id, "stripe", Some(1999));
+        // Create provider link so we get past provider link check and fail on Stripe config
+        create_test_provider_link(&mut conn, &product.id, "stripe", "price_test_123");
 
         product_id = product.id.clone();
     }

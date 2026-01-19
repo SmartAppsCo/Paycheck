@@ -13,8 +13,8 @@ use paycheck::email::EmailService;
 use paycheck::handlers;
 use paycheck::jwt::{self, JwksCache};
 use paycheck::models::{
-    self, ActorType, AuditAction, AuditLogNames, CreateOrgMember, CreatePaymentConfig,
-    CreateProduct, CreateProject, CreateUser, OperatorRole, OrgMemberRole,
+    self, ActorType, AuditAction, AuditLogNames, CreateOrgMember, CreateProduct, CreateProject,
+    CreateProviderLink, CreateUser, OperatorRole, OrgMemberRole,
 };
 use paycheck::rate_limit::ActivationRateLimiter;
 
@@ -296,6 +296,8 @@ fn seed_dev_data(state: &AppState) {
             "cloud-sync".to_string(),
             "priority-support".to_string(),
         ],
+        price_cents: Some(4999),
+        currency: Some("usd".to_string()),
     };
     let product = queries::create_product(&conn, &project.id, &product_input)
         .expect("Failed to create dev product");
@@ -322,16 +324,13 @@ fn seed_dev_data(state: &AppState) {
     )
     .expect("Failed to create audit log");
 
-    // 6. Create payment config for product
-    let payment_config_input = CreatePaymentConfig {
+    // 6. Create provider link for product (use your real Stripe price ID in test mode)
+    let provider_link_input = CreateProviderLink {
         provider: "stripe".to_string(),
-        stripe_price_id: None,
-        price_cents: Some(4999), // $49.99
-        currency: Some("usd".to_string()),
-        ls_variant_id: None,
+        linked_id: "price_REPLACE_WITH_YOUR_STRIPE_PRICE_ID".to_string(),
     };
-    let _payment_config = queries::create_payment_config(&conn, &product.id, &payment_config_input)
-        .expect("Failed to create dev payment config");
+    let _provider_link = queries::create_provider_link(&conn, &product.id, &provider_link_input)
+        .expect("Failed to create dev provider link");
 
     // Print copy-paste friendly output
     println!();

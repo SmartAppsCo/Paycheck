@@ -2,7 +2,7 @@ mod api_keys;
 mod audit_logs;
 mod licenses;
 mod members;
-mod product_payment_config;
+mod product_provider_link;
 mod products;
 mod project_members;
 mod projects;
@@ -11,7 +11,7 @@ pub use api_keys::*;
 pub use audit_logs::*;
 pub use licenses::*;
 pub use members::*;
-pub use product_payment_config::*;
+pub use product_provider_link::*;
 pub use products::*;
 pub use project_members::*;
 pub use projects::*;
@@ -56,8 +56,8 @@ pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<App
         )
         .route("/orgs/{org_id}/projects", post(create_project))
         .route("/orgs/{org_id}/projects", get(list_projects))
-        // Payment config (at org level, masked for customers to verify their settings)
-        .route("/orgs/{org_id}/payment-config", get(get_payment_config))
+        // Payment provider config (at org level, masked for customers to verify their settings)
+        .route("/orgs/{org_id}/payment-provider", get(get_payment_config))
         // Audit logs (org-scoped, any org member can view their org's logs)
         .route("/orgs/{org_id}/audit-logs", get(query_org_audit_logs))
         .layer(middleware::from_fn_with_state(
@@ -123,26 +123,26 @@ pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<App
             "/orgs/{org_id}/projects/{project_id}/products/{product_id}/restore",
             post(restore_product),
         )
-        // Product payment config
+        // Product provider links
         .route(
-            "/orgs/{org_id}/projects/{project_id}/products/{product_id}/payment-config",
-            post(create_payment_config),
+            "/orgs/{org_id}/projects/{project_id}/products/{product_id}/provider-links",
+            post(create_provider_link),
         )
         .route(
-            "/orgs/{org_id}/projects/{project_id}/products/{product_id}/payment-config",
-            get(list_payment_configs),
+            "/orgs/{org_id}/projects/{project_id}/products/{product_id}/provider-links",
+            get(list_provider_links),
         )
         .route(
-            "/orgs/{org_id}/projects/{project_id}/products/{product_id}/payment-config/{config_id}",
-            get(get_payment_config_handler),
+            "/orgs/{org_id}/projects/{project_id}/products/{product_id}/provider-links/{link_id}",
+            get(get_provider_link_handler),
         )
         .route(
-            "/orgs/{org_id}/projects/{project_id}/products/{product_id}/payment-config/{config_id}",
-            put(update_payment_config_handler),
+            "/orgs/{org_id}/projects/{project_id}/products/{product_id}/provider-links/{link_id}",
+            put(update_provider_link_handler),
         )
         .route(
-            "/orgs/{org_id}/projects/{project_id}/products/{product_id}/payment-config/{config_id}",
-            delete(delete_payment_config_handler),
+            "/orgs/{org_id}/projects/{project_id}/products/{product_id}/provider-links/{link_id}",
+            delete(delete_provider_link_handler),
         )
         // Licenses
         .route(

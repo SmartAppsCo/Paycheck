@@ -1,11 +1,11 @@
 meta {
-  name: Delete Payment Config
+  name: Delete Provider Link
   type: http
   seq: 5
 }
 
 delete {
-  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/products/{{product_id}}/payment-config/{{payment_config_id}}
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/products/{{product_id}}/provider-links/{{link_id}}
   body: none
   auth: bearer
 }
@@ -15,6 +15,6 @@ auth:bearer {
 }
 
 docs {
-  Delete a payment configuration.
+  Delete a provider link.
   Removes the payment provider integration for this product.
 }

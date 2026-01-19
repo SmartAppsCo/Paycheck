@@ -17,6 +17,7 @@ auth:bearer {
 body:json {
   {
     "name": "Pro License (Updated)",
+    "price_cents": 3999,
     "device_limit": 10,
     "features": ["advanced-export", "cloud-sync", "priority-support", "beta-access"]
   }
@@ -25,4 +26,15 @@ body:json {
 docs {
   Update a product. All fields are optional.
   Changes don't affect already-issued licenses.
+
+  Fields:
+  - name: Display name
+  - tier: Tier identifier
+  - price_cents: Price in cents (for display/reference)
+  - currency: Currency code (e.g., "usd")
+  - license_exp_days: When license expires (null = never)
+  - updates_exp_days: When update access ends (null = never)
+  - activation_limit: Max activations (0 = unlimited)
+  - device_limit: Max concurrent devices (0 = unlimited)
+  - features: Array of feature flags
 }

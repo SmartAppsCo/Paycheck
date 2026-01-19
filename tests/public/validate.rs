@@ -520,6 +520,8 @@ async fn test_validate_perpetual_license_returns_valid() {
         let input = CreateProduct {
             name: "Perpetual Plan".to_string(),
             tier: "perpetual".to_string(),
+            price_cents: None,
+            currency: None,
             license_exp_days: None, // No expiration
             updates_exp_days: None,
             activation_limit: 5,

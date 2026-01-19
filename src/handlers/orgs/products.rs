@@ -3,7 +3,7 @@ use axum::{
     http::HeaderMap,
 };
 
-use crate::db::queries::ProductWithPaymentConfig;
+use crate::db::queries::ProductWithProviderLinks;
 use crate::db::{AppState, queries};
 use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path, RestoreRequest};
@@ -25,7 +25,7 @@ pub async fn create_product(
     Path(path): Path<crate::middleware::OrgProjectPath>,
     headers: HeaderMap,
     Json(input): Json<CreateProduct>,
-) -> Result<Json<ProductWithPaymentConfig>> {
+) -> Result<Json<ProductWithProviderLinks>> {
     if !ctx.can_write_project() {
         return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
@@ -47,9 +47,9 @@ pub async fn create_product(
         .save()?;
 
     // Return with empty payment config (none configured yet)
-    Ok(Json(ProductWithPaymentConfig {
+    Ok(Json(ProductWithProviderLinks {
         product,
-        payment_config: vec![],
+        provider_links: vec![],
     }))
 }
 
@@ -57,21 +57,21 @@ pub async fn list_products(
     State(state): State<AppState>,
     Path(path): Path<crate::middleware::OrgProjectPath>,
     Query(pagination): Query<PaginationQuery>,
-) -> Result<Json<Paginated<ProductWithPaymentConfig>>> {
+) -> Result<Json<Paginated<ProductWithProviderLinks>>> {
     let conn = state.db.get()?;
     let limit = pagination.limit();
     let offset = pagination.offset();
     let (products, total) =
-        queries::list_products_with_config_paginated(&conn, &path.project_id, limit, offset)?;
+        queries::list_products_with_links_paginated(&conn, &path.project_id, limit, offset)?;
     Ok(Json(Paginated::new(products, total, limit, offset)))
 }
 
 pub async fn get_product(
     State(state): State<AppState>,
     Path(path): Path<ProductPath>,
-) -> Result<Json<ProductWithPaymentConfig>> {
+) -> Result<Json<ProductWithProviderLinks>> {
     let conn = state.db.get()?;
-    let product = queries::get_product_with_config(&conn, &path.product_id)?
+    let product = queries::get_product_with_links(&conn, &path.product_id)?
         .or_not_found(msg::PRODUCT_NOT_FOUND)?;
 
     if product.product.project_id != path.project_id {
@@ -87,7 +87,7 @@ pub async fn update_product(
     Path(path): Path<ProductPath>,
     headers: HeaderMap,
     Json(input): Json<UpdateProduct>,
-) -> Result<Json<ProductWithPaymentConfig>> {
+) -> Result<Json<ProductWithProviderLinks>> {
     if !ctx.can_write_project() {
         return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
@@ -117,7 +117,7 @@ pub async fn update_product(
         .auth_method(&ctx.auth_method)
         .save()?;
 
-    let product = queries::get_product_with_config(&conn, &path.product_id)?
+    let product = queries::get_product_with_links(&conn, &path.product_id)?
         .or_not_found(msg::PRODUCT_NOT_FOUND)?;
 
     Ok(Json(product))
@@ -166,7 +166,7 @@ pub async fn restore_product(
     Path(path): Path<ProductPath>,
     headers: HeaderMap,
     Json(input): Json<RestoreRequest>,
-) -> Result<Json<ProductWithPaymentConfig>> {
+) -> Result<Json<ProductWithProviderLinks>> {
     if !ctx.can_write_project() {
         return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
@@ -183,7 +183,7 @@ pub async fn restore_product(
 
     queries::restore_product(&conn, &path.product_id, input.force)?;
 
-    let product = queries::get_product_with_config(&conn, &path.product_id)?
+    let product = queries::get_product_with_links(&conn, &path.product_id)?
         .ok_or_else(|| AppError::Internal(msg::PRODUCT_NOT_FOUND_AFTER_RESTORE.into()))?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)

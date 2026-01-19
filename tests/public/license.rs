@@ -508,6 +508,8 @@ async fn test_license_shows_correct_limits() {
         let input = CreateProduct {
             name: "Limited Plan".to_string(),
             tier: "limited".to_string(),
+            price_cents: None,
+            currency: None,
             license_exp_days: Some(ONE_YEAR as i32),
             updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
             activation_limit: 10,

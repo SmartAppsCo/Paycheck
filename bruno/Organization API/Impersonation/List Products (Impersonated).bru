@@ -1,0 +1,27 @@
+meta {
+  name: List Products (Impersonated)
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/products
+  body: none
+  auth: bearer
+}
+
+headers {
+  X-On-Behalf-Of: {{user_id}}
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+docs {
+  List products for a project using operator impersonation.
+
+  Requirements:
+  - Operator must have admin or owner role
+  - X-On-Behalf-Of must be a user_id of a member with access to this project
+}

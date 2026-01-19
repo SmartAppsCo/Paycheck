@@ -641,6 +641,8 @@ fn test_update_product() {
     let update = UpdateProduct {
         name: Some("Premium".to_string()),
         tier: Some("premium".to_string()),
+        price_cents: None,
+        currency: None,
         license_exp_days: Some(Some(2 * ONE_YEAR as i32)),
         updates_exp_days: None,
         activation_limit: Some(10),

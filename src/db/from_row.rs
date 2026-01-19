@@ -71,9 +71,9 @@ pub const PROJECT_COLS: &str = "id, org_id, name, license_key_prefix, private_ke
 
 pub const PROJECT_MEMBER_COLS: &str = "id, org_member_id, project_id, role, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
-pub const PRODUCT_COLS: &str = "id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, features, created_at, deleted_at, deleted_cascade_depth";
+pub const PRODUCT_COLS: &str = "id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, features, price_cents, currency, created_at, deleted_at, deleted_cascade_depth";
 
-pub const PAYMENT_CONFIG_COLS: &str = "id, product_id, provider, stripe_price_id, price_cents, currency, ls_variant_id, created_at, updated_at";
+pub const PROVIDER_LINK_COLS: &str = "id, product_id, provider, linked_id, created_at, updated_at";
 
 /// Columns for licenses table (no encryption - email_hash instead of key)
 pub const LICENSE_COLS: &str = "id, email_hash, project_id, product_id, customer_id, activation_count, revoked, created_at, expires_at, updates_expires_at, payment_provider, payment_provider_customer_id, payment_provider_subscription_id, payment_provider_order_id, deleted_at, deleted_cascade_depth";
@@ -255,25 +255,24 @@ impl FromRow for Product {
             activation_limit: row.get(6)?,
             device_limit: row.get(7)?,
             features: serde_json::from_str(&features_str).unwrap_or_default(),
-            created_at: row.get(9)?,
-            deleted_at: row.get(10)?,
-            deleted_cascade_depth: row.get(11)?,
+            price_cents: row.get(9)?,
+            currency: row.get(10)?,
+            created_at: row.get(11)?,
+            deleted_at: row.get(12)?,
+            deleted_cascade_depth: row.get(13)?,
         })
     }
 }
 
-impl FromRow for ProductPaymentConfig {
+impl FromRow for ProductProviderLink {
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        Ok(ProductPaymentConfig {
+        Ok(ProductProviderLink {
             id: row.get(0)?,
             product_id: row.get(1)?,
             provider: row.get(2)?,
-            stripe_price_id: row.get(3)?,
-            price_cents: row.get(4)?,
-            currency: row.get(5)?,
-            ls_variant_id: row.get(6)?,
-            created_at: row.get(7)?,
-            updated_at: row.get(8)?,
+            linked_id: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
         })
     }
 }
