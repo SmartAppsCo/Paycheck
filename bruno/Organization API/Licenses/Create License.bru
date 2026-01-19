@@ -30,6 +30,7 @@ docs {
   - product_id: Product to create licenses for
 
   Optional fields:
+  - email: Email address for license recovery
   - customer_id: Developer-managed customer identifier to link to your system
   - license_exp_days: Override license expiration (days from now, null for perpetual)
   - updates_exp_days: Override updates expiration (days from now)
@@ -37,5 +38,14 @@ docs {
 
   If expiration fields are not specified, uses product defaults.
 
-  Returns: { "licenses": [{ "id", "key", "expires_at", "updates_expires_at" }] }
+  Returns: { "items": [{ full license details + activation_code, activation_code_expires_at }] }
+
+  Each item includes:
+  - id, email_hash, project_id, product_id, customer_id
+  - activation_count, revoked, created_at
+  - expires_at, updates_expires_at
+  - payment_provider fields (null for direct-created licenses)
+  - product_name
+  - activation_code (30 min TTL)
+  - activation_code_expires_at
 }

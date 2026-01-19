@@ -25,6 +25,7 @@ internal/
 # Claude Code
 .claude/
 .mcp.json
+CLAUDE.local.md
 
 # Shell config (sandbox artifacts)
 .bash_profile

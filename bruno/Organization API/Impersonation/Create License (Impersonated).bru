@@ -44,18 +44,27 @@ docs {
   - updates_exp_days: (optional) Override updates expiration (days from now)
   - count: (optional) Number of licenses to create (1-100, default: 1)
 
-  Returns (when count=1):
+  Returns:
   {
-    "licenses": [{
+    "items": [{
       "id": "lic_xxx",
-      "activation_code": "PREFIX-XXXX-XXXX",
-      "activation_code_expires_at": 1735693200,
+      "email_hash": "abc123...",
+      "project_id": "proj_xxx",
+      "product_id": "prod_xxx",
+      "customer_id": "your-customer-123",
+      "activation_count": 0,
+      "revoked": false,
+      "created_at": 1704067200,
       "expires_at": 1767229200,
-      "updates_expires_at": 1767229200
+      "updates_expires_at": 1767229200,
+      "product_name": "Pro Plan",
+      "activation_code": "PREFIX-XXXX-XXXX",
+      "activation_code_expires_at": 1735693200
     }]
   }
 
   The activation_code:
+  - Always included for all licenses (single and bulk)
   - Expires in 30 minutes
   - Can be redeemed via POST /redeem with code, device_id, device_type in JSON body
   - Format: PREFIX-XXXX-XXXX (prefix from project's license_key_prefix)

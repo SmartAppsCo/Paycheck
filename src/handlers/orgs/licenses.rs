@@ -138,19 +138,16 @@ fn default_count() -> i32 {
 
 #[derive(Debug, Serialize)]
 pub struct CreateLicenseResponse {
-    pub items: Vec<CreatedLicense>,
+    pub items: Vec<CreatedLicenseWithDetails>,
 }
 
 #[derive(Debug, Serialize)]
-pub struct CreatedLicense {
-    pub id: String,
-    /// Activation code for immediate use (only included when count=1)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub activation_code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub activation_code_expires_at: Option<i64>,
-    pub expires_at: Option<i64>,
-    pub updates_expires_at: Option<i64>,
+pub struct CreatedLicenseWithDetails {
+    #[serde(flatten)]
+    pub license: LicenseWithProduct,
+    /// Activation code for immediate use (30 min TTL)
+    pub activation_code: String,
+    pub activation_code_expires_at: i64,
 }
 
 /// POST /orgs/{org_id}/projects/{project_id}/licenses
@@ -235,28 +232,24 @@ pub async fn create_license(
             },
         )?;
 
-        // Generate activation code for single license creation (useful for immediate distribution)
-        let (activation_code, activation_code_expires_at) = if body.count == 1 {
-            let code =
-                queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)?;
-            (Some(code.code), Some(code.expires_at))
-        } else {
-            (None, None)
-        };
+        // Generate activation code for immediate use
+        let code =
+            queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)?;
 
-        created_licenses.push(CreatedLicense {
-            id: license.id.clone(),
-            activation_code,
-            activation_code_expires_at,
-            expires_at: exps.license_exp,
-            updates_expires_at: exps.updates_exp,
+        created_licenses.push(CreatedLicenseWithDetails {
+            license: LicenseWithProduct {
+                license,
+                product_name: product.name.clone(),
+            },
+            activation_code: code.code,
+            activation_code_expires_at: code.expires_at,
         });
 
         // Audit log for each license
         AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
             .actor(ActorType::User, Some(&ctx.member.user_id))
             .action(AuditAction::CreateLicense)
-            .resource("license", &license.id)
+            .resource("license", &created_licenses.last().unwrap().license.license.id)
             .details(&serde_json::json!({ "product_id": body.product_id, "expires_at": exps.license_exp, "has_email": email_hash.is_some() }))
             .org(&path.org_id)
             .project(&path.project_id)
