@@ -2004,8 +2004,9 @@ pub fn get_project_by_public_key(conn: &Connection, public_key: &str) -> Result<
 
 pub fn create_project_member(
     conn: &Connection,
+    org_member_id: &str,
     project_id: &str,
-    input: &CreateProjectMember,
+    role: ProjectMemberRole,
 ) -> Result<ProjectMember> {
     let id = gen_id();
     let now = now();
@@ -2013,21 +2014,14 @@ pub fn create_project_member(
     conn.execute(
         "INSERT INTO project_members (id, org_member_id, project_id, role, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![
-            &id,
-            &input.org_member_id,
-            project_id,
-            input.role.as_ref(),
-            now,
-            now
-        ],
+        params![&id, org_member_id, project_id, role.as_ref(), now, now],
     )?;
 
     Ok(ProjectMember {
         id,
-        org_member_id: input.org_member_id.clone(),
+        org_member_id: org_member_id.to_string(),
         project_id: project_id.to_string(),
-        role: input.role,
+        role,
         created_at: now,
         updated_at: now,
         deleted_at: None,

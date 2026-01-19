@@ -16,16 +16,19 @@ auth:bearer {
 
 body:json {
   {
-    "org_member_id": "member-id-here",
-    "role": "member"
+    "user_id": "{{user_id}}",
+    "role": "admin"
   }
 }
 
 docs {
   Add an org member to a project with a specific role.
 
+  Request body:
+  - user_id: The user_id of an existing org member
+  - role: Project role (admin or view)
+
   Roles:
-  - owner: Full project access
-  - admin: Can manage products/licenses
-  - member: Limited access
+  - admin: Can manage products, licenses, devices
+  - view: Read-only access to project data
 }

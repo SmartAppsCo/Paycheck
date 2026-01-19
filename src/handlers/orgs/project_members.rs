@@ -34,30 +34,26 @@ pub async fn create_project_member(
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
-    // Verify the org member exists and belongs to the same org (with user details for audit)
-    let target_member = queries::get_org_member_with_user_by_id(&conn, &input.org_member_id)?
-        .or_not_found(msg::ORG_MEMBER_NOT_FOUND)?;
-
-    if target_member.org_id != path.org_id {
-        return Err(AppError::BadRequest(
-            "Member does not belong to this organization".into(),
-        ));
-    }
+    // Look up the org member by user_id and org_id
+    let target_member =
+        queries::get_org_member_with_user_by_user_and_org(&conn, &input.user_id, &path.org_id)?
+            .or_not_found(msg::ORG_MEMBER_NOT_FOUND)?;
 
     // Check if already a project member
-    if queries::get_project_member(&conn, &input.org_member_id, &path.project_id)?.is_some() {
+    if queries::get_project_member(&conn, &target_member.id, &path.project_id)?.is_some() {
         return Err(AppError::Conflict(
             "Member is already added to this project".into(),
         ));
     }
 
-    let project_member = queries::create_project_member(&conn, &path.project_id, &input)?;
+    let project_member =
+        queries::create_project_member(&conn, &target_member.id, &path.project_id, input.role)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::CreateProjectMember)
         .resource("project_member", &project_member.id)
-        .details(&serde_json::json!({ "org_member_id": input.org_member_id, "project_id": path.project_id, "role": input.role }))
+        .details(&serde_json::json!({ "user_id": input.user_id, "project_id": path.project_id, "role": input.role }))
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource_user(&target_member.name, &target_member.email))

@@ -50,7 +50,7 @@ pub struct ProjectMemberWithDetails {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateProjectMember {
-    pub org_member_id: String,
+    pub user_id: String,
     pub role: ProjectMemberRole,
 }
 

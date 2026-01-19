@@ -5,7 +5,7 @@ meta {
 }
 
 get {
-  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/members/{{member_id}}
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/members/{{user_id}}
   body: none
   auth: bearer
 }
@@ -15,17 +15,17 @@ auth:bearer {
 }
 
 docs {
-  Get a specific project member by ID.
+  Get a specific project member by user_id.
 
   Returns the project member with org member details.
 
   Response:
   {
-    "id": "pm_xxx",
-    "org_member_id": "member_xxx",
+    "user_id": "usr_xxx",
     "project_id": "proj_xxx",
     "role": "admin",
     "created_at": 1234567890,
+    "updated_at": 1234567890,
     "email": "member@example.com",
     "name": "Member Name"
   }
