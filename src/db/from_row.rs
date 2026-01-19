@@ -56,7 +56,11 @@ pub fn query_all<T: FromRow>(
 pub const USER_COLS: &str =
     "id, email, name, operator_role, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
-pub const ORGANIZATION_COLS: &str = "id, name, stripe_config, ls_config, resend_api_key, payment_provider, created_at, updated_at, deleted_at, deleted_cascade_depth";
+pub const ORGANIZATION_COLS: &str =
+    "id, name, payment_provider, created_at, updated_at, deleted_at, deleted_cascade_depth";
+
+pub const ORG_SERVICE_CONFIG_COLS: &str =
+    "id, org_id, category, provider, config_encrypted, created_at, updated_at";
 
 pub const ORG_MEMBER_COLS: &str =
     "id, user_id, org_id, role, created_at, updated_at, deleted_at, deleted_cascade_depth";
@@ -109,21 +113,28 @@ impl FromRow for User {
 
 impl FromRow for Organization {
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        // Read config data as raw bytes (encrypted)
-        let stripe_data: Option<Vec<u8>> = row.get(2)?;
-        let ls_data: Option<Vec<u8>> = row.get(3)?;
-        let resend_data: Option<Vec<u8>> = row.get(4)?;
         Ok(Organization {
             id: row.get(0)?,
             name: row.get(1)?,
-            stripe_config_encrypted: stripe_data,
-            ls_config_encrypted: ls_data,
-            resend_api_key_encrypted: resend_data,
-            payment_provider: row.get(5)?,
-            created_at: row.get(6)?,
-            updated_at: row.get(7)?,
-            deleted_at: row.get(8)?,
-            deleted_cascade_depth: row.get(9)?,
+            payment_provider: row.get(2)?,
+            created_at: row.get(3)?,
+            updated_at: row.get(4)?,
+            deleted_at: row.get(5)?,
+            deleted_cascade_depth: row.get(6)?,
+        })
+    }
+}
+
+impl FromRow for OrgServiceConfig {
+    fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        Ok(OrgServiceConfig {
+            id: row.get(0)?,
+            org_id: row.get(1)?,
+            category: parse_enum(row, 2, "category")?,
+            provider: parse_enum(row, 3, "provider")?,
+            config_encrypted: row.get(4)?,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
         })
     }
 }

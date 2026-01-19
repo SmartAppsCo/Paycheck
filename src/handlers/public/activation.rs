@@ -88,9 +88,8 @@ pub async fn request_activation_code(
 
     // Get organization for org-level Resend API key (do this once)
     let org = queries::get_organization_by_id(&conn, &project.org_id)?;
-    let org_resend_key = org
-        .as_ref()
-        .and_then(|o| o.decrypt_resend_api_key(&state.master_key).ok())
+    let org_resend_key = queries::get_org_resend_api_key(&conn, &project.org_id, &state.master_key)
+        .ok()
         .flatten();
 
     // Batch fetch all products for the licenses (avoids N+1 queries)

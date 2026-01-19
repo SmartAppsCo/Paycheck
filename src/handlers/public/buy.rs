@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::db::{AppState, queries};
 use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::Json;
-use crate::models::CreatePaymentSession;
+use crate::models::{CreatePaymentSession, ServiceProvider};
 use crate::payments::{LemonSqueezyClient, PaymentProvider, StripeClient};
 
 /// Simplified BuyRequest - Paycheck knows the product pricing details.
@@ -75,8 +75,8 @@ pub async fn initiate_buy(
             .ok_or_else(|| AppError::BadRequest(msg::INVALID_ORG_PROVIDER.into()))?
     } else {
         // Auto-detect: use the only configured provider, or error if both/neither
-        let has_stripe = org.has_stripe_config();
-        let has_ls = org.has_ls_config();
+        let has_stripe = queries::org_has_service_config(&conn, &org.id, ServiceProvider::Stripe)?;
+        let has_ls = queries::org_has_service_config(&conn, &org.id, ServiceProvider::LemonSqueezy)?;
         match (has_stripe, has_ls) {
             (true, false) => PaymentProvider::Stripe,
             (false, true) => PaymentProvider::LemonSqueezy,
@@ -122,8 +122,7 @@ pub async fn initiate_buy(
     // Create checkout with the appropriate provider using the linked_id
     let checkout_url = match provider {
         PaymentProvider::Stripe => {
-            let config = org
-                .decrypt_stripe_config(&state.master_key)?
+            let config = queries::get_org_stripe_config(&conn, &org.id, &state.master_key)?
                 .ok_or_else(|| AppError::BadRequest(msg::STRIPE_NOT_CONFIGURED.into()))?;
 
             let client = StripeClient::new(&config);
@@ -140,8 +139,7 @@ pub async fn initiate_buy(
             url
         }
         PaymentProvider::LemonSqueezy => {
-            let config = org
-                .decrypt_ls_config(&state.master_key)?
+            let config = queries::get_org_ls_config(&conn, &org.id, &state.master_key)?
                 .ok_or_else(|| AppError::BadRequest(msg::LS_NOT_CONFIGURED.into()))?;
 
             let client = LemonSqueezyClient::new(&config);

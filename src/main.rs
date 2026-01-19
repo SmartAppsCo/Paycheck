@@ -429,102 +429,60 @@ fn rotate_master_key(
         println!("  [OK] Project: {} ({})", project.name, project.id);
     }
 
-    // Rotate organization payment configs
-    let organizations = queries::list_organizations(&tx)
-        .map_err(|e| format!("Failed to list organizations: {}", e))?;
+    // Rotate organization service configs (stripe, lemonsqueezy, resend)
+    let service_configs = queries::list_all_org_service_configs(&tx)
+        .map_err(|e| format!("Failed to list org service configs: {}", e))?;
 
-    let orgs_with_configs: Vec<_> = organizations
-        .iter()
-        .filter(|o| {
-            o.stripe_config_encrypted.is_some()
-                || o.ls_config_encrypted.is_some()
-                || o.resend_api_key_encrypted.is_some()
-        })
-        .collect();
-
-    if !orgs_with_configs.is_empty() {
+    if !service_configs.is_empty() {
         println!();
         println!(
-            "Found {} organization(s) with encrypted configs.",
-            orgs_with_configs.len()
+            "Found {} organization service config(s) to rotate.",
+            service_configs.len()
         );
 
-        for org in &orgs_with_configs {
-            let new_stripe = if let Some(ref encrypted) = org.stripe_config_encrypted {
-                let plaintext = old_key
-                    .decrypt_private_key(&org.id, encrypted)
-                    .map_err(|e| {
-                        format!("Failed to decrypt Stripe config for org {}: {}", org.id, e)
-                    })?;
-                let new_enc = new_key
-                    .encrypt_private_key(&org.id, &plaintext)
-                    .map_err(|e| {
-                        format!(
-                            "Failed to re-encrypt Stripe config for org {}: {}",
-                            org.id, e
-                        )
-                    })?;
-                Some(new_enc)
-            } else {
-                None
-            };
+        for config in &service_configs {
+            // Decrypt with old key
+            let plaintext = old_key
+                .decrypt_private_key(&config.org_id, &config.config_encrypted)
+                .map_err(|e| {
+                    format!(
+                        "Failed to decrypt {} config for org {}: {}",
+                        config.provider.as_str(),
+                        config.org_id,
+                        e
+                    )
+                })?;
 
-            let new_ls = if let Some(ref encrypted) = org.ls_config_encrypted {
-                let plaintext = old_key
-                    .decrypt_private_key(&org.id, encrypted)
-                    .map_err(|e| {
-                        format!(
-                            "Failed to decrypt LemonSqueezy config for org {}: {}",
-                            org.id, e
-                        )
-                    })?;
-                let new_enc = new_key
-                    .encrypt_private_key(&org.id, &plaintext)
-                    .map_err(|e| {
-                        format!(
-                            "Failed to re-encrypt LemonSqueezy config for org {}: {}",
-                            org.id, e
-                        )
-                    })?;
-                Some(new_enc)
-            } else {
-                None
-            };
+            // Re-encrypt with new key
+            let new_enc = new_key
+                .encrypt_private_key(&config.org_id, &plaintext)
+                .map_err(|e| {
+                    format!(
+                        "Failed to re-encrypt {} config for org {}: {}",
+                        config.provider.as_str(),
+                        config.org_id,
+                        e
+                    )
+                })?;
 
-            let new_resend = if let Some(ref encrypted) = org.resend_api_key_encrypted {
-                let plaintext = old_key
-                    .decrypt_private_key(&org.id, encrypted)
-                    .map_err(|e| {
-                        format!("Failed to decrypt Resend API key for org {}: {}", org.id, e)
-                    })?;
-                let new_enc = new_key
-                    .encrypt_private_key(&org.id, &plaintext)
-                    .map_err(|e| {
-                        format!(
-                            "Failed to re-encrypt Resend API key for org {}: {}",
-                            org.id, e
-                        )
-                    })?;
-                Some(new_enc)
-            } else {
-                None
-            };
+            // Update in database
+            queries::update_org_service_config_encrypted(&tx, &config.id, &new_enc).map_err(
+                |e| {
+                    format!(
+                        "Failed to update {} config for org {}: {}",
+                        config.provider.as_str(),
+                        config.org_id,
+                        e
+                    )
+                },
+            )?;
 
-            queries::update_organization_encrypted_configs(
-                &tx,
-                &org.id,
-                new_stripe.as_deref(),
-                new_ls.as_deref(),
-                new_resend.as_deref(),
-            )
-            .map_err(|e| {
-                format!(
-                    "Failed to update encrypted configs for org {}: {}",
-                    org.id, e
-                )
-            })?;
-
-            println!("  [OK] Org: {} ({})", org.name, org.id);
+            println!(
+                "  [OK] {} ({}) for org: {}",
+                config.provider.as_str(),
+                config.category.as_str(),
+                config.org_id
+            );
         }
     }
 
@@ -560,10 +518,10 @@ fn rotate_master_key(
     println!();
     println!("SUCCESS: All keys rotated to new master key.");
     println!("  {} project(s)", projects.len());
-    if !orgs_with_configs.is_empty() {
+    if !service_configs.is_empty() {
         println!(
-            "  {} organization payment config(s)",
-            orgs_with_configs.len()
+            "  {} organization service config(s)",
+            service_configs.len()
         );
     }
     if email_key_rotated {

@@ -58,9 +58,6 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS organizations (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
-            stripe_config TEXT,
-            ls_config TEXT,
-            resend_api_key BLOB,
             payment_provider TEXT CHECK (payment_provider IS NULL OR payment_provider IN ('stripe', 'lemonsqueezy')),
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
@@ -68,6 +65,26 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             deleted_cascade_depth INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_organizations_active ON organizations(id) WHERE deleted_at IS NULL;
+
+        -- Organization service configs (normalized from org columns)
+        -- Stores encrypted credentials for external services (payment, email, etc.)
+        CREATE TABLE IF NOT EXISTS org_service_configs (
+            id TEXT PRIMARY KEY,
+            org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            category TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            config_encrypted BLOB NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(org_id, provider),
+            CHECK (
+                (category = 'payment' AND provider IN ('stripe', 'lemonsqueezy')) OR
+                (category = 'email' AND provider IN ('resend'))
+            )
+        );
+        CREATE INDEX IF NOT EXISTS idx_org_service_configs_org ON org_service_configs(org_id);
+        CREATE INDEX IF NOT EXISTS idx_org_service_configs_lookup ON org_service_configs(org_id, provider);
+        CREATE INDEX IF NOT EXISTS idx_org_service_configs_category ON org_service_configs(org_id, category);
 
         -- Organization members (references users for identity)
         CREATE TABLE IF NOT EXISTS org_members (

@@ -16,7 +16,7 @@ fn create_stripe_test_client() -> StripeClient {
     let config = StripeConfig {
         secret_key: "sk_test_xxx".to_string(),
         publishable_key: "pk_test_xxx".to_string(),
-        webhook_secret: "whsec_test_secret".to_string(),
+        webhook_secret: "whsec_test123secret456".to_string(),
     };
     StripeClient::new(&config)
 }
@@ -50,7 +50,7 @@ fn test_stripe_valid_signature() {
     let client = create_stripe_test_client();
     let payload = b"{\"type\":\"checkout.session.completed\"}";
     let timestamp = current_timestamp();
-    let signature = compute_stripe_signature(payload, "whsec_test_secret", &timestamp);
+    let signature = compute_stripe_signature(payload, "whsec_test123secret456", &timestamp);
     let signature_header = format!("t={},v1={}", timestamp, signature);
 
     let result = client
@@ -83,7 +83,7 @@ fn test_stripe_modified_payload() {
     let modified_payload = b"{\"type\":\"checkout.session.completed\",\"hacked\":true}";
     let timestamp = current_timestamp();
     // Sign the original payload
-    let signature = compute_stripe_signature(original_payload, "whsec_test_secret", &timestamp);
+    let signature = compute_stripe_signature(original_payload, "whsec_test123secret456", &timestamp);
     let signature_header = format!("t={},v1={}", timestamp, signature);
 
     // Verify with modified payload
@@ -100,7 +100,7 @@ fn test_stripe_old_timestamp_fails_verification() {
     let payload = b"{\"type\":\"checkout.session.completed\"}";
     let timestamp = old_timestamp();
     // Valid signature but timestamp too old
-    let signature = compute_stripe_signature(payload, "whsec_test_secret", &timestamp);
+    let signature = compute_stripe_signature(payload, "whsec_test123secret456", &timestamp);
     let signature_header = format!("t={},v1={}", timestamp, signature);
 
     let result = client
@@ -163,7 +163,7 @@ fn create_lemonsqueezy_test_client() -> LemonSqueezyClient {
     let config = LemonSqueezyConfig {
         api_key: "lskey_test_xxx".to_string(),
         store_id: "12345".to_string(),
-        webhook_secret: "ls_test_secret".to_string(),
+        webhook_secret: "ls_whsec_test_secret".to_string(),
     };
     LemonSqueezyClient::new(&config)
 }
@@ -184,7 +184,7 @@ fn compute_lemonsqueezy_signature(payload: &[u8], secret: &str) -> String {
 fn test_lemonsqueezy_valid_signature() {
     let client = create_lemonsqueezy_test_client();
     let payload = b"{\"meta\":{\"event_name\":\"order_created\"}}";
-    let signature = compute_lemonsqueezy_signature(payload, "ls_test_secret");
+    let signature = compute_lemonsqueezy_signature(payload, "ls_whsec_test_secret");
 
     let result = client
         .verify_webhook_signature(payload, &signature)
@@ -213,7 +213,7 @@ fn test_lemonsqueezy_modified_payload() {
     let original_payload = b"{\"meta\":{\"event_name\":\"order_created\"}}";
     let modified_payload = b"{\"meta\":{\"event_name\":\"order_created\",\"hacked\":true}}";
     // Sign original payload
-    let signature = compute_lemonsqueezy_signature(original_payload, "ls_test_secret");
+    let signature = compute_lemonsqueezy_signature(original_payload, "ls_whsec_test_secret");
 
     // Verify with modified payload
     let result = client
@@ -257,7 +257,7 @@ fn test_stripe_large_payload() {
     let payload = format!("{{\"data\":\"{}\"}}", large_data);
     let payload_bytes = payload.as_bytes();
     let timestamp = current_timestamp();
-    let signature = compute_stripe_signature(payload_bytes, "whsec_test_secret", &timestamp);
+    let signature = compute_stripe_signature(payload_bytes, "whsec_test123secret456", &timestamp);
     let signature_header = format!("t={},v1={}", timestamp, signature);
 
     let result = client
@@ -277,7 +277,7 @@ fn test_lemonsqueezy_large_payload() {
     let large_data = "x".repeat(100_000);
     let payload = format!("{{\"data\":\"{}\"}}", large_data);
     let payload_bytes = payload.as_bytes();
-    let signature = compute_lemonsqueezy_signature(payload_bytes, "ls_test_secret");
+    let signature = compute_lemonsqueezy_signature(payload_bytes, "ls_whsec_test_secret");
 
     let result = client
         .verify_webhook_signature(payload_bytes, &signature)
@@ -295,7 +295,7 @@ fn test_stripe_binary_payload() {
     // Binary data in payload
     let payload = &[0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD];
     let timestamp = current_timestamp();
-    let signature = compute_stripe_signature(payload, "whsec_test_secret", &timestamp);
+    let signature = compute_stripe_signature(payload, "whsec_test123secret456", &timestamp);
     let signature_header = format!("t={},v1={}", timestamp, signature);
 
     let result = client
@@ -312,7 +312,7 @@ fn test_stripe_binary_payload() {
 fn test_lemonsqueezy_binary_payload() {
     let client = create_lemonsqueezy_test_client();
     let payload = &[0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD];
-    let signature = compute_lemonsqueezy_signature(payload, "ls_test_secret");
+    let signature = compute_lemonsqueezy_signature(payload, "ls_whsec_test_secret");
 
     let result = client
         .verify_webhook_signature(payload, &signature)
@@ -329,7 +329,7 @@ fn test_stripe_unicode_in_payload() {
     let client = create_stripe_test_client();
     let payload = "{\"customer_name\":\"日本語\",\"emoji\":\"🎉\"}".as_bytes();
     let timestamp = current_timestamp();
-    let signature = compute_stripe_signature(payload, "whsec_test_secret", &timestamp);
+    let signature = compute_stripe_signature(payload, "whsec_test123secret456", &timestamp);
     let signature_header = format!("t={},v1={}", timestamp, signature);
 
     let result = client
@@ -1005,7 +1005,7 @@ async fn test_stripe_webhook_checkout_completed_creates_license() {
     });
     let payload_bytes = serde_json::to_vec(&payload).unwrap();
     let timestamp = current_timestamp();
-    let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+    let signature = compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &timestamp);
     let signature_header = format!("t={},v1={}", timestamp, signature);
 
     let app = webhook_app(state.clone());
@@ -1183,7 +1183,7 @@ async fn test_stripe_webhook_unpaid_checkout_ignored() {
     });
     let payload_bytes = serde_json::to_vec(&payload).unwrap();
     let timestamp = current_timestamp();
-    let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+    let signature = compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &timestamp);
     let signature_header = format!("t={},v1={}", timestamp, signature);
 
     let app = webhook_app(state.clone());
@@ -1260,7 +1260,7 @@ async fn test_stripe_webhook_invoice_paid_extends_license() {
     });
     let payload_bytes = serde_json::to_vec(&payload).unwrap();
     let timestamp = current_timestamp();
-    let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+    let signature = compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &timestamp);
     let signature_header = format!("t={},v1={}", timestamp, signature);
 
     let app = webhook_app(state.clone());
@@ -1339,7 +1339,7 @@ async fn test_stripe_webhook_subscription_deleted_returns_ok() {
     });
     let payload_bytes = serde_json::to_vec(&payload).unwrap();
     let timestamp = current_timestamp();
-    let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+    let signature = compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &timestamp);
     let signature_header = format!("t={},v1={}", timestamp, signature);
 
     let app = webhook_app(state.clone());
@@ -1396,7 +1396,7 @@ async fn test_stripe_webhook_unknown_event_ignored() {
     });
     let payload_bytes = serde_json::to_vec(&payload).unwrap();
     let timestamp = current_timestamp();
-    let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+    let signature = compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &timestamp);
     let signature_header = format!("t={},v1={}", timestamp, signature);
 
     let app = webhook_app(state);
@@ -1466,7 +1466,7 @@ async fn test_lemonsqueezy_webhook_order_created_creates_license() {
         }
     });
     let payload_bytes = serde_json::to_vec(&payload).unwrap();
-    let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_test_secret");
+    let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_whsec_test_secret");
 
     let app = webhook_app(state.clone());
 
@@ -1641,7 +1641,7 @@ async fn test_lemonsqueezy_webhook_subscription_payment_extends_license() {
         }
     });
     let payload_bytes = serde_json::to_vec(&payload).unwrap();
-    let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_test_secret");
+    let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_whsec_test_secret");
 
     let app = webhook_app(state.clone());
 
@@ -1718,7 +1718,7 @@ async fn test_lemonsqueezy_webhook_subscription_cancelled_returns_ok() {
         }
     });
     let payload_bytes = serde_json::to_vec(&payload).unwrap();
-    let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_test_secret");
+    let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_whsec_test_secret");
 
     let app = webhook_app(state.clone());
 
@@ -1787,7 +1787,7 @@ async fn test_webhook_provider_not_configured_returns_ok() {
     });
     let payload_bytes = serde_json::to_vec(&payload).unwrap();
     let timestamp = current_timestamp();
-    let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+    let signature = compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &timestamp);
     let signature_header = format!("t={},v1={}", timestamp, signature);
 
     let app = webhook_app(state.clone());
@@ -1871,7 +1871,7 @@ mod webhook_security {
         });
         let payload_bytes = serde_json::to_vec(&payload).unwrap();
         let timestamp = current_timestamp();
-        let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+        let signature = compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &timestamp);
         let signature_header = format!("t={},v1={}", timestamp, signature);
 
         let app = webhook_app(state.clone());
@@ -1994,7 +1994,7 @@ mod webhook_security {
         });
         let payload_bytes = serde_json::to_vec(&payload).unwrap();
         let timestamp = current_timestamp();
-        let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+        let signature = compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &timestamp);
         let signature_header = format!("t={},v1={}", timestamp, signature);
 
         // Send multiple times
@@ -2056,7 +2056,7 @@ mod webhook_security {
         });
         let payload_bytes = serde_json::to_vec(&payload).unwrap();
         let timestamp = current_timestamp();
-        let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+        let signature = compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &timestamp);
         let signature_header = format!("t={},v1={}", timestamp, signature);
 
         let app = webhook_app(state.clone());
@@ -2164,7 +2164,7 @@ mod webhook_security {
             }
         });
         let payload_bytes = serde_json::to_vec(&payload).unwrap();
-        let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_test_secret");
+        let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_whsec_test_secret");
 
         let app = webhook_app(state.clone());
 
@@ -2261,7 +2261,7 @@ mod webhook_security {
             }
         });
         let payload_bytes = serde_json::to_vec(&payload).unwrap();
-        let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_test_secret");
+        let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_whsec_test_secret");
 
         let app = webhook_app(state.clone());
 
@@ -2360,7 +2360,7 @@ mod webhook_security {
         // Timestamp 10 minutes ago (beyond 5-minute tolerance)
         let old_timestamp = (chrono::Utc::now().timestamp() - 600).to_string();
         let signature =
-            compute_stripe_signature(&payload_bytes, "whsec_test_secret", &old_timestamp);
+            compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &old_timestamp);
         let signature_header = format!("t={},v1={}", old_timestamp, signature);
 
         let app = webhook_app(state);
@@ -2427,7 +2427,7 @@ mod webhook_security {
         // Timestamp 5 minutes in the future (beyond 60-second clock skew tolerance)
         let future_timestamp = (chrono::Utc::now().timestamp() + 300).to_string();
         let signature =
-            compute_stripe_signature(&payload_bytes, "whsec_test_secret", &future_timestamp);
+            compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &future_timestamp);
         let signature_header = format!("t={},v1={}", future_timestamp, signature);
 
         let app = webhook_app(state);
@@ -2493,7 +2493,7 @@ mod webhook_security {
         });
         let original_bytes = serde_json::to_vec(&original_payload).unwrap();
         let timestamp = current_timestamp();
-        let signature = compute_stripe_signature(&original_bytes, "whsec_test_secret", &timestamp);
+        let signature = compute_stripe_signature(&original_bytes, "whsec_test123secret456", &timestamp);
         let signature_header = format!("t={},v1={}", timestamp, signature);
 
         // Attacker modifies the amount to $0
@@ -2572,7 +2572,7 @@ mod webhook_security {
         });
         let original_bytes = serde_json::to_vec(&original_payload).unwrap();
         let timestamp = current_timestamp();
-        let signature = compute_stripe_signature(&original_bytes, "whsec_test_secret", &timestamp);
+        let signature = compute_stripe_signature(&original_bytes, "whsec_test123secret456", &timestamp);
         let signature_header = format!("t={},v1={}", timestamp, signature);
 
         // Attacker tries to substitute their email
@@ -2645,7 +2645,7 @@ mod webhook_security {
         });
         let payload_bytes = serde_json::to_vec(&payload).unwrap();
         let timestamp = current_timestamp();
-        let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+        let signature = compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &timestamp);
         let signature_header = format!("t={},v1={}", timestamp, signature);
 
         let app = webhook_app(state);
@@ -2696,7 +2696,7 @@ mod webhook_security {
         });
         let payload_bytes = serde_json::to_vec(&payload).unwrap();
         let timestamp = current_timestamp();
-        let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+        let signature = compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &timestamp);
         let signature_header = format!("t={},v1={}", timestamp, signature);
 
         let app = webhook_app(state);
@@ -2763,7 +2763,7 @@ mod webhook_security {
         });
         let payload_bytes = serde_json::to_vec(&payload).unwrap();
         let timestamp = current_timestamp();
-        let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+        let signature = compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &timestamp);
         let signature_header = format!("t={},v1={}", timestamp, signature);
 
         // Use a barrier to synchronize concurrent requests
@@ -2853,7 +2853,7 @@ mod webhook_security {
             }
         });
         let payload_bytes = serde_json::to_vec(&payload).unwrap();
-        let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_test_secret");
+        let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_whsec_test_secret");
 
         let app = webhook_app(state);
 

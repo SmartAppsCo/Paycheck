@@ -8,9 +8,9 @@ use crate::models::*;
 
 use super::from_row::{
     ACTIVATION_CODE_COLS, API_KEY_COLS, API_KEY_SCOPE_COLS, DEVICE_COLS, LICENSE_COLS,
-    ORG_MEMBER_COLS, ORG_MEMBER_WITH_USER_COLS, ORGANIZATION_COLS, PAYMENT_SESSION_COLS,
-    PRODUCT_COLS, PROJECT_COLS, PROJECT_MEMBER_COLS, PROVIDER_LINK_COLS, USER_COLS, query_all,
-    query_one,
+    ORG_MEMBER_COLS, ORG_MEMBER_WITH_USER_COLS, ORG_SERVICE_CONFIG_COLS, ORGANIZATION_COLS,
+    PAYMENT_SESSION_COLS, PRODUCT_COLS, PROJECT_COLS, PROJECT_MEMBER_COLS, PROVIDER_LINK_COLS,
+    USER_COLS, query_all, query_one,
 };
 
 fn now() -> i64 {
@@ -1163,17 +1163,14 @@ pub fn create_organization(conn: &Connection, input: &CreateOrganization) -> Res
     let now = now();
 
     conn.execute(
-        "INSERT INTO organizations (id, name, stripe_config, ls_config, resend_api_key, payment_provider, created_at, updated_at)
-         VALUES (?1, ?2, NULL, NULL, NULL, NULL, ?3, ?4)",
+        "INSERT INTO organizations (id, name, payment_provider, created_at, updated_at)
+         VALUES (?1, ?2, NULL, ?3, ?4)",
         params![&id, &input.name, now, now],
     )?;
 
     Ok(Organization {
         id,
         name: input.name.clone(),
-        stripe_config_encrypted: None,
-        ls_config_encrypted: None,
-        resend_api_key_encrypted: None,
         payment_provider: None,
         created_at: now,
         updated_at: now,
@@ -1234,11 +1231,12 @@ pub fn list_organizations_paginated(
     Ok((items, total))
 }
 
+/// Update organization's basic fields (name, payment_provider).
+/// Service configs (stripe, lemonsqueezy, resend) are managed via upsert_org_service_config.
 pub fn update_organization(
     conn: &Connection,
     id: &str,
     input: &UpdateOrganization,
-    master_key: &MasterKey,
 ) -> Result<bool> {
     let now = now();
     let mut updated = false;
@@ -1247,38 +1245,6 @@ pub fn update_organization(
         conn.execute(
             "UPDATE organizations SET name = ?1, updated_at = ?2 WHERE id = ?3",
             params![name, now, id],
-        )?;
-        updated = true;
-    }
-    if let Some(ref stripe_config) = input.stripe_config {
-        // Serialize to JSON and encrypt
-        let json = serde_json::to_string(stripe_config)?;
-        let encrypted = master_key.encrypt_private_key(id, json.as_bytes())?;
-        conn.execute(
-            "UPDATE organizations SET stripe_config = ?1, updated_at = ?2 WHERE id = ?3",
-            params![encrypted, now, id],
-        )?;
-        updated = true;
-    }
-    if let Some(ref ls_config) = input.ls_config {
-        // Serialize to JSON and encrypt
-        let json = serde_json::to_string(ls_config)?;
-        let encrypted = master_key.encrypt_private_key(id, json.as_bytes())?;
-        conn.execute(
-            "UPDATE organizations SET ls_config = ?1, updated_at = ?2 WHERE id = ?3",
-            params![encrypted, now, id],
-        )?;
-        updated = true;
-    }
-    if let Some(ref resend_api_key) = input.resend_api_key {
-        // Some(None) clears the value (fallback to system default), Some(Some(value)) sets it
-        let encrypted: Option<Vec<u8>> = resend_api_key
-            .as_ref()
-            .map(|key| master_key.encrypt_private_key(id, key.as_bytes()))
-            .transpose()?;
-        conn.execute(
-            "UPDATE organizations SET resend_api_key = ?1, updated_at = ?2 WHERE id = ?3",
-            params![encrypted, now, id],
         )?;
         updated = true;
     }
@@ -1293,19 +1259,168 @@ pub fn update_organization(
     Ok(updated)
 }
 
-/// Update an organization's encrypted configs (for migration/rotation)
-pub fn update_organization_encrypted_configs(
-    conn: &Connection,
-    id: &str,
-    stripe_config: Option<&[u8]>,
-    ls_config: Option<&[u8]>,
-    resend_api_key: Option<&[u8]>,
-) -> Result<()> {
+/// Clear the organization's payment_provider field
+pub fn clear_org_payment_provider(conn: &Connection, id: &str) -> Result<()> {
     conn.execute(
-        "UPDATE organizations SET stripe_config = ?1, ls_config = ?2, resend_api_key = ?3, updated_at = ?4 WHERE id = ?5",
-        params![stripe_config, ls_config, resend_api_key, now(), id],
+        "UPDATE organizations SET payment_provider = NULL, updated_at = ?1 WHERE id = ?2",
+        params![now(), id],
     )?;
     Ok(())
+}
+
+// ============ Organization Service Configs ============
+
+/// Get a service config for an org by provider
+pub fn get_org_service_config(
+    conn: &Connection,
+    org_id: &str,
+    provider: ServiceProvider,
+) -> Result<Option<OrgServiceConfig>> {
+    query_one(
+        conn,
+        &format!(
+            "SELECT {} FROM org_service_configs WHERE org_id = ?1 AND provider = ?2",
+            ORG_SERVICE_CONFIG_COLS
+        ),
+        params![org_id, provider.as_str()],
+    )
+}
+
+/// Get all service configs for an org
+pub fn get_org_service_configs(conn: &Connection, org_id: &str) -> Result<Vec<OrgServiceConfig>> {
+    query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM org_service_configs WHERE org_id = ?1 ORDER BY provider",
+            ORG_SERVICE_CONFIG_COLS
+        ),
+        &[&org_id],
+    )
+}
+
+/// Get service configs for an org by category
+pub fn get_org_service_configs_by_category(
+    conn: &Connection,
+    org_id: &str,
+    category: ServiceCategory,
+) -> Result<Vec<OrgServiceConfig>> {
+    query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM org_service_configs WHERE org_id = ?1 AND category = ?2 ORDER BY provider",
+            ORG_SERVICE_CONFIG_COLS
+        ),
+        params![org_id, category.as_str()],
+    )
+}
+
+/// Check if an org has a specific service config
+pub fn org_has_service_config(
+    conn: &Connection,
+    org_id: &str,
+    provider: ServiceProvider,
+) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM org_service_configs WHERE org_id = ?1 AND provider = ?2",
+        params![org_id, provider.as_str()],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+/// Upsert a service config (insert or update if exists)
+pub fn upsert_org_service_config(
+    conn: &Connection,
+    org_id: &str,
+    provider: ServiceProvider,
+    encrypted_config: &[u8],
+) -> Result<OrgServiceConfig> {
+    let now = now();
+    let id = gen_id();
+    let category = provider.category();
+
+    conn.execute(
+        "INSERT INTO org_service_configs (id, org_id, category, provider, config_encrypted, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+         ON CONFLICT(org_id, provider) DO UPDATE SET
+             config_encrypted = excluded.config_encrypted,
+             updated_at = excluded.updated_at",
+        params![id, org_id, category.as_str(), provider.as_str(), encrypted_config, now],
+    )?;
+
+    // Return the config (either newly inserted or updated)
+    get_org_service_config(conn, org_id, provider)?
+        .ok_or_else(|| AppError::Internal("Config not found after upsert".into()))
+}
+
+/// Delete a service config
+pub fn delete_org_service_config(
+    conn: &Connection,
+    org_id: &str,
+    provider: ServiceProvider,
+) -> Result<bool> {
+    let deleted = conn.execute(
+        "DELETE FROM org_service_configs WHERE org_id = ?1 AND provider = ?2",
+        params![org_id, provider.as_str()],
+    )?;
+    Ok(deleted > 0)
+}
+
+/// List all service configs (for key rotation)
+pub fn list_all_org_service_configs(conn: &Connection) -> Result<Vec<OrgServiceConfig>> {
+    query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM org_service_configs ORDER BY org_id, provider",
+            ORG_SERVICE_CONFIG_COLS
+        ),
+        &[],
+    )
+}
+
+/// Update encrypted config for a specific config row (for key rotation)
+pub fn update_org_service_config_encrypted(
+    conn: &Connection,
+    config_id: &str,
+    encrypted_config: &[u8],
+) -> Result<()> {
+    conn.execute(
+        "UPDATE org_service_configs SET config_encrypted = ?1, updated_at = ?2 WHERE id = ?3",
+        params![encrypted_config, now(), config_id],
+    )?;
+    Ok(())
+}
+
+// ============ Service Config Helper Functions ============
+
+/// Get decrypted Stripe config for an org
+pub fn get_org_stripe_config(
+    conn: &Connection,
+    org_id: &str,
+    master_key: &MasterKey,
+) -> Result<Option<StripeConfig>> {
+    let config = get_org_service_config(conn, org_id, ServiceProvider::Stripe)?;
+    config.map(|c| c.decrypt_stripe_config(master_key)).transpose()
+}
+
+/// Get decrypted LemonSqueezy config for an org
+pub fn get_org_ls_config(
+    conn: &Connection,
+    org_id: &str,
+    master_key: &MasterKey,
+) -> Result<Option<LemonSqueezyConfig>> {
+    let config = get_org_service_config(conn, org_id, ServiceProvider::LemonSqueezy)?;
+    config.map(|c| c.decrypt_ls_config(master_key)).transpose()
+}
+
+/// Get decrypted Resend API key for an org
+pub fn get_org_resend_api_key(
+    conn: &Connection,
+    org_id: &str,
+    master_key: &MasterKey,
+) -> Result<Option<String>> {
+    let config = get_org_service_config(conn, org_id, ServiceProvider::Resend)?;
+    config.map(|c| c.decrypt_resend_api_key(master_key)).transpose()
 }
 
 pub fn delete_organization(conn: &Connection, id: &str) -> Result<bool> {

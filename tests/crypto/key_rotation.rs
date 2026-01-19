@@ -48,53 +48,35 @@ fn rotate_project_key(
     Ok(())
 }
 
-/// Simulate key rotation for an organization's payment configs
-fn rotate_org_payment_configs(
+/// Simulate key rotation for all of an organization's service configs
+fn rotate_org_service_configs(
     conn: &Connection,
     org_id: &str,
     old_key: &MasterKey,
     new_key: &MasterKey,
 ) -> Result<(), String> {
-    // Get org
-    let org = queries::get_organization_by_id(conn, org_id)
-        .map_err(|e| e.to_string())?
-        .ok_or("Org not found")?;
+    // Get all service configs for this org
+    let configs = queries::list_all_org_service_configs(conn)
+        .map_err(|e| format!("Failed to list service configs: {}", e))?
+        .into_iter()
+        .filter(|c| c.org_id == org_id)
+        .collect::<Vec<_>>();
 
-    // Rotate Stripe config if present
-    let new_stripe = if let Some(ref encrypted) = org.stripe_config_encrypted {
+    for config in configs {
+        // Decrypt with old key
         let plaintext = old_key
-            .decrypt_private_key(&org.id, encrypted)
-            .map_err(|e| format!("Failed to decrypt Stripe config: {}", e))?;
-        let new_enc = new_key
-            .encrypt_private_key(&org.id, &plaintext)
-            .map_err(|e| format!("Failed to encrypt Stripe config: {}", e))?;
-        Some(new_enc)
-    } else {
-        None
-    };
+            .decrypt_private_key(&config.org_id, &config.config_encrypted)
+            .map_err(|e| format!("Failed to decrypt {} config: {}", config.provider.as_str(), e))?;
 
-    // Rotate LemonSqueezy config if present
-    let new_ls = if let Some(ref encrypted) = org.ls_config_encrypted {
-        let plaintext = old_key
-            .decrypt_private_key(&org.id, encrypted)
-            .map_err(|e| format!("Failed to decrypt LS config: {}", e))?;
+        // Re-encrypt with new key
         let new_enc = new_key
-            .encrypt_private_key(&org.id, &plaintext)
-            .map_err(|e| format!("Failed to encrypt LS config: {}", e))?;
-        Some(new_enc)
-    } else {
-        None
-    };
+            .encrypt_private_key(&config.org_id, &plaintext)
+            .map_err(|e| format!("Failed to re-encrypt {} config: {}", config.provider.as_str(), e))?;
 
-    // Update in database
-    queries::update_organization_encrypted_configs(
-        conn,
-        &org.id,
-        new_stripe.as_deref(),
-        new_ls.as_deref(),
-        None, // resend_api_key - not rotated in this helper
-    )
-    .map_err(|e| format!("Failed to update: {}", e))?;
+        // Update in database
+        queries::update_org_service_config_encrypted(conn, &config.id, &new_enc)
+            .map_err(|e| format!("Failed to update {} config: {}", config.provider.as_str(), e))?;
+    }
 
     Ok(())
 }
@@ -177,26 +159,20 @@ fn test_org_stripe_config_reencrypts_with_new_master_key() {
     let org = create_test_org(&mut conn, "Test Org");
 
     // Set up Stripe config with old key
-    let stripe_config = r#"{"api_key":"sk_test_123","webhook_secret":"whsec_123"}"#;
+    let stripe_config = r#"{"secret_key":"sk_test_123","publishable_key":"pk_test_123","webhook_secret":"whsec_123"}"#;
     let encrypted_stripe = old_key
         .encrypt_private_key(&org.id, stripe_config.as_bytes())
         .unwrap();
 
-    queries::update_organization_encrypted_configs(
-        &conn,
-        &org.id,
-        Some(&encrypted_stripe),
-        None,
-        None,
-    )
-    .unwrap();
+    queries::upsert_org_service_config(&conn, &org.id, ServiceProvider::Stripe, &encrypted_stripe)
+        .unwrap();
 
     // Verify we can decrypt with old key
-    let fetched = queries::get_organization_by_id(&mut conn, &org.id)
+    let fetched = queries::get_org_service_config(&conn, &org.id, ServiceProvider::Stripe)
         .unwrap()
-        .unwrap();
+        .expect("Stripe config should exist");
     let decrypted = old_key
-        .decrypt_private_key(&org.id, fetched.stripe_config_encrypted.as_ref().unwrap())
+        .decrypt_private_key(&org.id, &fetched.config_encrypted)
         .expect("Should decrypt with old key");
     assert_eq!(
         decrypted,
@@ -205,15 +181,14 @@ fn test_org_stripe_config_reencrypts_with_new_master_key() {
     );
 
     // Rotate the key
-    rotate_org_payment_configs(&mut conn, &org.id, &old_key, &new_key)
+    rotate_org_service_configs(&mut conn, &org.id, &old_key, &new_key)
         .expect("Rotation should succeed");
 
     // Verify old key no longer works
-    let fetched = queries::get_organization_by_id(&mut conn, &org.id)
+    let fetched = queries::get_org_service_config(&conn, &org.id, ServiceProvider::Stripe)
         .unwrap()
-        .unwrap();
-    let result =
-        old_key.decrypt_private_key(&org.id, fetched.stripe_config_encrypted.as_ref().unwrap());
+        .expect("Stripe config should still exist");
+    let result = old_key.decrypt_private_key(&org.id, &fetched.config_encrypted);
     assert!(
         result.is_err(),
         "old key should fail to decrypt Stripe config after rotation"
@@ -221,7 +196,7 @@ fn test_org_stripe_config_reencrypts_with_new_master_key() {
 
     // Verify new key works
     let decrypted = new_key
-        .decrypt_private_key(&org.id, fetched.stripe_config_encrypted.as_ref().unwrap())
+        .decrypt_private_key(&org.id, &fetched.config_encrypted)
         .expect("New key should decrypt");
     assert_eq!(
         decrypted,
@@ -240,20 +215,20 @@ fn test_org_lemonsqueezy_config_reencrypts_with_new_master_key() {
     let org = create_test_org(&mut conn, "Test Org");
 
     // Set up LemonSqueezy config with old key
-    let ls_config = r#"{"api_key":"ls_test_123","webhook_secret":"lswhsec_123"}"#;
+    let ls_config = r#"{"api_key":"ls_test_123","store_id":"12345","webhook_secret":"lswhsec_123"}"#;
     let encrypted_ls = old_key
         .encrypt_private_key(&org.id, ls_config.as_bytes())
         .unwrap();
 
-    queries::update_organization_encrypted_configs(&mut conn, &org.id, None, Some(&encrypted_ls), None)
+    queries::upsert_org_service_config(&conn, &org.id, ServiceProvider::LemonSqueezy, &encrypted_ls)
         .unwrap();
 
     // Verify we can decrypt with old key
-    let fetched = queries::get_organization_by_id(&mut conn, &org.id)
+    let fetched = queries::get_org_service_config(&conn, &org.id, ServiceProvider::LemonSqueezy)
         .unwrap()
-        .unwrap();
+        .expect("LemonSqueezy config should exist");
     let decrypted = old_key
-        .decrypt_private_key(&org.id, fetched.ls_config_encrypted.as_ref().unwrap())
+        .decrypt_private_key(&org.id, &fetched.config_encrypted)
         .expect("Should decrypt with old key");
     assert_eq!(
         decrypted,
@@ -262,15 +237,14 @@ fn test_org_lemonsqueezy_config_reencrypts_with_new_master_key() {
     );
 
     // Rotate the key
-    rotate_org_payment_configs(&mut conn, &org.id, &old_key, &new_key)
+    rotate_org_service_configs(&mut conn, &org.id, &old_key, &new_key)
         .expect("Rotation should succeed");
 
     // Verify old key no longer works
-    let fetched = queries::get_organization_by_id(&mut conn, &org.id)
+    let fetched = queries::get_org_service_config(&conn, &org.id, ServiceProvider::LemonSqueezy)
         .unwrap()
-        .unwrap();
-    let result =
-        old_key.decrypt_private_key(&org.id, fetched.ls_config_encrypted.as_ref().unwrap());
+        .expect("LemonSqueezy config should still exist");
+    let result = old_key.decrypt_private_key(&org.id, &fetched.config_encrypted);
     assert!(
         result.is_err(),
         "old key should fail to decrypt LemonSqueezy config after rotation"
@@ -278,7 +252,7 @@ fn test_org_lemonsqueezy_config_reencrypts_with_new_master_key() {
 
     // Verify new key works
     let decrypted = new_key
-        .decrypt_private_key(&org.id, fetched.ls_config_encrypted.as_ref().unwrap())
+        .decrypt_private_key(&org.id, &fetched.config_encrypted)
         .expect("New key should decrypt");
     assert_eq!(
         decrypted,

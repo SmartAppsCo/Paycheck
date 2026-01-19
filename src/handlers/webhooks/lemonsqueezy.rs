@@ -4,9 +4,10 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
+use rusqlite::Connection;
 
 use crate::crypto::MasterKey;
-use crate::db::AppState;
+use crate::db::{AppState, queries};
 use crate::models::Organization;
 use crate::payments::{
     LemonSqueezyClient, LemonSqueezyOrderAttributes, LemonSqueezySubscriptionInvoiceAttributes,
@@ -37,6 +38,7 @@ impl WebhookProvider for LemonSqueezyWebhookProvider {
 
     fn verify_signature(
         &self,
+        conn: &Connection,
         org: &Organization,
         master_key: &MasterKey,
         body: &Bytes,
@@ -45,7 +47,7 @@ impl WebhookProvider for LemonSqueezyWebhookProvider {
         // Handle both missing and corrupted configs gracefully by returning 200 OK.
         // This prevents payment providers from retrying indefinitely on 5xx errors
         // and avoids leaking internal state about config status.
-        let ls_config = match org.decrypt_ls_config(master_key) {
+        let ls_config = match queries::get_org_ls_config(conn, &org.id, master_key) {
             Ok(Some(config)) => config,
             Ok(None) => return Err((StatusCode::OK, "LemonSqueezy not configured")),
             Err(e) => {

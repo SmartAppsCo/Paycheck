@@ -819,11 +819,9 @@ mod organization_tests {
         );
 
         // Verify config was encrypted and stored
-        let mut conn = state.db.get().unwrap();
-        let org = queries::get_organization_by_id(&mut conn, &org_id)
-            .unwrap()
-            .unwrap();
-        let stripe_config = org.decrypt_stripe_config(&master_key).unwrap();
+        let conn = state.db.get().unwrap();
+        let stripe_config =
+            queries::get_org_stripe_config(&conn, &org_id, &master_key).unwrap();
         assert!(
             stripe_config.is_some(),
             "Stripe config should be stored and decryptable"
@@ -838,6 +836,7 @@ mod organization_tests {
     #[tokio::test]
     async fn test_update_organization_with_payment_provider() {
         let (app, state) = operator_app();
+        let master_key = test_master_key();
 
         let org_id: String;
         let api_key: String;
@@ -846,6 +845,8 @@ mod organization_tests {
             let mut conn = state.db.get().unwrap();
             let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             let org = create_test_org(&mut conn, "Test Org");
+            // Must set up Stripe config before we can set payment_provider to "stripe"
+            setup_stripe_config(&mut conn, &org.id, &master_key);
             org_id = org.id;
             api_key = key;
         }
@@ -1032,11 +1033,11 @@ mod payment_config_tests {
             "Stripe config should be present as object"
         );
         assert_eq!(
-            json["stripe_config"]["secret_key"], "sk_test_xxx",
+            json["stripe_config"]["secret_key"], "sk_test_abc123xyz789",
             "Stripe secret key should be decrypted"
         );
         assert_eq!(
-            json["stripe_config"]["webhook_secret"], "whsec_test_secret",
+            json["stripe_config"]["webhook_secret"], "whsec_test123secret456",
             "Stripe webhook secret should be decrypted"
         );
     }
@@ -1094,11 +1095,11 @@ mod payment_config_tests {
             "LemonSqueezy config should be present as object"
         );
         assert_eq!(
-            json["ls_config"]["api_key"], "lskey_test_xxx",
+            json["ls_config"]["api_key"], "ls_test_key_abcdefghij",
             "LemonSqueezy API key should be decrypted"
         );
         assert_eq!(
-            json["ls_config"]["webhook_secret"], "ls_test_secret",
+            json["ls_config"]["webhook_secret"], "ls_whsec_test_secret",
             "LemonSqueezy webhook secret should be decrypted"
         );
     }

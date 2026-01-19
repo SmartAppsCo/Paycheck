@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::MasterKey;
 use crate::error::{AppError, Result, msg};
 use crate::models::project::{LemonSqueezyConfig, StripeConfig};
 
@@ -8,15 +7,6 @@ use crate::models::project::{LemonSqueezyConfig, StripeConfig};
 pub struct Organization {
     pub id: String,
     pub name: String,
-    /// Encrypted Stripe config (None if not configured)
-    #[serde(skip)]
-    pub stripe_config_encrypted: Option<Vec<u8>>,
-    /// Encrypted LemonSqueezy config (None if not configured)
-    #[serde(skip)]
-    pub ls_config_encrypted: Option<Vec<u8>>,
-    /// Encrypted Resend API key (None if not configured - uses system default)
-    #[serde(skip)]
-    pub resend_api_key_encrypted: Option<Vec<u8>>,
     pub payment_provider: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -26,62 +16,6 @@ pub struct Organization {
     /// Cascade depth (0 = directly deleted, >0 = cascaded from parent)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted_cascade_depth: Option<i32>,
-}
-
-impl Organization {
-    /// Decrypt and parse the Stripe config.
-    pub fn decrypt_stripe_config(&self, master_key: &MasterKey) -> Result<Option<StripeConfig>> {
-        let Some(encrypted) = &self.stripe_config_encrypted else {
-            return Ok(None);
-        };
-
-        let decrypted = master_key.decrypt_private_key(&self.id, encrypted)?;
-        let json = String::from_utf8(decrypted)
-            .map_err(|_| crate::error::AppError::Internal("Invalid UTF-8 in config".into()))?;
-        let config: StripeConfig = serde_json::from_str(&json)?;
-        Ok(Some(config))
-    }
-
-    /// Decrypt and parse the LemonSqueezy config.
-    pub fn decrypt_ls_config(&self, master_key: &MasterKey) -> Result<Option<LemonSqueezyConfig>> {
-        let Some(encrypted) = &self.ls_config_encrypted else {
-            return Ok(None);
-        };
-
-        let decrypted = master_key.decrypt_private_key(&self.id, encrypted)?;
-        let json = String::from_utf8(decrypted)
-            .map_err(|_| crate::error::AppError::Internal("Invalid UTF-8 in config".into()))?;
-        let config: LemonSqueezyConfig = serde_json::from_str(&json)?;
-        Ok(Some(config))
-    }
-
-    /// Check if Stripe is configured (without decrypting).
-    pub fn has_stripe_config(&self) -> bool {
-        self.stripe_config_encrypted.is_some()
-    }
-
-    /// Check if LemonSqueezy is configured (without decrypting).
-    pub fn has_ls_config(&self) -> bool {
-        self.ls_config_encrypted.is_some()
-    }
-
-    /// Decrypt the Resend API key.
-    pub fn decrypt_resend_api_key(&self, master_key: &MasterKey) -> Result<Option<String>> {
-        let Some(encrypted) = &self.resend_api_key_encrypted else {
-            return Ok(None);
-        };
-
-        let decrypted = master_key.decrypt_private_key(&self.id, encrypted)?;
-        let api_key = String::from_utf8(decrypted).map_err(|_| {
-            crate::error::AppError::Internal("Invalid UTF-8 in Resend API key".into())
-        })?;
-        Ok(Some(api_key))
-    }
-
-    /// Check if Resend is configured (without decrypting).
-    pub fn has_resend_api_key(&self) -> bool {
-        self.resend_api_key_encrypted.is_some()
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -104,8 +38,12 @@ impl CreateOrganization {
 #[derive(Debug, Deserialize)]
 pub struct UpdateOrganization {
     pub name: Option<String>,
-    pub stripe_config: Option<StripeConfig>,
-    pub ls_config: Option<LemonSqueezyConfig>,
+    /// Stripe config - use Some(config) to set, Some(None) to clear, None to leave unchanged
+    #[serde(default, deserialize_with = "deserialize_optional_stripe_config")]
+    pub stripe_config: Option<Option<StripeConfig>>,
+    /// LemonSqueezy config - use Some(config) to set, Some(None) to clear, None to leave unchanged
+    #[serde(default, deserialize_with = "deserialize_optional_ls_config")]
+    pub ls_config: Option<Option<LemonSqueezyConfig>>,
     /// Resend API key for email delivery (overrides system default)
     /// Use Some(None) to clear and fall back to system default, None to leave unchanged
     #[serde(default, deserialize_with = "deserialize_optional_field")]
@@ -148,6 +86,24 @@ where
     Ok(Some(Option::deserialize(deserializer)?))
 }
 
+fn deserialize_optional_stripe_config<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Option<StripeConfig>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(Option::deserialize(deserializer)?))
+}
+
+fn deserialize_optional_ls_config<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Option<LemonSqueezyConfig>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(Option::deserialize(deserializer)?))
+}
+
 /// Public view of an organization (includes payment config status)
 #[derive(Debug, Clone, Serialize)]
 pub struct OrganizationPublic {
@@ -167,22 +123,25 @@ pub struct OrganizationPublic {
     pub deleted_cascade_depth: Option<i32>,
 }
 
-impl From<Organization> for OrganizationPublic {
-    fn from(o: Organization) -> Self {
-        let has_stripe = o.has_stripe_config();
-        let has_ls = o.has_ls_config();
-        let has_resend = o.has_resend_api_key();
+impl OrganizationPublic {
+    /// Create OrganizationPublic with service config flags
+    pub fn from_with_service_configs(
+        org: Organization,
+        has_stripe: bool,
+        has_lemonsqueezy: bool,
+        has_resend: bool,
+    ) -> Self {
         Self {
-            id: o.id,
-            name: o.name,
+            id: org.id,
+            name: org.name,
             has_stripe,
-            has_lemonsqueezy: has_ls,
+            has_lemonsqueezy,
             has_resend,
-            payment_provider: o.payment_provider,
-            created_at: o.created_at,
-            updated_at: o.updated_at,
-            deleted_at: o.deleted_at,
-            deleted_cascade_depth: o.deleted_cascade_depth,
+            payment_provider: org.payment_provider,
+            created_at: org.created_at,
+            updated_at: org.updated_at,
+            deleted_at: org.deleted_at,
+            deleted_cascade_depth: org.deleted_cascade_depth,
         }
     }
 }

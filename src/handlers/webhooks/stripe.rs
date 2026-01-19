@@ -4,9 +4,10 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
+use rusqlite::Connection;
 
 use crate::crypto::MasterKey;
-use crate::db::AppState;
+use crate::db::{AppState, queries};
 use crate::models::Organization;
 use crate::payments::{
     StripeCheckoutSession, StripeClient, StripeInvoice, StripeSubscription, StripeWebhookEvent,
@@ -36,6 +37,7 @@ impl WebhookProvider for StripeWebhookProvider {
 
     fn verify_signature(
         &self,
+        conn: &Connection,
         org: &Organization,
         master_key: &MasterKey,
         body: &Bytes,
@@ -44,7 +46,7 @@ impl WebhookProvider for StripeWebhookProvider {
         // Handle both missing and corrupted configs gracefully by returning 200 OK.
         // This prevents payment providers from retrying indefinitely on 5xx errors
         // and avoids leaking internal state about config status.
-        let stripe_config = match org.decrypt_stripe_config(master_key) {
+        let stripe_config = match queries::get_org_stripe_config(conn, &org.id, master_key) {
             Ok(Some(config)) => config,
             Ok(None) => return Err((StatusCode::OK, "Stripe not configured")),
             Err(e) => {

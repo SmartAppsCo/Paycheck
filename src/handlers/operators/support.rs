@@ -26,8 +26,8 @@ pub async fn get_org_payment_config(
 
     let org = queries::get_organization_by_id(&conn, &org_id)?.or_not_found(msg::ORG_NOT_FOUND)?;
 
-    let stripe_config = org.decrypt_stripe_config(&state.master_key)?;
-    let ls_config = org.decrypt_ls_config(&state.master_key)?;
+    let stripe_config = queries::get_org_stripe_config(&conn, &org_id, &state.master_key)?;
+    let ls_config = queries::get_org_ls_config(&conn, &org_id, &state.master_key)?;
 
     tracing::info!(
         "OPERATOR: Retrieved payment config for organization {} ({})",

@@ -31,14 +31,8 @@ fn setup_corrupted_stripe_config(conn: &rusqlite::Connection, org_id: &str) {
     corrupted_bytes.extend_from_slice(&[0u8; 12]); // Fake nonce (12 bytes)
     corrupted_bytes.extend_from_slice(b"corrupted_ciphertext_garbage_data"); // Invalid ciphertext
 
-    queries::update_organization_encrypted_configs(
-        conn,
-        org_id,
-        Some(&corrupted_bytes),
-        None,
-        None,
-    )
-    .expect("Failed to set corrupted Stripe config");
+    queries::upsert_org_service_config(conn, org_id, ServiceProvider::Stripe, &corrupted_bytes)
+        .expect("Failed to set corrupted Stripe config");
 }
 
 fn compute_stripe_signature(payload: &[u8], secret: &str, timestamp: &str) -> String {
@@ -194,7 +188,7 @@ async fn test_stripe_webhook_valid_config_works() {
 
     // Use the correct webhook secret from setup_stripe_config
     let timestamp = current_timestamp();
-    let signature = compute_stripe_signature(&payload_bytes, "whsec_test_secret", &timestamp);
+    let signature = compute_stripe_signature(&payload_bytes, "whsec_test123secret456", &timestamp);
     let signature_header = format!("t={},v1={}", timestamp, signature);
 
     let app = webhook_app(state);
@@ -228,12 +222,11 @@ fn setup_corrupted_lemonsqueezy_config(conn: &rusqlite::Connection, org_id: &str
     corrupted_bytes.extend_from_slice(&[0u8; 12]); // Fake nonce (12 bytes)
     corrupted_bytes.extend_from_slice(b"corrupted_ciphertext_garbage_data"); // Invalid ciphertext
 
-    queries::update_organization_encrypted_configs(
+    queries::upsert_org_service_config(
         conn,
         org_id,
-        None,                   // No Stripe config
-        Some(&corrupted_bytes), // Corrupted LemonSqueezy config
-        None,
+        ServiceProvider::LemonSqueezy,
+        &corrupted_bytes,
     )
     .expect("Failed to set corrupted LemonSqueezy config");
 }

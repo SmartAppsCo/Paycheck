@@ -307,64 +307,37 @@ pub fn complete_payment_session(conn: &Connection, session_id: &str, license_id:
 /// Set up Stripe config for an organization
 pub fn setup_stripe_config(conn: &Connection, org_id: &str, master_key: &MasterKey) {
     let config = StripeConfig {
-        secret_key: "sk_test_xxx".to_string(),
-        publishable_key: "pk_test_xxx".to_string(),
-        webhook_secret: "whsec_test_secret".to_string(),
+        secret_key: "sk_test_abc123xyz789".to_string(),
+        publishable_key: "pk_test_abc123xyz789".to_string(),
+        webhook_secret: "whsec_test123secret456".to_string(),
     };
     let config_json = serde_json::to_vec(&config).expect("Failed to serialize Stripe config");
     let encrypted = master_key
         .encrypt_private_key(org_id, &config_json)
         .expect("Failed to encrypt Stripe config");
-    queries::update_organization_encrypted_configs(conn, org_id, Some(&encrypted), None, None)
+    queries::upsert_org_service_config(conn, org_id, ServiceProvider::Stripe, &encrypted)
         .expect("Failed to set Stripe config");
 }
 
 /// Set up LemonSqueezy config for an organization
 pub fn setup_lemonsqueezy_config(conn: &Connection, org_id: &str, master_key: &MasterKey) {
     let config = LemonSqueezyConfig {
-        api_key: "lskey_test_xxx".to_string(),
-        store_id: "12345".to_string(),
-        webhook_secret: "ls_test_secret".to_string(),
+        api_key: "ls_test_key_abcdefghij".to_string(),
+        store_id: "store_123".to_string(),
+        webhook_secret: "ls_whsec_test_secret".to_string(),
     };
     let config_json = serde_json::to_vec(&config).expect("Failed to serialize LS config");
     let encrypted = master_key
         .encrypt_private_key(org_id, &config_json)
         .expect("Failed to encrypt LS config");
-    queries::update_organization_encrypted_configs(conn, org_id, None, Some(&encrypted), None)
+    queries::upsert_org_service_config(conn, org_id, ServiceProvider::LemonSqueezy, &encrypted)
         .expect("Failed to set LemonSqueezy config");
 }
 
 /// Set up both Stripe and LemonSqueezy configs for an organization
 pub fn setup_both_payment_configs(conn: &Connection, org_id: &str, master_key: &MasterKey) {
-    let stripe_config = StripeConfig {
-        secret_key: "sk_test_xxx".to_string(),
-        publishable_key: "pk_test_xxx".to_string(),
-        webhook_secret: "whsec_test_secret".to_string(),
-    };
-    let stripe_json =
-        serde_json::to_vec(&stripe_config).expect("Failed to serialize Stripe config");
-    let stripe_encrypted = master_key
-        .encrypt_private_key(org_id, &stripe_json)
-        .expect("Failed to encrypt Stripe config");
-
-    let ls_config = LemonSqueezyConfig {
-        api_key: "lskey_test_xxx".to_string(),
-        store_id: "12345".to_string(),
-        webhook_secret: "ls_test_secret".to_string(),
-    };
-    let ls_json = serde_json::to_vec(&ls_config).expect("Failed to serialize LS config");
-    let ls_encrypted = master_key
-        .encrypt_private_key(org_id, &ls_json)
-        .expect("Failed to encrypt LS config");
-
-    queries::update_organization_encrypted_configs(
-        conn,
-        org_id,
-        Some(&stripe_encrypted),
-        Some(&ls_encrypted),
-        None,
-    )
-    .expect("Failed to set payment configs");
+    setup_stripe_config(conn, org_id, master_key);
+    setup_lemonsqueezy_config(conn, org_id, master_key);
 }
 
 /// Create a test license with subscription info (for renewal/cancellation tests)

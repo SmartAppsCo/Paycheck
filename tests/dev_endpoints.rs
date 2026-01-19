@@ -40,25 +40,20 @@ fn operator_app_with_payment_configs() -> (Router, String) {
         let org = create_test_org(&mut conn, "Test Org");
         org_id = org.id.clone();
 
-        // Add payment configs to organization
+        // Add payment configs to organization using service config table
+        setup_stripe_config(&conn, &org.id, &master_key);
+        setup_lemonsqueezy_config(&conn, &org.id, &master_key);
+
+        // Set default payment provider
         let update = UpdateOrganization {
             name: None,
-            stripe_config: Some(StripeConfig {
-                secret_key: "sk_test_abc123xyz789".to_string(),
-                publishable_key: "pk_test_abc123xyz789".to_string(),
-                webhook_secret: "whsec_test123secret456".to_string(),
-            }),
-            ls_config: Some(LemonSqueezyConfig {
-                api_key: "ls_test_key_abcdefghij".to_string(),
-                store_id: "store_123".to_string(),
-                webhook_secret: "ls_whsec_test_secret".to_string(),
-            }),
+            stripe_config: None,
+            ls_config: None,
             resend_api_key: None,
             payment_provider: Some(Some("stripe".to_string())),
         };
-
-        queries::update_organization(&mut conn, &org.id, &update, &master_key)
-            .expect("Failed to update organization with payment configs");
+        queries::update_organization(&conn, &org.id, &update)
+            .expect("Failed to set payment provider");
     }
 
     let audit_manager = SqliteConnectionManager::memory();

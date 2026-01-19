@@ -165,9 +165,8 @@ fn test_list_organizations() {
 
 #[test]
 fn test_update_organization() {
-    let mut conn = setup_test_db();
-    let master_key = test_master_key();
-    let org = create_test_org(&mut conn, "Original Name");
+    let conn = setup_test_db();
+    let org = create_test_org(&conn, "Original Name");
 
     let update = UpdateOrganization {
         name: Some("Updated Name".to_string()),
@@ -176,9 +175,9 @@ fn test_update_organization() {
         resend_api_key: None,
         payment_provider: None,
     };
-    queries::update_organization(&mut conn, &org.id, &update, &master_key).expect("Update failed");
+    queries::update_organization(&conn, &org.id, &update).expect("Update failed");
 
-    let updated = queries::get_organization_by_id(&mut conn, &org.id)
+    let updated = queries::get_organization_by_id(&conn, &org.id)
         .expect("Query failed")
         .expect("Organization not found");
 
@@ -361,47 +360,31 @@ fn test_update_org_stripe_config() {
     let master_key = test_master_key();
     let org = create_test_org(&mut conn, "Test Org");
 
-    let stripe_config = StripeConfig {
-        secret_key: "sk_test_xxx".to_string(),
-        publishable_key: "pk_test_xxx".to_string(),
-        webhook_secret: "whsec_xxx".to_string(),
-    };
+    // Set up Stripe config using the new service config table
+    setup_stripe_config(&conn, &org.id, &master_key);
 
-    let update = UpdateOrganization {
-        name: None,
-        stripe_config: Some(stripe_config.clone()),
-        ls_config: None,
-        resend_api_key: None,
-        payment_provider: None,
-    };
-
-    queries::update_organization(&mut conn, &org.id, &update, &master_key).expect("Update failed");
-
-    let updated = queries::get_organization_by_id(&mut conn, &org.id)
-        .expect("Query failed")
-        .expect("Organization not found");
-
+    // Verify config exists
     assert!(
-        updated.has_stripe_config(),
-        "org should have Stripe config after update"
+        queries::org_has_service_config(&conn, &org.id, ServiceProvider::Stripe)
+            .expect("Query failed"),
+        "org should have Stripe config after setup"
     );
-    let decrypted = updated
-        .decrypt_stripe_config(&master_key)
-        .expect("Decryption failed")
+
+    // Verify we can decrypt it
+    let decrypted = queries::get_org_stripe_config(&conn, &org.id, &master_key)
+        .expect("Query failed")
         .expect("Config not found");
     assert_eq!(
-        decrypted.secret_key, "sk_test_xxx",
+        decrypted.secret_key, "sk_test_abc123xyz789",
         "decrypted secret key should match input"
     );
 
     // Verify the raw data is actually encrypted (has magic bytes)
+    let raw_config = queries::get_org_service_config(&conn, &org.id, ServiceProvider::Stripe)
+        .expect("Query failed")
+        .expect("Config should exist");
     assert!(
-        updated.stripe_config_encrypted.is_some(),
-        "encrypted config should be stored"
-    );
-    let raw = updated.stripe_config_encrypted.as_ref().unwrap();
-    assert!(
-        raw.starts_with(b"ENC1"),
+        raw_config.config_encrypted.starts_with(b"ENC1"),
         "config should be encrypted with ENC1 magic bytes"
     );
 }
@@ -412,47 +395,35 @@ fn test_update_org_lemonsqueezy_config() {
     let master_key = test_master_key();
     let org = create_test_org(&mut conn, "Test Org");
 
-    let ls_config = LemonSqueezyConfig {
-        api_key: "ls_test_api_key".to_string(),
-        store_id: "store_12345".to_string(),
-        webhook_secret: "whsec_ls_xxx".to_string(),
-    };
+    // Set up LemonSqueezy config using the new service config table
+    setup_lemonsqueezy_config(&conn, &org.id, &master_key);
 
-    let update = UpdateOrganization {
-        name: None,
-        stripe_config: None,
-        ls_config: Some(ls_config.clone()),
-        resend_api_key: None,
-        payment_provider: None,
-    };
-
-    queries::update_organization(&mut conn, &org.id, &update, &master_key).expect("Update failed");
-
-    let updated = queries::get_organization_by_id(&mut conn, &org.id)
-        .expect("Query failed")
-        .expect("Organization not found");
-
+    // Verify config exists
     assert!(
-        updated.has_ls_config(),
-        "org should have LemonSqueezy config after update"
+        queries::org_has_service_config(&conn, &org.id, ServiceProvider::LemonSqueezy)
+            .expect("Query failed"),
+        "org should have LemonSqueezy config after setup"
     );
-    let decrypted = updated
-        .decrypt_ls_config(&master_key)
-        .expect("Decryption failed")
+
+    // Verify we can decrypt it
+    let decrypted = queries::get_org_ls_config(&conn, &org.id, &master_key)
+        .expect("Query failed")
         .expect("Config not found");
     assert_eq!(
-        decrypted.api_key, "ls_test_api_key",
+        decrypted.api_key, "ls_test_key_abcdefghij",
         "decrypted API key should match input"
     );
     assert_eq!(
-        decrypted.store_id, "store_12345",
+        decrypted.store_id, "store_123",
         "decrypted store_id should match input"
     );
 
     // Verify encryption
-    let raw = updated.ls_config_encrypted.as_ref().unwrap();
+    let raw_config = queries::get_org_service_config(&conn, &org.id, ServiceProvider::LemonSqueezy)
+        .expect("Query failed")
+        .expect("Config should exist");
     assert!(
-        raw.starts_with(b"ENC1"),
+        raw_config.config_encrypted.starts_with(b"ENC1"),
         "config should be encrypted with ENC1 magic bytes"
     );
 }
@@ -463,57 +434,50 @@ fn test_update_org_both_payment_configs() {
     let master_key = test_master_key();
     let org = create_test_org(&mut conn, "Test Org");
 
-    let stripe_config = StripeConfig {
-        secret_key: "sk_test_both".to_string(),
-        publishable_key: "pk_test_both".to_string(),
-        webhook_secret: "whsec_both".to_string(),
-    };
+    // Set up both configs using the helper functions
+    setup_both_payment_configs(&conn, &org.id, &master_key);
 
-    let ls_config = LemonSqueezyConfig {
-        api_key: "ls_both_key".to_string(),
-        store_id: "store_both".to_string(),
-        webhook_secret: "whsec_ls_both".to_string(),
-    };
-
+    // Set payment provider
     let update = UpdateOrganization {
         name: None,
-        stripe_config: Some(stripe_config),
-        ls_config: Some(ls_config),
+        stripe_config: None,
+        ls_config: None,
         resend_api_key: None,
         payment_provider: Some(Some("stripe".to_string())),
     };
-
-    queries::update_organization(&mut conn, &org.id, &update, &master_key).expect("Update failed");
-
-    let updated = queries::get_organization_by_id(&mut conn, &org.id)
-        .expect("Query failed")
-        .expect("Organization not found");
+    queries::update_organization(&conn, &org.id, &update).expect("Update failed");
 
     // Both configs should be present and decryptable
-    assert!(updated.has_stripe_config(), "org should have Stripe config");
     assert!(
-        updated.has_ls_config(),
+        queries::org_has_service_config(&conn, &org.id, ServiceProvider::Stripe)
+            .expect("Query failed"),
+        "org should have Stripe config"
+    );
+    assert!(
+        queries::org_has_service_config(&conn, &org.id, ServiceProvider::LemonSqueezy)
+            .expect("Query failed"),
         "org should have LemonSqueezy config"
     );
 
-    let stripe = updated
-        .decrypt_stripe_config(&master_key)
-        .expect("Stripe decryption failed")
+    let stripe = queries::get_org_stripe_config(&conn, &org.id, &master_key)
+        .expect("Stripe query failed")
         .expect("Stripe config not found");
     assert_eq!(
-        stripe.secret_key, "sk_test_both",
+        stripe.secret_key, "sk_test_abc123xyz789",
         "Stripe secret key should match input"
     );
 
-    let ls = updated
-        .decrypt_ls_config(&master_key)
-        .expect("LS decryption failed")
+    let ls = queries::get_org_ls_config(&conn, &org.id, &master_key)
+        .expect("LS query failed")
         .expect("LS config not found");
     assert_eq!(
-        ls.api_key, "ls_both_key",
+        ls.api_key, "ls_test_key_abcdefghij",
         "LemonSqueezy API key should match input"
     );
 
+    let updated = queries::get_organization_by_id(&conn, &org.id)
+        .expect("Query failed")
+        .expect("Organization not found");
     assert_eq!(
         updated.payment_provider,
         Some("stripe".to_string()),
@@ -523,33 +487,16 @@ fn test_update_org_both_payment_configs() {
 
 #[test]
 fn test_payment_config_wrong_key_fails() {
-    let mut conn = setup_test_db();
+    let conn = setup_test_db();
     let master_key = test_master_key();
     let wrong_key = MasterKey::from_bytes([1u8; 32]); // Different key
-    let org = create_test_org(&mut conn, "Test Org");
+    let org = create_test_org(&conn, "Test Org");
 
-    let stripe_config = StripeConfig {
-        secret_key: "sk_secret".to_string(),
-        publishable_key: "pk_secret".to_string(),
-        webhook_secret: "whsec_secret".to_string(),
-    };
-
-    let update = UpdateOrganization {
-        name: None,
-        stripe_config: Some(stripe_config),
-        ls_config: None,
-        resend_api_key: None,
-        payment_provider: None,
-    };
-
-    queries::update_organization(&mut conn, &org.id, &update, &master_key).expect("Update failed");
-
-    let updated = queries::get_organization_by_id(&mut conn, &org.id)
-        .expect("Query failed")
-        .expect("Organization not found");
+    // Set up Stripe config using the correct key
+    setup_stripe_config(&conn, &org.id, &master_key);
 
     // Decryption with wrong key should fail
-    let result = updated.decrypt_stripe_config(&wrong_key);
+    let result = queries::get_org_stripe_config(&conn, &org.id, &wrong_key);
     assert!(result.is_err(), "Decryption with wrong key should fail");
 }
 
