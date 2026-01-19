@@ -1,0 +1,45 @@
+meta {
+  name: Update Product (Impersonated)
+  type: http
+  seq: 6
+}
+
+put {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/products/{{product_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+headers {
+  X-On-Behalf-Of: {{user_id}}
+}
+
+body:json {
+  {
+    "license_exp_days": null,
+    "updates_exp_days": null
+  }
+}
+
+docs {
+  Update a product using operator impersonation.
+
+  All fields are optional - only include what you want to change.
+  Changes don't affect already-issued licenses.
+
+  IMPORTANT: license_exp_days and updates_exp_days
+  - null = perpetual license (never expires) - use for one-time purchases
+  - 365 = expires 365 days after purchase
+  - 30 = expires 30 days after purchase (subscriptions)
+  - 0 = expires IMMEDIATELY (don't use this!)
+
+  Example body to fix a product with immediate expiration:
+  {
+    "license_exp_days": null,
+    "updates_exp_days": null
+  }
+}

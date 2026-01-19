@@ -1,0 +1,28 @@
+meta {
+  name: Revoke License (Impersonated)
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/licenses/{{license_id}}/revoke
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+headers {
+  X-On-Behalf-Of: {{user_id}}
+}
+
+docs {
+  Revoke a license using operator impersonation.
+
+  This permanently invalidates the license - it cannot be redeemed or used.
+  Use this to clean up test licenses or handle refunds.
+
+  The license remains in the database (for audit purposes) but is marked revoked.
+}
