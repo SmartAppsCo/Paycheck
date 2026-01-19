@@ -250,7 +250,12 @@ pub async fn create_license(
             .actor(ActorType::User, Some(&ctx.member.user_id))
             .action(AuditAction::CreateLicense)
             .resource("license", &created_licenses.last().unwrap().license.license.id)
-            .details(&serde_json::json!({ "product_id": body.product_id, "expires_at": exps.license_exp, "has_email": email_hash.is_some() }))
+            .details(&serde_json::json!({
+                "product_id": body.product_id,
+                "expires_at": exps.license_exp,
+                "has_email": email_hash.is_some(),
+                "impersonator": ctx.impersonator_json()
+            }))
             .org(&path.org_id)
             .project(&path.project_id)
             .names(&ctx.audit_names().project(project.name.clone()))
@@ -326,7 +331,8 @@ pub async fn update_license(
             .resource("license", &license.id)
             .details(&serde_json::json!({
                 "old_email_hash": old_email_hash,
-                "reason": "email_correction"
+                "reason": "email_correction",
+                "impersonator": ctx.impersonator_json()
             }))
             .org(&path.org_id)
             .project(&path.project_id)
@@ -413,9 +419,13 @@ pub async fn revoke_license(
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::RevokeLicense)
         .resource("license", &license.id)
+        .details(&serde_json::json!({
+            "impersonator": ctx.impersonator_json()
+        }))
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().project(project.name.clone()))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(serde_json::json!({ "success": true })))
@@ -469,10 +479,14 @@ pub async fn send_activation_code(
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::GenerateActivationCode)
         .resource("license", &license.id)
-        .details(&serde_json::json!({ "expires_at": code.expires_at }))
+        .details(&serde_json::json!({
+            "expires_at": code.expires_at,
+            "impersonator": ctx.impersonator_json()
+        }))
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().project(project.name.clone()))
+        .auth_method(&ctx.auth_method)
         .save()?;
 
     Ok(Json(SendActivationCodeResponse {
@@ -535,7 +549,13 @@ pub async fn deactivate_device_admin(
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::DeactivateDevice)
         .resource("device", &device.id)
-        .details(&serde_json::json!({ "license_id": license.id, "device_id": path.device_id, "device_name": device.name, "reason": "admin_remote_deactivation" }))
+        .details(&serde_json::json!({
+            "license_id": license.id,
+            "device_id": path.device_id,
+            "device_name": device.name,
+            "reason": "admin_remote_deactivation",
+            "impersonator": ctx.impersonator_json()
+        }))
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(device.name.clone()))
@@ -595,7 +615,8 @@ pub async fn restore_license(
         .resource("license", &path.license_id)
         .details(&serde_json::json!({
             "product_id": existing.product_id,
-            "force": input.force
+            "force": input.force,
+            "impersonator": ctx.impersonator_json()
         }))
         .org(&path.org_id)
         .project(&path.project_id)

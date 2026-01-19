@@ -53,7 +53,12 @@ pub async fn create_project_member(
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::CreateProjectMember)
         .resource("project_member", &project_member.id)
-        .details(&serde_json::json!({ "user_id": input.user_id, "project_id": path.project_id, "role": input.role }))
+        .details(&serde_json::json!({
+            "user_id": input.user_id,
+            "project_id": path.project_id,
+            "role": input.role,
+            "impersonator": ctx.impersonator_json()
+        }))
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource_user(&target_member.name, &target_member.email))
@@ -138,7 +143,10 @@ pub async fn update_project_member(
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::UpdateProjectMember)
         .resource("project_member", &member.id)
-        .details(&serde_json::json!({ "role": input.role }))
+        .details(&serde_json::json!({
+            "role": input.role,
+            "impersonator": ctx.impersonator_json()
+        }))
         .org(&path.org_id)
         .project(&path.project_id)
         .names(
@@ -184,6 +192,9 @@ pub async fn delete_project_member(
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::DeleteProjectMember)
         .resource("project_member", &existing.id)
+        .details(&serde_json::json!({
+            "impersonator": ctx.impersonator_json()
+        }))
         .org(&path.org_id)
         .project(&path.project_id)
         .names(

@@ -47,7 +47,10 @@ pub async fn create_project(
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::CreateProject)
         .resource("project", &project.id)
-        .details(&serde_json::json!({ "name": input.name }))
+        .details(&serde_json::json!({
+            "name": input.name,
+            "impersonator": ctx.impersonator_json()
+        }))
         .org(&org_id)
         .project(&project.id)
         .names(
@@ -132,7 +135,10 @@ pub async fn update_project(
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::UpdateProject)
         .resource("project", &path.project_id)
-        .details(&serde_json::json!({ "name": input.name }))
+        .details(&serde_json::json!({
+            "name": input.name,
+            "impersonator": ctx.impersonator_json()
+        }))
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(existing.name).org(org.name))
@@ -165,7 +171,10 @@ pub async fn delete_project(
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::DeleteProject)
         .resource("project", &path.project_id)
-        .details(&serde_json::json!({ "name": existing.name }))
+        .details(&serde_json::json!({
+            "name": existing.name,
+            "impersonator": ctx.impersonator_json()
+        }))
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(existing.name).org(org.name))
@@ -248,7 +257,8 @@ pub async fn restore_project(
         .resource("project", &path.project_id)
         .details(&serde_json::json!({
             "name": existing.name,
-            "force": input.force
+            "force": input.force,
+            "impersonator": ctx.impersonator_json()
         }))
         .org(&path.org_id)
         .project(&path.project_id)

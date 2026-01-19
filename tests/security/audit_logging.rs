@@ -1363,6 +1363,584 @@ mod impersonation_logging {
         );
     }
 
+    /// Verify that project creation via impersonation logs the impersonator.
+    /// This ensures the regression is caught - projects were missing impersonator details.
+    #[tokio::test]
+    async fn test_project_creation_impersonation_logged() {
+        let (app, state) = org_app_with_audit();
+
+        let org_id: String;
+        let operator_user_id: String;
+        let operator_email = "operator@admin.com";
+        let member_user_id: String;
+        let operator_api_key: String;
+
+        {
+            let mut conn = state.db.get().unwrap();
+
+            // Create org with an owner member
+            let org = create_test_org(&mut conn, "Test Org");
+            let (member_user, _, _) =
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+
+            // Create operator who will impersonate
+            let (operator_user, op_key) =
+                create_test_operator(&mut conn, operator_email, OperatorRole::Admin);
+
+            org_id = org.id;
+            operator_user_id = operator_user.id;
+            member_user_id = member_user.id;
+            operator_api_key = op_key;
+        }
+
+        // Operator creates a project while impersonating the owner
+        let body = json!({
+            "name": "Test Project",
+            "license_key_prefix": "TEST"
+        });
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/orgs/{}/projects", org_id))
+                    .header("content-type", "application/json")
+                    .header("Authorization", format!("Bearer {}", operator_api_key))
+                    .header("X-On-Behalf-Of", &member_user_id)
+                    .body(Body::from(serde_json::to_string(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "impersonated project creation should succeed"
+        );
+
+        // Query audit logs
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/orgs/{}/audit-logs?action=create_project", org_id))
+                    .header("Authorization", format!("Bearer {}", operator_api_key))
+                    .header("X-On-Behalf-Of", &member_user_id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let json = body_json(response).await;
+        let items = json["items"].as_array().unwrap();
+        assert!(!items.is_empty(), "should have audit log for project creation");
+
+        let log = &items[0];
+
+        // user_id should be the impersonated member
+        assert_eq!(
+            log["user_id"], member_user_id,
+            "user_id should be the impersonated member"
+        );
+
+        // details.impersonator should contain the operator's info
+        let details = log["details"].as_object().unwrap();
+        let impersonator = details
+            .get("impersonator")
+            .expect("Project creation via impersonation should have impersonator in details");
+
+        assert!(
+            !impersonator.is_null(),
+            "impersonator field should be populated"
+        );
+        let imp = impersonator.as_object().unwrap();
+        assert_eq!(
+            imp["user_id"], operator_user_id,
+            "impersonator.user_id should be the operator"
+        );
+        assert_eq!(
+            imp["email"], operator_email,
+            "impersonator.email should be the operator's email"
+        );
+    }
+
+    /// Verify that license creation via impersonation logs the impersonator.
+    /// This ensures the regression is caught - licenses were missing impersonator details.
+    #[tokio::test]
+    async fn test_license_creation_impersonation_logged() {
+        let (app, state) = org_app_with_audit();
+        let master_key = test_master_key();
+
+        let org_id: String;
+        let project_id: String;
+        let product_id: String;
+        let operator_user_id: String;
+        let operator_email = "operator@admin.com";
+        let member_user_id: String;
+        let operator_api_key: String;
+
+        {
+            let mut conn = state.db.get().unwrap();
+
+            let org = create_test_org(&mut conn, "Test Org");
+            let (member_user, _, _) =
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
+
+            let (operator_user, op_key) =
+                create_test_operator(&mut conn, operator_email, OperatorRole::Admin);
+
+            org_id = org.id;
+            project_id = project.id;
+            product_id = product.id;
+            operator_user_id = operator_user.id;
+            member_user_id = member_user.id;
+            operator_api_key = op_key;
+        }
+
+        // Operator creates a license while impersonating the owner
+        let body = json!({
+            "product_id": product_id,
+            "email": "customer@example.com"
+        });
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/orgs/{}/projects/{}/licenses", org_id, project_id))
+                    .header("content-type", "application/json")
+                    .header("Authorization", format!("Bearer {}", operator_api_key))
+                    .header("X-On-Behalf-Of", &member_user_id)
+                    .body(Body::from(serde_json::to_string(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "impersonated license creation should succeed"
+        );
+
+        // Query audit logs
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/orgs/{}/audit-logs?action=create_license",
+                        org_id
+                    ))
+                    .header("Authorization", format!("Bearer {}", operator_api_key))
+                    .header("X-On-Behalf-Of", &member_user_id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let json = body_json(response).await;
+        let items = json["items"].as_array().unwrap();
+        assert!(!items.is_empty(), "should have audit log for license creation");
+
+        let log = &items[0];
+
+        // user_id should be the impersonated member
+        assert_eq!(
+            log["user_id"], member_user_id,
+            "user_id should be the impersonated member"
+        );
+
+        // details.impersonator should contain the operator's info
+        let details = log["details"].as_object().unwrap();
+        let impersonator = details
+            .get("impersonator")
+            .expect("License creation via impersonation should have impersonator in details");
+
+        assert!(
+            !impersonator.is_null(),
+            "impersonator field should be populated"
+        );
+        let imp = impersonator.as_object().unwrap();
+        assert_eq!(
+            imp["user_id"], operator_user_id,
+            "impersonator.user_id should be the operator"
+        );
+        assert_eq!(
+            imp["email"], operator_email,
+            "impersonator.email should be the operator's email"
+        );
+    }
+
+    /// Verify that product creation via impersonation logs the impersonator.
+    /// This ensures the regression is caught - products were missing impersonator details.
+    #[tokio::test]
+    async fn test_product_creation_impersonation_logged() {
+        let (app, state) = org_app_with_audit();
+        let master_key = test_master_key();
+
+        let org_id: String;
+        let project_id: String;
+        let operator_user_id: String;
+        let operator_email = "operator@admin.com";
+        let member_user_id: String;
+        let operator_api_key: String;
+
+        {
+            let mut conn = state.db.get().unwrap();
+
+            let org = create_test_org(&mut conn, "Test Org");
+            let (member_user, _, _) =
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+
+            let (operator_user, op_key) =
+                create_test_operator(&mut conn, operator_email, OperatorRole::Admin);
+
+            org_id = org.id;
+            project_id = project.id;
+            operator_user_id = operator_user.id;
+            member_user_id = member_user.id;
+            operator_api_key = op_key;
+        }
+
+        // Operator creates a product while impersonating the owner
+        let body = json!({
+            "name": "Pro Plan",
+            "tier": "pro"
+        });
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/orgs/{}/projects/{}/products", org_id, project_id))
+                    .header("content-type", "application/json")
+                    .header("Authorization", format!("Bearer {}", operator_api_key))
+                    .header("X-On-Behalf-Of", &member_user_id)
+                    .body(Body::from(serde_json::to_string(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "impersonated product creation should succeed"
+        );
+
+        // Query audit logs
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/orgs/{}/audit-logs?action=create_product",
+                        org_id
+                    ))
+                    .header("Authorization", format!("Bearer {}", operator_api_key))
+                    .header("X-On-Behalf-Of", &member_user_id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let json = body_json(response).await;
+        let items = json["items"].as_array().unwrap();
+        assert!(!items.is_empty(), "should have audit log for product creation");
+
+        let log = &items[0];
+
+        // user_id should be the impersonated member
+        assert_eq!(
+            log["user_id"], member_user_id,
+            "user_id should be the impersonated member"
+        );
+
+        // details.impersonator should contain the operator's info
+        let details = log["details"].as_object().unwrap();
+        let impersonator = details
+            .get("impersonator")
+            .expect("Product creation via impersonation should have impersonator in details");
+
+        assert!(
+            !impersonator.is_null(),
+            "impersonator field should be populated"
+        );
+        let imp = impersonator.as_object().unwrap();
+        assert_eq!(
+            imp["user_id"], operator_user_id,
+            "impersonator.user_id should be the operator"
+        );
+        assert_eq!(
+            imp["email"], operator_email,
+            "impersonator.email should be the operator's email"
+        );
+    }
+
+    /// Verify that project member creation via impersonation logs the impersonator.
+    /// This ensures the regression is caught - project_members were missing impersonator details.
+    #[tokio::test]
+    async fn test_project_member_creation_impersonation_logged() {
+        let (app, state) = org_app_with_audit();
+        let master_key = test_master_key();
+
+        let org_id: String;
+        let project_id: String;
+        let operator_user_id: String;
+        let operator_email = "operator@admin.com";
+        let member_user_id: String;
+        let new_member_user_id: String;
+        let operator_api_key: String;
+
+        {
+            let mut conn = state.db.get().unwrap();
+
+            let org = create_test_org(&mut conn, "Test Org");
+            let (member_user, _, _) =
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+
+            // Create another org member who will be added to the project
+            let (new_member_user, _, _) = create_test_org_member(
+                &mut conn,
+                &org.id,
+                "newmember@test.com",
+                OrgMemberRole::Member,
+            );
+
+            let (operator_user, op_key) =
+                create_test_operator(&mut conn, operator_email, OperatorRole::Admin);
+
+            org_id = org.id;
+            project_id = project.id;
+            operator_user_id = operator_user.id;
+            member_user_id = member_user.id;
+            new_member_user_id = new_member_user.id;
+            operator_api_key = op_key;
+        }
+
+        // Operator adds a project member while impersonating the owner
+        let body = json!({
+            "user_id": new_member_user_id,
+            "role": "view"
+        });
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/orgs/{}/projects/{}/members",
+                        org_id, project_id
+                    ))
+                    .header("content-type", "application/json")
+                    .header("Authorization", format!("Bearer {}", operator_api_key))
+                    .header("X-On-Behalf-Of", &member_user_id)
+                    .body(Body::from(serde_json::to_string(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "impersonated project member creation should succeed"
+        );
+
+        // Query audit logs
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/orgs/{}/audit-logs?action=create_project_member",
+                        org_id
+                    ))
+                    .header("Authorization", format!("Bearer {}", operator_api_key))
+                    .header("X-On-Behalf-Of", &member_user_id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let json = body_json(response).await;
+        let items = json["items"].as_array().unwrap();
+        assert!(
+            !items.is_empty(),
+            "should have audit log for project member creation"
+        );
+
+        let log = &items[0];
+
+        // user_id should be the impersonated member
+        assert_eq!(
+            log["user_id"], member_user_id,
+            "user_id should be the impersonated member"
+        );
+
+        // details.impersonator should contain the operator's info
+        let details = log["details"].as_object().unwrap();
+        let impersonator = details.get("impersonator").expect(
+            "Project member creation via impersonation should have impersonator in details",
+        );
+
+        assert!(
+            !impersonator.is_null(),
+            "impersonator field should be populated"
+        );
+        let imp = impersonator.as_object().unwrap();
+        assert_eq!(
+            imp["user_id"], operator_user_id,
+            "impersonator.user_id should be the operator"
+        );
+        assert_eq!(
+            imp["email"], operator_email,
+            "impersonator.email should be the operator's email"
+        );
+    }
+
+    /// Verify that license revocation via impersonation logs the impersonator.
+    /// This ensures revoke operations also have impersonator details.
+    #[tokio::test]
+    async fn test_license_revocation_impersonation_logged() {
+        let (app, state) = org_app_with_audit();
+        let master_key = test_master_key();
+
+        let org_id: String;
+        let project_id: String;
+        let license_id: String;
+        let operator_user_id: String;
+        let operator_email = "operator@admin.com";
+        let member_user_id: String;
+        let operator_api_key: String;
+
+        {
+            let mut conn = state.db.get().unwrap();
+
+            let org = create_test_org(&mut conn, "Test Org");
+            let (member_user, _, _) =
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
+            let license = create_test_license(
+                &conn,
+                &project.id,
+                &product.id,
+                Some(future_timestamp(ONE_YEAR)),
+            );
+
+            let (operator_user, op_key) =
+                create_test_operator(&mut conn, operator_email, OperatorRole::Admin);
+
+            org_id = org.id;
+            project_id = project.id;
+            license_id = license.id;
+            operator_user_id = operator_user.id;
+            member_user_id = member_user.id;
+            operator_api_key = op_key;
+        }
+
+        // Operator revokes a license while impersonating the owner
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/orgs/{}/projects/{}/licenses/{}/revoke",
+                        org_id, project_id, license_id
+                    ))
+                    .header("Authorization", format!("Bearer {}", operator_api_key))
+                    .header("X-On-Behalf-Of", &member_user_id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "impersonated license revocation should succeed"
+        );
+
+        // Query audit logs
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/orgs/{}/audit-logs?action=revoke_license",
+                        org_id
+                    ))
+                    .header("Authorization", format!("Bearer {}", operator_api_key))
+                    .header("X-On-Behalf-Of", &member_user_id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let json = body_json(response).await;
+        let items = json["items"].as_array().unwrap();
+        assert!(
+            !items.is_empty(),
+            "should have audit log for license revocation"
+        );
+
+        let log = &items[0];
+
+        // user_id should be the impersonated member
+        assert_eq!(
+            log["user_id"], member_user_id,
+            "user_id should be the impersonated member"
+        );
+
+        // details.impersonator should contain the operator's info
+        let details = log["details"].as_object().unwrap();
+        let impersonator = details
+            .get("impersonator")
+            .expect("License revocation via impersonation should have impersonator in details");
+
+        assert!(
+            !impersonator.is_null(),
+            "impersonator field should be populated"
+        );
+        let imp = impersonator.as_object().unwrap();
+        assert_eq!(
+            imp["user_id"], operator_user_id,
+            "impersonator.user_id should be the operator"
+        );
+        assert_eq!(
+            imp["email"], operator_email,
+            "impersonator.email should be the operator's email"
+        );
+    }
+
     /// Verify that direct operator access (without impersonation) is logged correctly.
     /// Tests adding an org member via synthetic owner access.
     #[tokio::test]

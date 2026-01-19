@@ -39,7 +39,11 @@ pub async fn create_product(
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::CreateProduct)
         .resource("product", &product.id)
-        .details(&serde_json::json!({ "name": input.name, "tier": input.tier }))
+        .details(&serde_json::json!({
+            "name": input.name,
+            "tier": input.tier,
+            "impersonator": ctx.impersonator_json()
+        }))
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(product.name.clone()))
@@ -110,7 +114,11 @@ pub async fn update_product(
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::UpdateProduct)
         .resource("product", &path.product_id)
-        .details(&serde_json::json!({ "name": input.name, "tier": input.tier }))
+        .details(&serde_json::json!({
+            "name": input.name,
+            "tier": input.tier,
+            "impersonator": ctx.impersonator_json()
+        }))
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(existing.name.clone()))
@@ -149,7 +157,10 @@ pub async fn delete_product(
         .actor(ActorType::User, Some(&ctx.member.user_id))
         .action(AuditAction::DeleteProduct)
         .resource("product", &path.product_id)
-        .details(&serde_json::json!({ "name": existing.name }))
+        .details(&serde_json::json!({
+            "name": existing.name,
+            "impersonator": ctx.impersonator_json()
+        }))
         .org(&path.org_id)
         .project(&path.project_id)
         .names(&ctx.audit_names().resource(existing.name.clone()))
@@ -192,7 +203,8 @@ pub async fn restore_product(
         .resource("product", &path.product_id)
         .details(&serde_json::json!({
             "name": existing.name,
-            "force": input.force
+            "force": input.force,
+            "impersonator": ctx.impersonator_json()
         }))
         .org(&path.org_id)
         .project(&path.project_id)
