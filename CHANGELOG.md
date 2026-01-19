@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [0.2.0] - 2026-01-20
+
+### Added
+
+- Audit logging for public endpoints (`/buy`, `/callback`, `/redeem`, `/validate`)
+- Cross-tab license detection in React `useLicense` hook — automatically syncs when license is activated in another tab
+- License creation API (`POST /orgs/.../licenses`) now returns full license details including activation code
+- Activation code emails now display prefix as non-selectable (CSS `user-select: none`) for easier copying
+- `/redeem` endpoint normalizes activation codes to handle whitespace/formatting variations
+
+### Changed
+
+- **Breaking**: Replaced `has_stripe`/`has_lemonsqueezy` booleans with `configured_services` map in organization responses
+- **Breaking**: Removed per-request `redirect_url` from SDKs — redirect URL is now configured per-project only
+- **Breaking**: Replaced `ProductPaymentConfig` with `ProductProviderLink` for payment provider integration
+- **Breaking**: Paginated response fields reordered — metadata (`page`, `per_page`, `total`, `total_pages`) now appears before `items`
+- Organization defaults now grouped by category in API responses
+- Email copy updated to clarify "8-character code (after the prefix)"
+
+### Fixed
+
+- React `useLicense()` hook not updating when license activated in another hook instance
+- `UpdateProduct` deserialization for nullable fields (`device_limit`, `activation_limit`, `license_exp_days`, `updates_exp_days`)
+- SDK response field casing now consistent (camelCase in TypeScript SDK)
+- Stripe webhook email extraction from `customer_details`
+- React SDK double-activation issue on mount
+- Impersonation audit logging regression — `actor_user_id` now correctly records impersonated user
+
+
 ## [0.1.2] - 2026-01-19
 
 ### Changed
