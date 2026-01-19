@@ -20,6 +20,34 @@ const MAX_CODE_LEN: usize = 64;
 const MAX_DEVICE_ID_LEN: usize = 256;
 const MAX_DEVICE_NAME_LEN: usize = 256;
 
+/// Normalize an activation code to canonical format (PREFIX-XXXX-XXXX).
+///
+/// The email displays codes with spaces instead of dashes for easier copying,
+/// so we accept both formats:
+/// - `PREFIX-XXXX-XXXX` (canonical)
+/// - `PREFIX-XXXX XXXX` (email display format)
+/// - `PREFIX- XXXX XXXX` (email text format with extra space)
+///
+/// Also handles extra whitespace that users might accidentally include.
+fn normalize_activation_code(code: &str) -> String {
+    // Remove extra whitespace and normalize to dashes
+    let trimmed = code.trim();
+
+    // Split on any whitespace or dashes
+    let parts: Vec<&str> = trimmed
+        .split(|c: char| c.is_whitespace() || c == '-')
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    // If we have exactly 3 parts (PREFIX, XXXX, XXXX), join with dashes
+    if parts.len() == 3 {
+        format!("{}-{}-{}", parts[0], parts[1], parts[2])
+    } else {
+        // Fallback: just trim whitespace
+        trimmed.to_string()
+    }
+}
+
 /// Request body for POST /redeem (using short-lived activation code)
 #[derive(Debug, Deserialize)]
 pub struct RedeemRequest {
@@ -114,9 +142,12 @@ pub async fn redeem_with_code(
         .ok()
         .ok_or_else(|| AppError::BadRequest(msg::INVALID_DEVICE_TYPE.into()))?;
 
+    // Normalize the code (accept both dash and space separators)
+    let normalized_code = normalize_activation_code(&req.code);
+
     // Atomically claim the activation code (prevents race conditions where multiple
     // concurrent requests could use the same code to create multiple devices)
-    let activation_code = queries::try_claim_activation_code(&conn, &req.code)?
+    let activation_code = queries::try_claim_activation_code(&conn, &normalized_code)?
         .ok_or_else(|| AppError::Forbidden(msg::CANNOT_BE_REDEEMED.into()))?;
 
     // Get the license
@@ -246,4 +277,52 @@ fn redeem_license_internal(
         activation_code: new_activation_code.code,
         activation_code_expires_at: new_activation_code.expires_at,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_activation_code() {
+        // Canonical format (no change)
+        assert_eq!(
+            normalize_activation_code("MYAPP-AB3D-EF5G"),
+            "MYAPP-AB3D-EF5G"
+        );
+
+        // Email HTML display format (space between code parts)
+        assert_eq!(
+            normalize_activation_code("MYAPP-AB3D EF5G"),
+            "MYAPP-AB3D-EF5G"
+        );
+
+        // Email text format (extra space after prefix)
+        assert_eq!(
+            normalize_activation_code("MYAPP-  AB3D EF5G"),
+            "MYAPP-AB3D-EF5G"
+        );
+
+        // All spaces
+        assert_eq!(
+            normalize_activation_code("MYAPP AB3D EF5G"),
+            "MYAPP-AB3D-EF5G"
+        );
+
+        // Leading/trailing whitespace
+        assert_eq!(
+            normalize_activation_code("  MYAPP-AB3D-EF5G  "),
+            "MYAPP-AB3D-EF5G"
+        );
+
+        // Tabs and mixed whitespace
+        assert_eq!(
+            normalize_activation_code("MYAPP\tAB3D  EF5G"),
+            "MYAPP-AB3D-EF5G"
+        );
+
+        // Non-standard format preserved (fallback)
+        assert_eq!(normalize_activation_code("invalid"), "invalid");
+        assert_eq!(normalize_activation_code("  invalid  "), "invalid");
+    }
 }

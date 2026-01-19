@@ -26,6 +26,48 @@ fn format_date(timestamp: i64) -> String {
         .unwrap_or_else(|| "Unknown date".to_string())
 }
 
+/// Format an activation code for HTML display.
+///
+/// Input: `PREFIX-XXXX-XXXX`
+/// Output: `<span style="...">PREFIX-</span>XXXX-XXXX`
+///
+/// The prefix is styled to be non-selectable (so users copy only the code part).
+fn format_code_html(code: &str) -> String {
+    // Parse PREFIX-XXXX-XXXX format
+    let parts: Vec<&str> = code.split('-').collect();
+    if parts.len() == 3 {
+        let prefix = parts[0];
+        let part1 = parts[1];
+        let part2 = parts[2];
+        format!(
+            r#"<span style="user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; color: #999; font-weight: normal;">{}-</span>{}-{}"#,
+            prefix, part1, part2
+        )
+    } else {
+        // Fallback: just return the code as-is
+        code.to_string()
+    }
+}
+
+/// Format an activation code for plain text display.
+///
+/// Input: `PREFIX-XXXX-XXXX`
+/// Output: `PREFIX-  XXXX-XXXX` (extra space after prefix for visual separation)
+fn format_code_text(code: &str) -> String {
+    // Parse PREFIX-XXXX-XXXX format
+    let parts: Vec<&str> = code.split('-').collect();
+    if parts.len() == 3 {
+        let prefix = parts[0];
+        let part1 = parts[1];
+        let part2 = parts[2];
+        // Extra space after prefix- so users can more easily select just the code part
+        format!("{}-  {}-{}", prefix, part1, part2)
+    } else {
+        // Fallback: just return the code as-is
+        code.to_string()
+    }
+}
+
 /// Result of attempting to send an activation code email.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmailSendResult {
@@ -223,14 +265,16 @@ impl EmailService {
             config.product_name, config.project_name
         );
         let date = format_date(config.purchased_at);
+        let code_text = format_code_text(config.code);
+        let code_html = format_code_html(config.code);
         let text = format!(
-            "Your {} license for {}\n\nYou have a license for {}. Here is your activation code:\n\n{} (purchased {})\nActivation code: {}\n\nThis activation code expires in {} minutes. You can request a new one anytime.\n\nEnter this code in {} to activate your license.\n\nIf you didn't request this, you can ignore this email.",
+            "Your {} license for {}\n\nYou have a license for {}. Here is your activation code:\n\n{} (purchased {})\nActivation code: {}\n\nThis activation code expires in {} minutes. You can request a new one anytime.\n\nEnter the 8-character code (after the prefix) in {} to activate your license.\n\nIf you didn't request this, you can ignore this email.",
             config.product_name,
             config.project_name,
             config.project_name,
             config.product_name,
             date,
-            config.code,
+            code_text,
             config.expires_in_minutes,
             config.project_name
         );
@@ -248,7 +292,7 @@ impl EmailService {
 </div>
 </div>
 <p style="color: #666;">This activation code expires in {} minutes. You can request a new one anytime.</p>
-<p>Enter this code in <strong>{}</strong> to activate your license.</p>
+<p>Enter the 8-character code (after the prefix) in <strong>{}</strong> to activate your license.</p>
 <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
 <p style="color: #999; font-size: 12px;">If you didn't request this, you can ignore this email.</p>
 </body>
@@ -258,7 +302,7 @@ impl EmailService {
             config.project_name,
             config.product_name,
             date,
-            config.code,
+            code_html,
             config.expires_in_minutes,
             config.project_name
         );
@@ -622,13 +666,14 @@ impl EmailService {
         );
         for license in &config.licenses {
             let date = format_date(license.purchased_at);
+            let code_text = format_code_text(&license.code);
             text.push_str(&format!(
                 "{} (purchased {})\nActivation code: {}\n\n",
-                license.product_name, date, license.code
+                license.product_name, date, code_text
             ));
         }
         text.push_str(&format!(
-            "These activation codes expire in {} minutes. You can request new ones anytime.\n\nEnter the appropriate code in {} to activate your license.\n\nIf you didn't request this, you can ignore this email.",
+            "These activation codes expire in {} minutes. You can request new ones anytime.\n\nEnter the appropriate 8-character code (after the prefix) in {} to activate your license.\n\nIf you didn't request this, you can ignore this email.",
             config.expires_in_minutes, config.project_name
         ));
 
@@ -636,6 +681,7 @@ impl EmailService {
         let mut license_blocks = String::new();
         for license in &config.licenses {
             let date = format_date(license.purchased_at);
+            let code_html = format_code_html(&license.code);
             license_blocks.push_str(&format!(
                 r#"<div style="margin-bottom: 24px;">
 <p style="margin-bottom: 8px;"><strong>{}</strong> <span style="color: #666; font-size: 14px;">(purchased {})</span></p>
@@ -643,7 +689,7 @@ impl EmailService {
 <code style="font-size: 24px; font-weight: bold; letter-spacing: 2px; color: #333;">{}</code>
 </div>
 </div>"#,
-                license.product_name, date, license.code
+                license.product_name, date, code_html
             ));
         }
 
@@ -656,7 +702,7 @@ impl EmailService {
 <p>You have multiple licenses for <strong>{}</strong>. Here are your activation codes:</p>
 {}
 <p style="color: #666;">These activation codes expire in {} minutes. You can request new ones anytime.</p>
-<p>Enter the appropriate code in <strong>{}</strong> to activate your license.</p>
+<p>Enter the appropriate 8-character code (after the prefix) in <strong>{}</strong> to activate your license.</p>
 <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
 <p style="color: #999; font-size: 12px;">If you didn't request this, you can ignore this email.</p>
 </body>
@@ -748,5 +794,29 @@ mod tests {
         // Total max wait time should be reasonable (21 seconds)
         let total_delay: u64 = RETRY_DELAYS.iter().sum();
         assert_eq!(total_delay, 21);
+    }
+
+    #[test]
+    fn test_format_code_html() {
+        // Standard format
+        let html = format_code_html("MYAPP-AB3D-EF5G");
+        assert!(html.contains("user-select: none"));
+        assert!(html.contains("MYAPP-")); // Prefix with dash (non-selectable)
+        assert!(html.contains("AB3D-EF5G")); // Code parts with dash
+
+        // Fallback for non-standard format
+        let html = format_code_html("invalid");
+        assert_eq!(html, "invalid");
+    }
+
+    #[test]
+    fn test_format_code_text() {
+        // Standard format - extra space after prefix for easier selection
+        let text = format_code_text("MYAPP-AB3D-EF5G");
+        assert_eq!(text, "MYAPP-  AB3D-EF5G");
+
+        // Fallback for non-standard format
+        let text = format_code_text("invalid");
+        assert_eq!(text, "invalid");
     }
 }
