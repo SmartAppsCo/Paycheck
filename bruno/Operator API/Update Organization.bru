@@ -48,7 +48,8 @@ docs {
     - webhook_secret: LemonSqueezy webhook signing secret
   - resend_api_key: Resend API key for email delivery (overrides system default)
   - payment_provider: Default payment provider ("stripe" or "lemonsqueezy", or null to clear)
-  
+    Note: Setting payment_provider requires that provider's config to already exist
+
   All sensitive configuration (payment configs, Resend API key) is encrypted at rest.
   All projects in this organization share the same payment and email configuration.
   
