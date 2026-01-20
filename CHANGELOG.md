@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [0.3.0] - 2026-01-20
+
+### Added
+
+- `device_inactive_days` product field — excludes devices not seen within N days from device limit count, allowing natural device rotation
+- `syncInterval` option in React `useLicense` hook for periodic server check-ins (minimum 5 minutes)
+- License details now include `active_device_count` and `total_device_count` fields
+
+### Changed
+
+- **Breaking**: `device_limit` and `activation_limit` changed from `i32` (0 = unlimited) to `Option<i32>` (null = unlimited)
+- Null values for optional fields are now always serialized explicitly in API responses
+
+### Fixed
+
+- SDK types for `activation_limit` and `device_limit` now correctly typed as nullable (`Option<i32>` in Rust, `number | null` in TypeScript)
+
+
 ## [0.2.0] - 2026-01-20
 
 ### Added
