@@ -594,6 +594,7 @@ fn test_update_product() {
         updates_exp_days: None,
         activation_limit: Some(10),
         device_limit: Some(5),
+        device_inactive_days: None,
         features: Some(vec![
             "feature1".to_string(),
             "feature2".to_string(),

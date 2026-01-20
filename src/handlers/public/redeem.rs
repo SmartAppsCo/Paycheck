@@ -241,6 +241,7 @@ fn redeem_license_internal(
         device_name,
         product.device_limit,
         product.activation_limit,
+        product.device_inactive_days,
     )?;
 
     // Calculate expirations

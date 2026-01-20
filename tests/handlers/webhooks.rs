@@ -675,6 +675,7 @@ fn test_checkout_creates_license_with_product_expirations() {
         updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
         activation_limit: 5,
         device_limit: 3,
+        device_inactive_days: None,
         features: vec![],
     };
     let product = queries::create_product(&mut conn, &project.id, &input)
@@ -766,6 +767,7 @@ fn test_checkout_perpetual_license() {
         updates_exp_days: None,
         activation_limit: 5,
         device_limit: 3,
+        device_inactive_days: None,
         features: vec![],
     };
     let product = queries::create_product(&mut conn, &project.id, &input)

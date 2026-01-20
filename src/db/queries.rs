@@ -2283,8 +2283,8 @@ pub fn create_product(
     let features_json = serde_json::to_string(&input.features)?;
 
     conn.execute(
-        "INSERT INTO products (id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, features, price_cents, currency, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        "INSERT INTO products (id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, device_inactive_days, features, price_cents, currency, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             &id,
             project_id,
@@ -2294,6 +2294,7 @@ pub fn create_product(
             input.updates_exp_days,
             input.activation_limit,
             input.device_limit,
+            input.device_inactive_days,
             &features_json,
             input.price_cents,
             &input.currency,
@@ -2310,6 +2311,7 @@ pub fn create_product(
         updates_exp_days: input.updates_exp_days,
         activation_limit: input.activation_limit,
         device_limit: input.device_limit,
+        device_inactive_days: input.device_inactive_days,
         features: input.features.clone(),
         price_cents: input.price_cents,
         currency: input.currency.clone(),
@@ -2395,6 +2397,7 @@ pub fn update_product(conn: &Connection, id: &str, input: &UpdateProduct) -> Res
         .set_opt("updates_exp_days", input.updates_exp_days)
         .set_opt("activation_limit", input.activation_limit)
         .set_opt("device_limit", input.device_limit)
+        .set_opt("device_inactive_days", input.device_inactive_days)
         .set_opt("features", features_json)
         .set_opt("price_cents", input.price_cents)
         .set_opt("currency", input.currency.clone())
@@ -3293,6 +3296,7 @@ pub fn acquire_device_atomic(
     name: Option<&str>,
     device_limit: i32,
     activation_limit: i32,
+    device_inactive_days: Option<i32>,
 ) -> Result<DeviceAcquisitionResult> {
     // Use IMMEDIATE to acquire write lock at transaction start, preventing TOCTOU races
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -3323,11 +3327,21 @@ pub fn acquire_device_atomic(
     }
 
     // New device - check limits atomically within the transaction
-    let current_device_count: i32 = tx.query_row(
-        "SELECT COUNT(*) FROM devices WHERE license_id = ?1",
-        params![license_id],
-        |row| row.get(0),
-    )?;
+    // If device_inactive_days is set, only count devices seen within that threshold
+    let current_device_count: i32 = if let Some(inactive_days) = device_inactive_days {
+        let cutoff = now() - (inactive_days as i64 * 86400);
+        tx.query_row(
+            "SELECT COUNT(*) FROM devices WHERE license_id = ?1 AND last_seen_at >= ?2",
+            params![license_id, cutoff],
+            |row| row.get(0),
+        )?
+    } else {
+        tx.query_row(
+            "SELECT COUNT(*) FROM devices WHERE license_id = ?1",
+            params![license_id],
+            |row| row.get(0),
+        )?
+    };
 
     if device_limit > 0 && current_device_count >= device_limit {
         // No need to commit - just drop the transaction
@@ -3450,6 +3464,26 @@ pub fn count_devices_for_license(conn: &Connection, license_id: &str) -> Result<
         |row| row.get(0),
     )
     .map_err(Into::into)
+}
+
+/// Count devices that have been seen within the inactive_days threshold.
+/// If inactive_days is None, returns the total device count.
+pub fn count_active_devices_for_license(
+    conn: &Connection,
+    license_id: &str,
+    inactive_days: Option<i32>,
+) -> Result<i32> {
+    if let Some(days) = inactive_days {
+        let cutoff = now() - (days as i64 * 86400);
+        conn.query_row(
+            "SELECT COUNT(*) FROM devices WHERE license_id = ?1 AND last_seen_at >= ?2",
+            params![license_id, cutoff],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+    } else {
+        count_devices_for_license(conn, license_id)
+    }
 }
 
 pub fn update_device_last_seen(conn: &Connection, id: &str) -> Result<()> {

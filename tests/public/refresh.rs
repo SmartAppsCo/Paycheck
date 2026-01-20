@@ -762,6 +762,7 @@ async fn test_refresh_with_expired_license_exp_fails() {
             updates_exp_days: Some(365),
             activation_limit: 5,
             device_limit: 3,
+        device_inactive_days: None,
             features: vec![],
         };
         let product = queries::create_product(&mut conn, &project.id, &input).unwrap();

@@ -291,6 +291,7 @@ fn seed_dev_data(state: &AppState) {
         updates_exp_days: Some(365),
         activation_limit: 0,
         device_limit: 5,
+        device_inactive_days: None,
         features: vec![
             "advanced-export".to_string(),
             "cloud-sync".to_string(),

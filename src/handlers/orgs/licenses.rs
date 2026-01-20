@@ -32,6 +32,11 @@ pub struct LicenseWithDevices {
     #[serde(flatten)]
     pub license: LicenseWithProduct,
     pub devices: Vec<Device>,
+    /// Number of devices currently counted against device_limit.
+    /// If product has device_inactive_days set, only devices seen within that window count.
+    pub active_device_count: i32,
+    /// Total device count regardless of activity
+    pub total_device_count: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -371,6 +376,9 @@ pub async fn get_license(
     }
 
     let devices = queries::list_devices_for_license(&conn, &license.id)?;
+    let total_device_count = devices.len() as i32;
+    let active_device_count =
+        queries::count_active_devices_for_license(&conn, &license.id, product.device_inactive_days)?;
 
     Ok(Json(LicenseWithDevices {
         license: LicenseWithProduct {
@@ -378,6 +386,8 @@ pub async fn get_license(
             product_name: product.name,
         },
         devices,
+        active_device_count,
+        total_device_count,
     }))
 }
 
@@ -608,6 +618,9 @@ pub async fn restore_license(
     let license = queries::get_license_by_id(&conn, &path.license_id)?
         .ok_or_else(|| AppError::Internal(msg::LICENSE_NOT_FOUND_AFTER_RESTORE.into()))?;
     let devices = queries::list_devices_for_license(&conn, &license.id)?;
+    let total_device_count = devices.len() as i32;
+    let active_device_count =
+        queries::count_active_devices_for_license(&conn, &license.id, product.device_inactive_days)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))
@@ -629,5 +642,7 @@ pub async fn restore_license(
             product_name: product.name,
         },
         devices,
+        active_device_count,
+        total_device_count,
     }))
 }

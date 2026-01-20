@@ -514,6 +514,7 @@ async fn test_license_shows_correct_limits() {
             updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
             activation_limit: 10,
             device_limit: 5,
+        device_inactive_days: None,
             features: vec![],
         };
         let product =

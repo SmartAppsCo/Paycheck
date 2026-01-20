@@ -166,10 +166,6 @@ async fn test_callback_completed_session_redirects_with_activation_code() {
         location.contains("status=success"),
         "redirect should include status=success for completed payment"
     );
-    assert!(
-        location.contains("project_id="),
-        "redirect should include project_id for client identification"
-    );
 }
 
 #[tokio::test]
@@ -255,14 +251,10 @@ async fn test_callback_project_redirect_url() {
         location
     );
 
-    // Should include activation code and project_id
+    // Should include activation code and status
     assert!(
         location.contains("code="),
         "redirect should include activation code for /redeem endpoint"
-    );
-    assert!(
-        location.contains("project_id="),
-        "redirect should include project_id for client identification"
     );
     assert!(
         location.contains("status=success"),

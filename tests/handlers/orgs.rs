@@ -745,6 +745,7 @@ mod license_tests {
                 updates_exp_days: None,
                 activation_limit: 5,
                 device_limit: 3,
+        device_inactive_days: None,
                 features: vec![],
             };
             let product = queries::create_product(&mut conn, &project.id, &input).unwrap();

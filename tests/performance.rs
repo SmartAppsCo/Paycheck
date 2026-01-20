@@ -301,6 +301,7 @@ async fn test_license_many_devices() {
         updates_exp_days: Some(365),
         activation_limit: 1000, // High activation limit
         device_limit: 0,        // 0 = unlimited
+        device_inactive_days: None,
         features: vec!["unlimited_devices".to_string()],
     };
     let product =

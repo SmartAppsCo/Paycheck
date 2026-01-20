@@ -158,6 +158,7 @@ pub fn create_test_product(conn: &Connection, project_id: &str, name: &str, tier
         updates_exp_days: Some(365),
         activation_limit: 5,
         device_limit: 3,
+        device_inactive_days: None,
         features: vec!["feature1".to_string(), "feature2".to_string()],
         price_cents: Some(4999),
         currency: Some("usd".to_string()),

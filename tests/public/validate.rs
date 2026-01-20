@@ -526,6 +526,7 @@ async fn test_validate_perpetual_license_returns_valid() {
             updates_exp_days: None,
             activation_limit: 5,
             device_limit: 3,
+        device_inactive_days: None,
             features: vec![],
         };
         let product =

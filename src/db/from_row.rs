@@ -75,7 +75,7 @@ pub const PROJECT_COLS: &str = "id, org_id, name, license_key_prefix, private_ke
 
 pub const PROJECT_MEMBER_COLS: &str = "id, org_member_id, project_id, role, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
-pub const PRODUCT_COLS: &str = "id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, features, price_cents, currency, created_at, deleted_at, deleted_cascade_depth";
+pub const PRODUCT_COLS: &str = "id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, device_inactive_days, features, price_cents, currency, created_at, deleted_at, deleted_cascade_depth";
 
 pub const PROVIDER_LINK_COLS: &str = "id, product_id, provider, linked_id, created_at, updated_at";
 
@@ -255,7 +255,7 @@ impl FromRow for ProjectMemberWithDetails {
 
 impl FromRow for Product {
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        let features_str: String = row.get(8)?;
+        let features_str: String = row.get(9)?;
         Ok(Product {
             id: row.get(0)?,
             project_id: row.get(1)?,
@@ -265,12 +265,13 @@ impl FromRow for Product {
             updates_exp_days: row.get(5)?,
             activation_limit: row.get(6)?,
             device_limit: row.get(7)?,
+            device_inactive_days: row.get(8)?,
             features: serde_json::from_str(&features_str).unwrap_or_default(),
-            price_cents: row.get(9)?,
-            currency: row.get(10)?,
-            created_at: row.get(11)?,
-            deleted_at: row.get(12)?,
-            deleted_cascade_depth: row.get(13)?,
+            price_cents: row.get(10)?,
+            currency: row.get(11)?,
+            created_at: row.get(12)?,
+            deleted_at: row.get(13)?,
+            deleted_cascade_depth: row.get(14)?,
         })
     }
 }

@@ -149,6 +149,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             updates_exp_days INTEGER,
             activation_limit INTEGER NOT NULL DEFAULT 0,
             device_limit INTEGER NOT NULL DEFAULT 0,
+            device_inactive_days INTEGER,
             features TEXT NOT NULL DEFAULT '[]',
             price_cents INTEGER,
             currency TEXT,

@@ -28,6 +28,10 @@ pub struct Product {
     pub updates_exp_days: Option<i32>,
     pub activation_limit: i32,
     pub device_limit: i32,
+    /// Devices not seen for this many days don't count against device_limit.
+    /// None = disabled (all devices count regardless of activity).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_inactive_days: Option<i32>,
     pub features: Vec<String>,
     /// Canonical price in cents (for display and future provider sync)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,6 +60,8 @@ pub struct CreateProduct {
     pub activation_limit: i32,
     #[serde(default)]
     pub device_limit: i32,
+    #[serde(default)]
+    pub device_inactive_days: Option<i32>,
     #[serde(default)]
     pub features: Vec<String>,
     #[serde(default)]
@@ -86,6 +92,8 @@ pub struct UpdateProduct {
     pub updates_exp_days: Option<Option<i32>>,
     pub activation_limit: Option<i32>,
     pub device_limit: Option<i32>,
+    #[serde(default, deserialize_with = "deserialize_optional_nullable")]
+    pub device_inactive_days: Option<Option<i32>>,
     pub features: Option<Vec<String>>,
     #[serde(default, deserialize_with = "deserialize_optional_nullable")]
     pub price_cents: Option<Option<i64>>,
