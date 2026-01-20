@@ -169,12 +169,12 @@ export interface LicenseInfo {
   updatesExpiresAt: number | null;
   /** Number of times license has been activated */
   activationCount: number;
-  /** Maximum activations allowed */
-  activationLimit: number;
+  /** Maximum activations allowed (null = unlimited) */
+  activationLimit: number | null;
   /** Current number of active devices */
   deviceCount: number;
-  /** Maximum devices allowed */
-  deviceLimit: number;
+  /** Maximum devices allowed (null = unlimited) */
+  deviceLimit: number | null;
   /** Active devices */
   devices: LicenseDeviceInfo[];
 }

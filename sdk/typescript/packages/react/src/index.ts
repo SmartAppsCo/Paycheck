@@ -26,6 +26,8 @@ export type { FeatureGateProps, LicenseGateProps } from './hooks';
 export type {
   PaycheckOptions,
   LicenseClaims,
+  LicenseInfo,
+  LicenseDeviceInfo,
   ActivationResult,
   DeactivateResult,
   DeviceInfo,

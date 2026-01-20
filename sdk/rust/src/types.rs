@@ -206,12 +206,12 @@ pub struct LicenseInfo {
     pub updates_expires_at: Option<i64>,
     /// Number of times license has been activated
     pub activation_count: i32,
-    /// Maximum activations allowed
-    pub activation_limit: i32,
+    /// Maximum activations allowed (None = unlimited)
+    pub activation_limit: Option<i32>,
     /// Current number of active devices
     pub device_count: i32,
-    /// Maximum devices allowed
-    pub device_limit: i32,
+    /// Maximum devices allowed (None = unlimited)
+    pub device_limit: Option<i32>,
     /// Active devices
     pub devices: Vec<LicenseDeviceInfo>,
 }
@@ -232,9 +232,9 @@ pub(crate) struct LicenseInfoResponse {
     pub expires_at: Option<i64>,
     pub updates_expires_at: Option<i64>,
     pub activation_count: i32,
-    pub activation_limit: i32,
+    pub activation_limit: Option<i32>,
     pub device_count: i32,
-    pub device_limit: i32,
+    pub device_limit: Option<i32>,
     pub devices: Vec<LicenseDeviceInfoResponse>,
 }
 
