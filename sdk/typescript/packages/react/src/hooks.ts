@@ -26,9 +26,13 @@ export interface UseLicenseOptions {
 
 /**
  * Return type for useLicense hook
+ *
+ * **Note on expiration:** The `isExpired` and `isLicensed` fields check `license_exp`
+ * (the business logic expiration), NOT the JWT's `exp` claim. The JWT `exp` (~1 hour)
+ * is only used internally for token refresh. See `LicenseClaims` for details.
  */
 export interface UseLicenseResult {
-  /** Decoded license claims (null if no license) */
+  /** Decoded license claims (null if no license). See LicenseClaims for expiration details. */
   license: LicenseClaims | null;
   /** Loading state (true on initial load and during async operations) */
   loading: boolean;
@@ -38,7 +42,7 @@ export interface UseLicenseResult {
   tier: string | null;
   /** Enabled features */
   features: string[];
-  /** Whether the license has expired */
+  /** Whether the license has expired (checks license_exp, not JWT exp) */
   isExpired: boolean;
   /** Error message if validation failed */
   error: string | null;
@@ -70,6 +74,10 @@ export interface UseLicenseResult {
 /**
  * Main hook for license state and actions.
  * Performs Ed25519 signature verification for secure offline validation.
+ *
+ * **Expiration handling:** This hook checks `license_exp` (business logic expiration),
+ * not the JWT's `exp` claim. The JWT `exp` (~1 hour) is handled automatically via
+ * auto-refresh. See `LicenseClaims` in @paycheck/sdk for full expiration documentation.
  *
  * @param options - Hook options
  * @param options.sync - Use sync() instead of validate() for online apps

@@ -83,7 +83,10 @@ Audit Logs (immutable, separate database)
 - **Payment config at org level**: Stripe/LemonSqueezy API keys and webhook secrets are configured per-organization, shared across all projects (no per-project payment setup needed)
 - **Envelope encryption**: Private keys (per-project) and payment provider configs (per-org) are encrypted at rest using AES-256-GCM with DEKs derived via HKDF from a master key
 - **Email as identity**: Purchase email hash stored for license recovery (no PII in DB)
-- Three expirations: `exp` (1hr JWT validity), `license_exp` (when access ends), `updates_exp` (when new versions gate)
+- **Three expiration claims** (see `sdk/CORE.md` for details):
+  - `exp` (~1 hour): JWT freshness window. Controls revocation propagation and claims refresh. Expired JWTs can still be refreshed if license is valid.
+  - `license_exp`: Actual license expiration (null = perpetual). This is what apps check for "is user licensed?"
+  - `updates_exp`: Version access cutoff (null = all versions). Compare against app build timestamp.
 - Identity types: `uuid` (web, localStorage), `machine` (desktop, hardware-derived)
 - JWTs stored unencrypted in localStorage (encryption would be security theater)
 - Device limits and activation limits tracked server-side (not in JWT—they'd be stale)

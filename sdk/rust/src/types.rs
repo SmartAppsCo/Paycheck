@@ -120,7 +120,21 @@ impl From<RedeemResponse> for ActivationResult {
     }
 }
 
-/// Decoded JWT claims
+/// Decoded JWT claims.
+///
+/// # Important: Three Expiration-Related Claims
+///
+/// - `exp`: JWT expiration (~1 hour). Controls token freshness and revocation propagation.
+///   Expired JWTs can still be refreshed via `/refresh` if the license is valid.
+///   The SDK uses this internally for auto-refresh. NOT for license validity checks.
+///
+/// - `license_exp`: License expiration (business logic). Controls when the user's access ends.
+///   Can be `None` for perpetual licenses. This is what you check for "is user licensed?"
+///
+/// - `updates_exp`: Version access expiration. Controls which versions the user can use.
+///   Compare against your app's build timestamp. Can be `None` for lifetime updates.
+///
+/// See `sdk/CORE.md` for full documentation on expiration handling.
 #[derive(Debug, Clone, Deserialize)]
 pub struct LicenseClaims {
     // Standard JWT claims
@@ -134,19 +148,29 @@ pub struct LicenseClaims {
     pub jti: String,
     /// Issued at (Unix timestamp)
     pub iat: i64,
-    /// Expires (Unix timestamp, ~1 hour)
+    /// JWT expiration (Unix timestamp, ~1 hour from issuance).
+    ///
+    /// This is NOT the license expiration - see `license_exp` for that.
+    /// Used for token freshness and revocation propagation.
+    /// Expired JWTs can still be refreshed if the underlying license is valid.
     pub exp: i64,
 
     // Paycheck claims
-    /// When license access ends (None = perpetual)
+    /// When license ACCESS ends (Unix timestamp, or None = perpetual/never expires).
+    ///
+    /// This is the business logic expiration - check this for "is user licensed?"
+    /// Different from `exp` which is just JWT validity (~1 hour).
     pub license_exp: Option<i64>,
-    /// When version access ends (None = all versions)
+    /// When VERSION ACCESS ends (Unix timestamp, or None = all versions covered).
+    ///
+    /// Compare against your app's build/release timestamp to determine if the user
+    /// can access this version. Use `covers_version(timestamp)` helper.
     pub updates_exp: Option<i64>,
-    /// Product tier
+    /// Product tier (e.g., "free", "pro", "enterprise")
     pub tier: String,
-    /// Enabled features
+    /// Enabled feature flags for `has_feature()` checks
     pub features: Vec<String>,
-    /// Device identifier
+    /// Device identifier (verified against current device to prevent token theft)
     pub device_id: String,
     /// Device type
     pub device_type: DeviceType,

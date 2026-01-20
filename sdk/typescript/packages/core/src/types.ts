@@ -98,7 +98,21 @@ export interface ActivationResult {
 }
 
 /**
- * Decoded JWT claims
+ * Decoded JWT claims.
+ *
+ * **Important: Three Expiration-Related Claims**
+ *
+ * - `exp`: JWT expiration (~1 hour). Controls token freshness and revocation propagation.
+ *   Expired JWTs can still be refreshed via `/refresh` if the license is valid.
+ *   The SDK uses this internally for auto-refresh. NOT for license validity checks.
+ *
+ * - `license_exp`: License expiration (business logic). Controls when the user's access ends.
+ *   Can be `null` for perpetual licenses. This is what you check for "is user licensed?"
+ *
+ * - `updates_exp`: Version access expiration. Controls which versions the user can use.
+ *   Compare against your app's build timestamp. Can be `null` for lifetime updates.
+ *
+ * @see https://github.com/anthropics/paycheck/blob/main/sdk/CORE.md for full documentation
  */
 export interface LicenseClaims {
   // Standard JWT claims
@@ -112,19 +126,35 @@ export interface LicenseClaims {
   jti: string;
   /** Issued at (Unix timestamp) */
   iat: number;
-  /** Expires (Unix timestamp, ~1 hour) */
+  /**
+   * JWT expiration (Unix timestamp, ~1 hour from issuance).
+   *
+   * This is NOT the license expiration - see `license_exp` for that.
+   * Used for token freshness and revocation propagation.
+   * Expired JWTs can still be refreshed if the underlying license is valid.
+   */
   exp: number;
 
   // Paycheck claims
-  /** When license access ends (null = perpetual) */
+  /**
+   * When license ACCESS ends (Unix timestamp, or null = perpetual/never expires).
+   *
+   * This is the business logic expiration - check this for "is user licensed?"
+   * Different from `exp` which is just JWT validity (~1 hour).
+   */
   license_exp: number | null;
-  /** When version access ends (null = all versions) */
+  /**
+   * When VERSION ACCESS ends (Unix timestamp, or null = all versions covered).
+   *
+   * Compare against your app's build/release timestamp to determine if the user
+   * can access this version. Use `coversVersion(timestamp)` helper.
+   */
   updates_exp: number | null;
-  /** Product tier */
+  /** Product tier (e.g., "free", "pro", "enterprise") */
   tier: string;
-  /** Enabled features */
+  /** Enabled feature flags for hasFeature() checks */
   features: string[];
-  /** Device identifier */
+  /** Device identifier (verified against current device to prevent token theft) */
   device_id: string;
   /** Device type */
   device_type: DeviceType;

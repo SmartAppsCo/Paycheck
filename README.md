@@ -298,9 +298,37 @@ Product pricing (`price_cents`, `currency`) is stored on the Product for display
 }
 ```
 
-- `exp` — 1-hour JWT validity (activation window)
-- `license_exp` — When access ends (`null` = perpetual)
-- `updates_exp` — When new version access ends (app compares against build date)
+### Understanding Expiration Times
+
+Paycheck JWTs have **three expiration-related claims** that serve different purposes:
+
+| Claim | Typical Value | Purpose | Check When |
+|-------|---------------|---------|------------|
+| `exp` | ~1 hour | Token freshness | Auto-refresh trigger |
+| `license_exp` | null or future date | License validity | "Is user licensed?" |
+| `updates_exp` | null or future date | Version access | "Can user use this version?" |
+
+**`exp` — JWT Expiration (~1 hour)**
+
+The standard JWT `exp` controls token freshness, not license validity. It exists for:
+- **Revocation propagation**: If a license is revoked, the JWT remains locally valid until `exp`. Shorter = faster revocation.
+- **Claims freshness**: Periodic refresh picks up plan upgrades, feature changes, renewed subscriptions.
+
+**Key point:** Expired JWTs can still be refreshed via `/refresh` as long as the underlying license is valid.
+
+**`license_exp` — License Expiration (business logic)**
+
+This is the actual license expiration. Check this for "is the user licensed?"
+- `null` = perpetual license (one-time purchases)
+- Future timestamp = subscription end date or time-limited license
+
+**`updates_exp` — Version Access**
+
+Controls which versions the user can access. Compare against your app's build timestamp.
+- `null` = lifetime updates
+- Future timestamp = updates until that date
+
+See [`sdk/CORE.md`](sdk/CORE.md) for detailed SDK documentation.
 
 ## Security Model
 

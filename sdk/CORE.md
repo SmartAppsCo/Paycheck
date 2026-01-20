@@ -11,6 +11,96 @@ This document defines the core functions that every Paycheck SDK must implement.
 5. **Type-safe**: Strong typing for all public APIs
 6. **Secure**: Ed25519 signature verification ensures JWT authenticity offline
 
+---
+
+## Understanding JWT Expiration vs License Expiration
+
+Paycheck JWTs contain **three expiration-related claims** that serve different purposes:
+
+### `exp` — JWT Expiration (~1 hour)
+
+The standard JWT `exp` claim controls how long the token itself is considered fresh.
+
+**Purpose:**
+- **Revocation propagation**: If a license is revoked server-side, the JWT remains locally valid until `exp`. A shorter `exp` means revocations take effect faster.
+- **Claims freshness**: When the JWT is refreshed, the server returns current `tier`, `features`, and expiration dates. If a user upgraded their plan, the short `exp` ensures the app picks up changes within an hour.
+- **Refresh trigger**: The SDK uses `exp` to know when to call `/refresh` for updated data.
+
+**Key behaviors:**
+- Expired JWTs can still be refreshed via `/refresh` (up to 10 years old)
+- Expired JWTs can still be validated via `/validate` (endpoint uses JTI, not the JWT itself)
+- Offline validation should check `license_exp`, NOT `exp`
+
+### `license_exp` — License Expiration (business logic)
+
+The custom `license_exp` claim controls when the actual license access ends.
+
+**Purpose:**
+- Determines if the user has a valid license to use your software
+- Can be `null` for perpetual licenses (one-time purchases)
+- Set based on product configuration (e.g., 30 days for monthly, 365 for annual, null for lifetime)
+
+**Key behaviors:**
+- This is what your app should check for "is the user licensed?"
+- Once `license_exp` passes, the license is truly expired and cannot be refreshed
+- Perpetual licenses (`license_exp: null`) never expire
+
+### `updates_exp` — Version Access Expiration
+
+The `updates_exp` claim controls which versions the user can access.
+
+**Purpose:**
+- Enables "perpetual license with 1 year of updates" business models
+- Can be `null` for lifetime update access
+
+**Key behaviors:**
+- Compare against your app's build/release timestamp
+- `coversVersion(timestamp)` returns true if `updates_exp` is null or >= timestamp
+
+### Summary Table
+
+| Claim | Typical Value | Purpose | Check When |
+|-------|---------------|---------|------------|
+| `exp` | ~1 hour | Token freshness, revocation window | Auto-refresh trigger |
+| `license_exp` | null, or future date | License validity | "Is user licensed?" |
+| `updates_exp` | null, or future date | Version access | "Can user use this version?" |
+
+### Example Scenarios
+
+**One-time purchase with lifetime updates:**
+```
+exp: 1hr from now (refreshable forever)
+license_exp: null (perpetual)
+updates_exp: null (all versions)
+```
+
+**One-time purchase with 1 year of updates:**
+```
+exp: 1hr from now (refreshable while license valid)
+license_exp: null (perpetual)
+updates_exp: purchase_date + 365 days
+```
+
+**Monthly subscription:**
+```
+exp: 1hr from now
+license_exp: subscription_end_date (e.g., 30 days from renewal)
+updates_exp: subscription_end_date
+```
+
+### SDK Validation Logic
+
+The SDK's `validate()` and `sync()` methods check `license_exp`, not `exp`:
+
+```
+1. Verify Ed25519 signature (ensures JWT wasn't tampered)
+2. Check device_id matches (prevents token theft)
+3. Check license_exp hasn't passed (is user licensed?)
+4. Return { valid: true, claims }
+```
+
+The `exp` claim is only used internally by `autoRefresh` to decide when to call `/refresh`.
+
 ## Client Configuration
 
 ### `new Paycheck(publicKey: string, options?: PaycheckOptions)`
@@ -256,14 +346,18 @@ LicenseClaims:
   aud: string               # Audience (project name, for debugging)
   jti: string               # JWT ID (unique per device activation)
   iat: number               # Issued at (Unix timestamp)
-  exp: number               # Expires (Unix timestamp, ~1 hour)
+  exp: number               # JWT expiration (~1 hour). Used for token freshness and
+                            # revocation propagation. NOT for license validity - see license_exp.
+                            # Expired JWTs can still be refreshed if the license is valid.
 
   # Paycheck claims
-  license_exp: number | null  # When license access ends
-  updates_exp: number | null  # When version access ends
-  tier: string                # Product tier
-  features: string[]          # Enabled features
-  device_id: string           # Device identifier
+  license_exp: number | null  # When license ACCESS ends (null = perpetual/never expires).
+                              # This is the business logic expiration - check this for "is user licensed?"
+  updates_exp: number | null  # When VERSION ACCESS ends (null = all versions covered).
+                              # Check this against your app's build timestamp for "can user use this version?"
+  tier: string                # Product tier (e.g., "free", "pro", "enterprise")
+  features: string[]          # Enabled feature flags for hasFeature() checks
+  device_id: string           # Device identifier (verified against current device)
   device_type: "uuid" | "machine"
   product_id: string          # Product UUID
 ```

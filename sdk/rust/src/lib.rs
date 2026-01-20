@@ -51,6 +51,22 @@
 //! - License validity is checked via `license_exp` claim, not JWT `exp`
 //! - Tokens auto-refresh when network is available
 //! - JWTs can be refreshed up to 10 years after issuance
+//!
+//! ## Understanding Expiration Times
+//!
+//! Paycheck JWTs have **three expiration-related claims**:
+//!
+//! | Claim | Typical Value | Purpose |
+//! |-------|---------------|---------|
+//! | `exp` | ~1 hour | Token freshness, revocation propagation window |
+//! | `license_exp` | null or future date | Actual license validity ("is user licensed?") |
+//! | `updates_exp` | null or future date | Version access ("can user use this version?") |
+//!
+//! **Key point:** The JWT's `exp` (~1 hour) is NOT the license expiration. Expired JWTs
+//! can still be refreshed via `/refresh` as long as `license_exp` hasn't passed.
+//! The short `exp` ensures revocations propagate within an hour and claims stay fresh.
+//!
+//! See `sdk/CORE.md` for detailed documentation.
 
 pub mod device;
 pub mod error;
