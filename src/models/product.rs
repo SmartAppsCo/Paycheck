@@ -26,8 +26,10 @@ pub struct Product {
     pub tier: String,
     pub license_exp_days: Option<i32>,
     pub updates_exp_days: Option<i32>,
-    pub activation_limit: i32,
-    pub device_limit: i32,
+    /// Maximum number of activations allowed. None = unlimited.
+    pub activation_limit: Option<i32>,
+    /// Maximum number of concurrent devices. None = unlimited.
+    pub device_limit: Option<i32>,
     /// Devices not seen for this many days don't count against device_limit.
     /// None = disabled (all devices count regardless of activity).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,10 +58,12 @@ pub struct CreateProduct {
     pub license_exp_days: Option<i32>,
     #[serde(default)]
     pub updates_exp_days: Option<i32>,
+    /// Maximum number of activations allowed. None = unlimited.
     #[serde(default)]
-    pub activation_limit: i32,
+    pub activation_limit: Option<i32>,
+    /// Maximum number of concurrent devices. None = unlimited.
     #[serde(default)]
-    pub device_limit: i32,
+    pub device_limit: Option<i32>,
     #[serde(default)]
     pub device_inactive_days: Option<i32>,
     #[serde(default)]
@@ -90,8 +94,10 @@ pub struct UpdateProduct {
     pub license_exp_days: Option<Option<i32>>,
     #[serde(default, deserialize_with = "deserialize_optional_nullable")]
     pub updates_exp_days: Option<Option<i32>>,
-    pub activation_limit: Option<i32>,
-    pub device_limit: Option<i32>,
+    #[serde(default, deserialize_with = "deserialize_optional_nullable")]
+    pub activation_limit: Option<Option<i32>>,
+    #[serde(default, deserialize_with = "deserialize_optional_nullable")]
+    pub device_limit: Option<Option<i32>>,
     #[serde(default, deserialize_with = "deserialize_optional_nullable")]
     pub device_inactive_days: Option<Option<i32>>,
     pub features: Option<Vec<String>>,

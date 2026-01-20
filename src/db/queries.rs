@@ -3294,8 +3294,8 @@ pub fn acquire_device_atomic(
     device_type: DeviceType,
     jti: &str,
     name: Option<&str>,
-    device_limit: i32,
-    activation_limit: i32,
+    device_limit: Option<i32>,
+    activation_limit: Option<i32>,
     device_inactive_days: Option<i32>,
 ) -> Result<DeviceAcquisitionResult> {
     // Use IMMEDIATE to acquire write lock at transaction start, preventing TOCTOU races
@@ -3326,43 +3326,46 @@ pub fn acquire_device_atomic(
         }));
     }
 
-    // New device - check limits atomically within the transaction
-    // If device_inactive_days is set, only count devices seen within that threshold
-    let current_device_count: i32 = if let Some(inactive_days) = device_inactive_days {
-        let cutoff = now() - (inactive_days as i64 * 86400);
-        tx.query_row(
-            "SELECT COUNT(*) FROM devices WHERE license_id = ?1 AND last_seen_at >= ?2",
-            params![license_id, cutoff],
-            |row| row.get(0),
-        )?
-    } else {
-        tx.query_row(
-            "SELECT COUNT(*) FROM devices WHERE license_id = ?1",
-            params![license_id],
-            |row| row.get(0),
-        )?
-    };
+    // New device - check device limit if set (None = unlimited)
+    if let Some(limit) = device_limit {
+        // If device_inactive_days is set, only count devices seen within that threshold
+        let current_device_count: i32 = if let Some(inactive_days) = device_inactive_days {
+            let cutoff = now() - (inactive_days as i64 * 86400);
+            tx.query_row(
+                "SELECT COUNT(*) FROM devices WHERE license_id = ?1 AND last_seen_at >= ?2",
+                params![license_id, cutoff],
+                |row| row.get(0),
+            )?
+        } else {
+            tx.query_row(
+                "SELECT COUNT(*) FROM devices WHERE license_id = ?1",
+                params![license_id],
+                |row| row.get(0),
+            )?
+        };
 
-    if device_limit > 0 && current_device_count >= device_limit {
-        // No need to commit - just drop the transaction
-        return Err(AppError::Forbidden(format!(
-            "Device limit reached ({}/{}). Deactivate a device first.",
-            current_device_count, device_limit
-        )));
+        if current_device_count >= limit {
+            return Err(AppError::Forbidden(format!(
+                "Device limit reached ({}/{}). Deactivate a device first.",
+                current_device_count, limit
+            )));
+        }
     }
 
-    // Check activation limit
-    let current_activation_count: i32 = tx.query_row(
-        "SELECT activation_count FROM licenses WHERE id = ?1",
-        params![license_id],
-        |row| row.get(0),
-    )?;
+    // Check activation limit if set (None = unlimited)
+    if let Some(limit) = activation_limit {
+        let current_activation_count: i32 = tx.query_row(
+            "SELECT activation_count FROM licenses WHERE id = ?1",
+            params![license_id],
+            |row| row.get(0),
+        )?;
 
-    if activation_limit > 0 && current_activation_count >= activation_limit {
-        return Err(AppError::Forbidden(format!(
-            "Activation limit reached ({}/{})",
-            current_activation_count, activation_limit
-        )));
+        if current_activation_count >= limit {
+            return Err(AppError::Forbidden(format!(
+                "Activation limit reached ({}/{})",
+                current_activation_count, limit
+            )));
+        }
     }
 
     // All checks passed - create device and increment activation count

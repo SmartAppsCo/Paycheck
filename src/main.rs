@@ -289,8 +289,8 @@ fn seed_dev_data(state: &AppState) {
         tier: "pro".to_string(),
         license_exp_days: Some(365),
         updates_exp_days: Some(365),
-        activation_limit: 0,
-        device_limit: 5,
+        activation_limit: None, // unlimited
+        device_limit: Some(5),
         device_inactive_days: None,
         features: vec![
             "advanced-export".to_string(),

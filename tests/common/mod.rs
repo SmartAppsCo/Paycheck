@@ -156,8 +156,8 @@ pub fn create_test_product(conn: &Connection, project_id: &str, name: &str, tier
         tier: tier.to_string(),
         license_exp_days: Some(365),
         updates_exp_days: Some(365),
-        activation_limit: 5,
-        device_limit: 3,
+        activation_limit: Some(5),
+        device_limit: Some(3),
         device_inactive_days: None,
         features: vec!["feature1".to_string(), "feature2".to_string()],
         price_cents: Some(4999),
@@ -521,7 +521,8 @@ pub fn create_license_at_device_limit(
     let license = create_test_license(conn, project_id, &product.id, Some(future_timestamp(365)));
 
     let mut devices = Vec::new();
-    for i in 0..product.device_limit {
+    let device_limit = product.device_limit.expect("create_license_at_device_limit requires a product with device_limit set");
+    for i in 0..device_limit {
         let device = create_test_device(
             conn,
             &license.id,

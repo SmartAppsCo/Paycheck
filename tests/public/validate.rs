@@ -524,8 +524,8 @@ async fn test_validate_perpetual_license_returns_valid() {
             currency: None,
             license_exp_days: None, // No expiration
             updates_exp_days: None,
-            activation_limit: 5,
-            device_limit: 3,
+            activation_limit: Some(5),
+            device_limit: Some(3),
         device_inactive_days: None,
             features: vec![],
         };

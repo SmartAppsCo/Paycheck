@@ -743,8 +743,8 @@ mod license_tests {
                 currency: None,
                 license_exp_days: None,
                 updates_exp_days: None,
-                activation_limit: 5,
-                device_limit: 3,
+                activation_limit: Some(5),
+                device_limit: Some(3),
         device_inactive_days: None,
                 features: vec![],
             };

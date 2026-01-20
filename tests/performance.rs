@@ -299,8 +299,8 @@ async fn test_license_many_devices() {
         currency: Some("usd".to_string()),
         license_exp_days: Some(365),
         updates_exp_days: Some(365),
-        activation_limit: 1000, // High activation limit
-        device_limit: 0,        // 0 = unlimited
+        activation_limit: Some(1000), // High activation limit
+        device_limit: None,           // None = unlimited
         device_inactive_days: None,
         features: vec!["unlimited_devices".to_string()],
     };

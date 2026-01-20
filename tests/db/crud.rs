@@ -523,11 +523,11 @@ fn test_create_product() {
         "license_exp_days should be 1 year"
     );
     assert_eq!(
-        product.device_limit, 3,
+        product.device_limit, Some(3),
         "device_limit should match test default"
     );
     assert_eq!(
-        product.activation_limit, 5,
+        product.activation_limit, Some(5),
         "activation_limit should match test default"
     );
     assert_eq!(
@@ -592,8 +592,8 @@ fn test_update_product() {
         currency: None,
         license_exp_days: Some(Some(2 * ONE_YEAR as i32)),
         updates_exp_days: None,
-        activation_limit: Some(10),
-        device_limit: Some(5),
+        activation_limit: Some(Some(10)),
+        device_limit: Some(Some(5)),
         device_inactive_days: None,
         features: Some(vec![
             "feature1".to_string(),
@@ -616,15 +616,46 @@ fn test_update_product() {
         "license_exp_days should be 2 years"
     );
     assert_eq!(
-        updated.activation_limit, 10,
+        updated.activation_limit, Some(10),
         "activation_limit should be updated"
     );
-    assert_eq!(updated.device_limit, 5, "device_limit should be updated");
+    assert_eq!(updated.device_limit, Some(5), "device_limit should be updated");
     assert_eq!(
         updated.features.len(),
         3,
         "features should have 3 items after update"
     );
+
+    // Test updating to None (unlimited) - this is the Some(None) pattern
+    let update_to_unlimited = UpdateProduct {
+        name: None,
+        tier: None,
+        price_cents: None,
+        currency: None,
+        license_exp_days: None,
+        updates_exp_days: None,
+        activation_limit: Some(None), // Set to unlimited
+        device_limit: Some(None),     // Set to unlimited
+        device_inactive_days: None,
+        features: None,
+    };
+
+    queries::update_product(&mut conn, &product.id, &update_to_unlimited).expect("Update to unlimited failed");
+
+    let unlimited = queries::get_product_by_id(&mut conn, &product.id)
+        .expect("Query failed")
+        .expect("Product not found");
+
+    assert_eq!(
+        unlimited.activation_limit, None,
+        "activation_limit should be None (unlimited) after update"
+    );
+    assert_eq!(
+        unlimited.device_limit, None,
+        "device_limit should be None (unlimited) after update"
+    );
+    // Verify other fields were NOT changed (outer None = skip update)
+    assert_eq!(unlimited.name, "Premium", "name should be unchanged");
 }
 
 #[test]

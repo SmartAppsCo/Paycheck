@@ -481,8 +481,8 @@ async fn test_redeem_device_limit_exceeded_returns_error() {
             currency: None,
             license_exp_days: Some(ONE_YEAR as i32),
             updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
-            activation_limit: 10,
-            device_limit: 1, // Only 1 device allowed
+            activation_limit: Some(10),
+            device_limit: Some(1), // Only 1 device allowed
             device_inactive_days: None,
             features: vec![],
         };
@@ -1059,8 +1059,8 @@ mod device_limit_enforcement {
                 currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
-                activation_limit: 10,
-                device_limit: 2,
+                activation_limit: Some(10),
+                device_limit: Some(2),
         device_inactive_days: None,
                 features: vec![],
             };
@@ -1129,8 +1129,8 @@ mod device_limit_enforcement {
                 currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
-                activation_limit: 10,
-                device_limit: 1,
+                activation_limit: Some(10),
+                device_limit: Some(1),
         device_inactive_days: None,
                 features: vec![],
             };
@@ -1206,8 +1206,8 @@ mod device_limit_enforcement {
                 currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
-                activation_limit: 10,
-                device_limit: 0, // 0 means unlimited devices
+                activation_limit: Some(10),
+                device_limit: None, // 0 means unlimited devices
                 device_inactive_days: None,
                 features: vec![],
             };
@@ -1279,8 +1279,8 @@ mod device_limit_enforcement {
                 currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
-                activation_limit: 10,
-                device_limit: 1,
+                activation_limit: Some(10),
+                device_limit: Some(1),
         device_inactive_days: None,
                 features: vec![],
             };
@@ -1364,8 +1364,8 @@ mod activation_limit_enforcement {
                 currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
-                activation_limit: 2, // Only 2 activations ever
-                device_limit: 10,    // Device limit is higher
+                activation_limit: Some(2), // Only 2 activations ever
+                device_limit: Some(10),    // Device limit is higher
                 device_inactive_days: None,
                 features: vec![],
             };
@@ -1444,8 +1444,8 @@ mod activation_limit_enforcement {
                 currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
-                activation_limit: 2, // Only 2 activations ever
-                device_limit: 10,    // Device limit is higher
+                activation_limit: Some(2), // Only 2 activations ever
+                device_limit: Some(10),    // Device limit is higher
                 device_inactive_days: None,
                 features: vec![],
             };
@@ -1589,8 +1589,8 @@ mod activation_limit_enforcement {
                 currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
-                activation_limit: 100, // High activation limit
-                device_limit: 1,       // Only 1 device allowed!
+                activation_limit: Some(100), // High activation limit
+                device_limit: Some(1),       // Only 1 device allowed!
                 device_inactive_days: None,
                 features: vec![],
             };
@@ -1716,8 +1716,8 @@ mod activation_limit_enforcement {
                 currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
-                activation_limit: 2, // Only 2 activations ever!
-                device_limit: 100,   // High device limit
+                activation_limit: Some(2), // Only 2 activations ever!
+                device_limit: Some(100),   // High device limit
                 device_inactive_days: None,
                 features: vec![],
             };
@@ -1842,8 +1842,8 @@ mod activation_limit_enforcement {
                 currency: None,
                 license_exp_days: Some(ONE_YEAR as i32),
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
-                activation_limit: 100,
-                device_limit: 100,
+                activation_limit: Some(100),
+                device_limit: Some(100),
         device_inactive_days: None,
                 features: vec![],
             };

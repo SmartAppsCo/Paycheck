@@ -760,8 +760,8 @@ async fn test_refresh_with_expired_license_exp_fails() {
             currency: None,
             license_exp_days: Some(1), // License expires 1 day after activation
             updates_exp_days: Some(365),
-            activation_limit: 5,
-            device_limit: 3,
+            activation_limit: Some(5),
+            device_limit: Some(3),
         device_inactive_days: None,
             features: vec![],
         };

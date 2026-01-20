@@ -673,8 +673,8 @@ fn test_checkout_creates_license_with_product_expirations() {
         currency: None,
         license_exp_days: Some(ONE_MONTH as i32),
         updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
-        activation_limit: 5,
-        device_limit: 3,
+        activation_limit: Some(5),
+        device_limit: Some(3),
         device_inactive_days: None,
         features: vec![],
     };
@@ -765,8 +765,8 @@ fn test_checkout_perpetual_license() {
         currency: None,
         license_exp_days: None, // Perpetual
         updates_exp_days: None,
-        activation_limit: 5,
-        device_limit: 3,
+        activation_limit: Some(5),
+        device_limit: Some(3),
         device_inactive_days: None,
         features: vec![],
     };
