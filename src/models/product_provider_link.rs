@@ -47,12 +47,10 @@ pub struct UpdateProviderLink {
 
 impl UpdateProviderLink {
     pub fn validate(&self) -> Result<()> {
-        if let Some(ref linked_id) = self.linked_id {
-            if linked_id.trim().is_empty() {
-                return Err(AppError::BadRequest(
-                    "linked_id cannot be empty".into(),
-                ));
-            }
+        if let Some(ref linked_id) = self.linked_id
+            && linked_id.trim().is_empty()
+        {
+            return Err(AppError::BadRequest("linked_id cannot be empty".into()));
         }
         Ok(())
     }

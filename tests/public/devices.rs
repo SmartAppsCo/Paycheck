@@ -126,7 +126,6 @@ async fn test_deactivate_adds_jti_to_revoked_list() {
     let master_key = test_master_key();
 
     let token: String;
-    let license_id: String;
     let jti: String;
 
     {
@@ -142,7 +141,6 @@ async fn test_deactivate_adds_jti_to_revoked_list() {
         );
         let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
-        license_id = license.id.clone();
         jti = device.jti.clone();
         token = create_test_jwt(&state, &project, &product, &license.id, &device);
     }

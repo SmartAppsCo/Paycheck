@@ -244,6 +244,19 @@ pub struct LemonSqueezySubscriptionInvoiceAttributes {
     pub subscription_id: i64,
     pub customer_id: i64,
     pub status: String, // "paid", etc.
+    /// Billing period end (ISO 8601 datetime string)
+    pub period_end: Option<String>,
+}
+
+impl LemonSqueezySubscriptionInvoiceAttributes {
+    /// Get the billing period end as a Unix timestamp.
+    pub fn period_end_timestamp(&self) -> Option<i64> {
+        self.period_end.as_ref().and_then(|s| {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .ok()
+                .map(|dt| dt.timestamp())
+        })
+    }
 }
 
 // ============ subscription_cancelled ============

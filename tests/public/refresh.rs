@@ -254,7 +254,7 @@ async fn test_refresh_rejects_non_uuid_product_id() {
     let manager = SqliteConnectionManager::memory();
     let pool = Pool::builder().max_size(4).build(manager).unwrap();
     {
-        let mut conn = pool.get().unwrap();
+        let conn = pool.get().unwrap();
         paycheck::db::init_db(&conn).unwrap();
     }
 

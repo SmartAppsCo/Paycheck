@@ -204,12 +204,38 @@ pub struct StripeMetadata {
 // ============ invoice.paid ============
 
 #[derive(Debug, Deserialize)]
+pub struct StripeInvoicePeriod {
+    pub end: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StripeInvoiceLineItem {
+    pub period: StripeInvoicePeriod,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StripeInvoiceLines {
+    pub data: Vec<StripeInvoiceLineItem>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct StripeInvoice {
     pub id: String,
     pub customer: Option<String>,
     pub subscription: Option<String>,
     pub billing_reason: Option<String>, // "subscription_create", "subscription_cycle", etc.
     pub status: String,                 // "paid", "open", etc.
+    pub lines: Option<StripeInvoiceLines>,
+}
+
+impl StripeInvoice {
+    /// Get the billing period end from the first line item.
+    pub fn period_end(&self) -> Option<i64> {
+        self.lines
+            .as_ref()
+            .and_then(|l| l.data.first())
+            .map(|item| item.period.end)
+    }
 }
 
 // ============ customer.subscription.deleted ============

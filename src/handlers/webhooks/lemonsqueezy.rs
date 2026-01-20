@@ -149,6 +149,8 @@ fn parse_subscription_payment(
         is_paid: invoice.status == "paid",
         // Use invoice ID (data.id) as unique event identifier for replay prevention
         event_id: Some(event.data.id.clone()),
+        // Use LemonSqueezy's billing period end for accurate expiration
+        period_end: invoice.period_end_timestamp(),
     }))
 }
 

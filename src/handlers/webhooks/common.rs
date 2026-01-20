@@ -81,6 +81,9 @@ pub struct RenewalData {
     pub is_paid: bool,
     /// Unique event/invoice ID for replay prevention
     pub event_id: Option<String>,
+    /// Billing period end from the payment provider (Unix timestamp).
+    /// More accurate than calculating from product settings.
+    pub period_end: Option<i64>,
 }
 
 /// Data extracted from a subscription cancellation event.
@@ -222,6 +225,10 @@ pub fn process_checkout(
 ///
 /// The `event_id` parameter is used for replay attack prevention - if the same
 /// event_id is processed twice, the second call returns "Already processed".
+///
+/// The `period_end` parameter is the billing period end from the payment provider,
+/// which is more accurate than calculating from product settings. If not available,
+/// falls back to `now + license_exp_days`.
 pub fn process_renewal(
     conn: &Connection,
     provider: &str,
@@ -229,6 +236,7 @@ pub fn process_renewal(
     license_id: &str,
     subscription_id: &str,
     event_id: Option<&str>,
+    period_end: Option<i64>,
 ) -> WebhookResult {
     // Replay attack prevention: check if we've already processed this event
     if let Some(eid) = event_id {
@@ -247,12 +255,26 @@ pub fn process_renewal(
         }
     }
 
+    // Use provider's period_end if available, otherwise calculate from product settings.
+    // Provider's date is more accurate (handles prorations, billing date changes, etc.)
     let now = chrono::Utc::now().timestamp();
-    let exps = LicenseExpirations::from_product(product, now);
+    let fallback_exps = LicenseExpirations::from_product(product, now);
 
-    if let Err(e) =
-        queries::extend_license_expiration(conn, license_id, exps.license_exp, exps.updates_exp)
-    {
+    let license_exp = period_end.or(fallback_exps.license_exp);
+    // For updates_exp, calculate relative offset from license_exp if provider gave period_end
+    let updates_exp = match (period_end, product.license_exp_days, product.updates_exp_days) {
+        // Provider period_end available and product has both expiration settings
+        (Some(pe), Some(_), Some(upd_days)) => Some(pe + (upd_days as i64 * 86400)),
+        // Provider period_end available but updates follows license (same duration)
+        (Some(pe), Some(lic_days), None) if lic_days > 0 => {
+            // If updates_exp_days not set, assume same as license
+            fallback_exps.updates_exp.map(|_| pe)
+        }
+        // Fall back to calculated value
+        _ => fallback_exps.updates_exp,
+    };
+
+    if let Err(e) = queries::extend_license_expiration(conn, license_id, license_exp, updates_exp) {
         tracing::error!("Failed to extend license: {}", e);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -261,11 +283,12 @@ pub fn process_renewal(
     }
 
     tracing::info!(
-        "{} subscription renewed: subscription={}, license_id={}, new_expires_at={:?}",
+        "{} subscription renewed: subscription={}, license_id={}, new_expires_at={:?}{}",
         provider,
         subscription_id,
         license_id,
-        exps.license_exp
+        license_exp,
+        if period_end.is_some() { " (from provider)" } else { " (calculated)" }
     );
 
     (StatusCode::OK, "OK")
@@ -382,36 +405,36 @@ async fn handle_checkout<P: WebhookProvider>(
     // Audit log on successful checkout (license created)
     if result.0 == StatusCode::OK && result.1 == "OK" {
         // Re-fetch session to get the linked license_id
-        if let Ok(Some(updated_session)) = queries::get_payment_session(&conn, &data.session_id) {
-            if let Some(license_id) = updated_session.license_id {
-                let audit_conn = state.audit.get().map_err(|e| {
-                    tracing::error!("Audit DB connection error: {}", e);
-                    (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
-                })?;
+        if let Ok(Some(updated_session)) = queries::get_payment_session(&conn, &data.session_id)
+            && let Some(license_id) = updated_session.license_id
+        {
+            let audit_conn = state.audit.get().map_err(|e| {
+                tracing::error!("Audit DB connection error: {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+            })?;
 
-                if let Err(e) = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, headers)
-                    .actor(ActorType::Public, None)
-                    .action(AuditAction::ReceiveCheckoutWebhook)
-                    .resource("license", &license_id)
-                    .details(&serde_json::json!({
-                        "provider": provider.provider_name(),
-                        "session_id": data.session_id,
-                        "product_id": product.id,
-                        "customer_email": data.customer_email,
-                        "subscription_id": data.subscription_id,
-                        "order_id": data.order_id,
-                    }))
-                    .org(&org.id)
-                    .project(&project.id)
-                    .names(&AuditLogNames {
-                        org_name: Some(org.name.clone()),
-                        project_name: Some(project.name.clone()),
-                        ..Default::default()
-                    })
-                    .save()
-                {
-                    tracing::warn!("Failed to write checkout audit log: {}", e);
-                }
+            if let Err(e) = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, headers)
+                .actor(ActorType::Public, None)
+                .action(AuditAction::ReceiveCheckoutWebhook)
+                .resource("license", &license_id)
+                .details(&serde_json::json!({
+                    "provider": provider.provider_name(),
+                    "session_id": data.session_id,
+                    "product_id": product.id,
+                    "customer_email": data.customer_email,
+                    "subscription_id": data.subscription_id,
+                    "order_id": data.order_id,
+                }))
+                .org(&org.id)
+                .project(&project.id)
+                .names(&AuditLogNames {
+                    org_name: Some(org.name.clone()),
+                    project_name: Some(project.name.clone()),
+                    ..Default::default()
+                })
+                .save()
+            {
+                tracing::warn!("Failed to write checkout audit log: {}", e);
             }
         }
     }
@@ -469,6 +492,7 @@ async fn handle_renewal<P: WebhookProvider>(
         &license.id,
         &data.subscription_id,
         data.event_id.as_deref(),
+        data.period_end,
     );
 
     // Audit log on successful renewal
@@ -478,9 +502,10 @@ async fn handle_renewal<P: WebhookProvider>(
             (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
         })?;
 
-        // Compute new expirations for logging
+        // Compute new expirations for logging (same logic as process_renewal)
         let now = chrono::Utc::now().timestamp();
-        let exps = LicenseExpirations::from_product(&product, now);
+        let fallback_exps = LicenseExpirations::from_product(&product, now);
+        let license_exp = data.period_end.or(fallback_exps.license_exp);
 
         if let Err(e) = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, headers)
             .actor(ActorType::Public, None)
@@ -491,8 +516,8 @@ async fn handle_renewal<P: WebhookProvider>(
                 "subscription_id": data.subscription_id,
                 "event_id": data.event_id,
                 "product_id": product.id,
-                "new_expires_at": exps.license_exp,
-                "new_updates_expires_at": exps.updates_exp,
+                "new_expires_at": license_exp,
+                "period_end_from_provider": data.period_end.is_some(),
             }))
             .org(&org.id)
             .project(&project.id)

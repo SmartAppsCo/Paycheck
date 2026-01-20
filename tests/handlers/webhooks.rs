@@ -376,6 +376,7 @@ fn test_renewal_webhook_replay_prevented() {
         &license.id,
         subscription_id,
         Some(event_id),
+        None, // No provider period_end - use calculated fallback
     );
     assert_eq!(
         status1,
@@ -406,6 +407,7 @@ fn test_renewal_webhook_replay_prevented() {
         &license.id,
         subscription_id,
         Some(event_id), // Same event ID = replay
+        None,
     );
 
     // Replay should be rejected (idempotent - already processed)
@@ -460,6 +462,7 @@ fn test_different_renewal_events_both_processed() {
         &license.id,
         subscription_id,
         Some("invoice_001"),
+        None,
     );
     assert_eq!(
         status1,
@@ -475,6 +478,7 @@ fn test_different_renewal_events_both_processed() {
         &license.id,
         subscription_id,
         Some("invoice_002"), // Different event ID
+        None,
     );
     assert_eq!(
         status2,
@@ -840,6 +844,7 @@ fn test_renewal_extends_license_expiration() {
         &license.id,
         "sub_123",
         Some("invoice_001"),
+        None,
     );
     assert_eq!(
         status,
@@ -891,6 +896,7 @@ fn test_renewal_without_event_id_always_processes() {
         &license.id,
         "sub_123",
         None, // No event_id - no replay prevention
+        None,
     );
     assert_eq!(
         status1,
@@ -903,7 +909,7 @@ fn test_renewal_without_event_id_always_processes() {
     );
 
     // Second call also processes (no replay prevention)
-    let (status2, msg2) = process_renewal(&mut conn, "stripe", &product, &license.id, "sub_123", None);
+    let (status2, msg2) = process_renewal(&conn, "stripe", &product, &license.id, "sub_123", None, None);
     assert_eq!(
         status2,
         StatusCode::OK,
@@ -912,6 +918,134 @@ fn test_renewal_without_event_id_always_processes() {
     assert_eq!(
         msg2, "OK",
         "second renewal without event_id should return OK message (no replay prevention)"
+    );
+}
+
+// ============ Provider Period End Tests ============
+
+#[test]
+fn test_renewal_uses_provider_period_end_when_available() {
+    use axum::http::StatusCode;
+
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+
+    let initial_exp = now() + (ONE_WEEK * 86400);
+    let license = create_test_license(&mut conn, &project.id, &product.id, Some(initial_exp));
+
+    // Provider says period ends 45 days from now (different from product's ONE_YEAR setting)
+    let provider_period_end = now() + (45 * 86400);
+
+    let (status, _) = process_renewal(
+        &conn,
+        "stripe",
+        &product,
+        &license.id,
+        "sub_123",
+        Some("invoice_001"),
+        Some(provider_period_end), // Provider's exact period end
+    );
+    assert_eq!(status, StatusCode::OK);
+
+    let updated = queries::get_license_by_id(&mut conn, &license.id)
+        .expect("db query should succeed")
+        .expect("license should exist");
+    let new_exp = updated.expires_at.expect("should have expiration");
+
+    // Should use provider's period_end (45 days), NOT product's license_exp_days (ONE_YEAR)
+    let expected_min = provider_period_end - 5;
+    let expected_max = provider_period_end + 5;
+    assert!(
+        new_exp >= expected_min && new_exp <= expected_max,
+        "license expiration should match provider period_end (~45 days), got {} days from now",
+        (new_exp - now()) / 86400
+    );
+}
+
+#[test]
+fn test_renewal_falls_back_to_calculated_when_no_period_end() {
+    use axum::http::StatusCode;
+
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+
+    let initial_exp = now() + (ONE_WEEK * 86400);
+    let license = create_test_license(&mut conn, &project.id, &product.id, Some(initial_exp));
+
+    let (status, _) = process_renewal(
+        &conn,
+        "stripe",
+        &product,
+        &license.id,
+        "sub_123",
+        Some("invoice_002"),
+        None, // No provider period_end - should fall back to calculated
+    );
+    assert_eq!(status, StatusCode::OK);
+
+    let updated = queries::get_license_by_id(&mut conn, &license.id)
+        .expect("db query should succeed")
+        .expect("license should exist");
+    let new_exp = updated.expires_at.expect("should have expiration");
+
+    // Should use calculated value: now + product.license_exp_days (ONE_YEAR)
+    let expected_min = now() + (ONE_YEAR * 86400) - 10;
+    let expected_max = now() + (ONE_YEAR * 86400) + 10;
+    assert!(
+        new_exp >= expected_min && new_exp <= expected_max,
+        "license expiration should be calculated from product ({} days), got {} days from now",
+        ONE_YEAR,
+        (new_exp - now()) / 86400
+    );
+}
+
+#[test]
+fn test_renewal_provider_period_end_handles_early_renewal() {
+    use axum::http::StatusCode;
+
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+
+    // License currently expires in 3 days (Stripe renews early)
+    let initial_exp = now() + (3 * 86400);
+    let license = create_test_license(&mut conn, &project.id, &product.id, Some(initial_exp));
+
+    // Stripe renews 3 days early, gives us period_end 30 days from now
+    // (not 30 days from current expiration, but 30 days from renewal time)
+    let provider_period_end = now() + (30 * 86400);
+
+    let (status, _) = process_renewal(
+        &conn,
+        "stripe",
+        &product,
+        &license.id,
+        "sub_123",
+        Some("invoice_003"),
+        Some(provider_period_end),
+    );
+    assert_eq!(status, StatusCode::OK);
+
+    let updated = queries::get_license_by_id(&mut conn, &license.id)
+        .expect("db query should succeed")
+        .expect("license should exist");
+    let new_exp = updated.expires_at.expect("should have expiration");
+
+    // Should be ~30 days from now (provider's exact date), not ~33 days
+    assert!(
+        (new_exp - provider_period_end).abs() < 5,
+        "should use provider's exact period_end for early renewals"
     );
 }
 

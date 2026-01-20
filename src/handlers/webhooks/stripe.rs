@@ -124,6 +124,9 @@ fn parse_invoice_paid(event: &StripeWebhookEvent) -> Result<WebhookEvent, Webhoo
             (StatusCode::BAD_REQUEST, "Invalid invoice")
         })?;
 
+    // Extract period_end before any moves
+    let period_end = invoice.period_end();
+
     let subscription_id = match invoice.subscription {
         Some(id) => id,
         None => return Ok(WebhookEvent::Ignored),
@@ -142,6 +145,8 @@ fn parse_invoice_paid(event: &StripeWebhookEvent) -> Result<WebhookEvent, Webhoo
         is_paid: invoice.status == "paid",
         // Use invoice ID as unique event identifier for replay prevention
         event_id: Some(invoice.id),
+        // Use Stripe's billing period end for accurate expiration
+        period_end,
     }))
 }
 
