@@ -1,12 +1,12 @@
-//! New Paycheck client with public key-based initialization
+//! Blocking Paycheck client using ureq
 
 use crate::device::{generate_uuid, get_machine_id};
-use crate::error::{map_status_to_error_code, PaycheckError, Result};
+use crate::error::{PaycheckError, Result, map_status_to_error_code};
 use crate::jwt::{decode_token, is_jwt_expired, is_license_expired, verify_token};
-use crate::storage::{keys, MemoryStorage, StorageAdapter};
+use crate::storage::{FileStorage, StorageAdapter, keys};
 use crate::types::*;
-use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::sync::Arc;
 use url::Url;
 
@@ -18,7 +18,7 @@ pub const DEFAULT_BASE_URL: &str = "https://api.paycheck.dev";
 pub struct PaycheckOptions {
     /// Paycheck server URL (default: "https://api.paycheck.dev")
     pub base_url: Option<String>,
-    /// Custom storage adapter (default: MemoryStorage)
+    /// Custom storage adapter (default: FileStorage based on app_name)
     pub storage: Option<Arc<dyn StorageAdapter>>,
     /// Device type (default: Machine for desktop)
     pub device_type: Option<DeviceType>,
@@ -77,22 +77,33 @@ pub struct ImportResult {
     pub reason: Option<String>,
 }
 
-/// Paycheck SDK client.
+/// Paycheck SDK client (blocking).
 ///
-/// Initialize with your project's public key from the Paycheck dashboard.
-/// The public key enables offline JWT signature verification using Ed25519.
+/// Initialize with your project's public key and storage directory. The public key
+/// enables offline JWT signature verification using Ed25519. The storage directory
+/// is where license data will be persisted (created automatically if needed).
 ///
 /// # Example
 /// ```rust,ignore
 /// use paycheck_sdk::Paycheck;
+/// use std::path::PathBuf;
 ///
-/// let paycheck = Paycheck::new("your-base64-public-key", Default::default())?;
+/// fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let data_dir = PathBuf::from("/path/to/app/data");
+///     let paycheck = Paycheck::new("your-base64-public-key", &data_dir)?;
 ///
-/// // Start a purchase
-/// let result = paycheck.checkout("product-uuid", None).await?;
+///     // Check if already licensed (offline, verifies Ed25519 signature)
+///     if paycheck.is_licensed() {
+///         println!("Licensed! Tier: {:?}", paycheck.get_tier());
+///         return Ok(());
+///     }
 ///
-/// // Validate license (offline, verifies Ed25519 signature)
-/// let result = paycheck.validate(None);
+///     // Activate with code (blocking ~500ms)
+///     let result = paycheck.activate_with_code("MYAPP-AB3D-EF5G", None)?;
+///     println!("Activated! Tier: {}", result.tier);
+///
+///     Ok(())
+/// }
 /// ```
 pub struct Paycheck {
     public_key: String,
@@ -101,18 +112,42 @@ pub struct Paycheck {
     auto_refresh: bool,
     device_id: String,
     device_type: DeviceType,
-    http: HttpClient,
 }
 
 impl Paycheck {
-    /// Create a new Paycheck client.
+    /// Create a new Paycheck client with default options.
     ///
     /// # Arguments
     /// * `public_key` - Base64-encoded Ed25519 public key from your Paycheck dashboard
-    /// * `options` - Optional configuration
-    pub fn new(public_key: &str, options: PaycheckOptions) -> Result<Self> {
+    /// * `storage_dir` - Directory for persistent storage (created if it doesn't exist)
+    ///
+    /// License data will be stored in `{storage_dir}/paycheck.json`.
+    pub fn new(public_key: &str, storage_dir: &Path) -> Result<Self> {
+        Self::with_options(public_key, storage_dir, PaycheckOptions::default())
+    }
+
+    /// Create a new Paycheck client with custom options.
+    ///
+    /// # Arguments
+    /// * `public_key` - Base64-encoded Ed25519 public key from your Paycheck dashboard
+    /// * `storage_dir` - Directory for persistent storage (created if it doesn't exist)
+    /// * `options` - Custom configuration
+    ///
+    /// License data will be stored in `{storage_dir}/paycheck.json`.
+    pub fn with_options(
+        public_key: &str,
+        storage_dir: &Path,
+        options: PaycheckOptions,
+    ) -> Result<Self> {
         if public_key.is_empty() {
             return Err(PaycheckError::validation("public_key is required"));
+        }
+
+        // Create storage directory if it doesn't exist
+        if !storage_dir.exists() {
+            std::fs::create_dir_all(storage_dir).map_err(|e| {
+                PaycheckError::validation(format!("Failed to create storage directory: {}", e))
+            })?;
         }
 
         let base_url = options
@@ -121,8 +156,13 @@ impl Paycheck {
             .trim_end_matches('/')
             .to_string();
 
-        let storage: Arc<dyn StorageAdapter> =
-            options.storage.unwrap_or_else(|| Arc::new(MemoryStorage::new()));
+        let storage: Arc<dyn StorageAdapter> = match options.storage {
+            Some(s) => s,
+            None => Arc::new(
+                FileStorage::new(storage_dir)
+                    .ok_or_else(|| PaycheckError::validation("Failed to initialize storage"))?,
+            ),
+        };
 
         let device_type = options.device_type.unwrap_or(DeviceType::Machine);
         let auto_refresh = options.auto_refresh.unwrap_or(true);
@@ -141,11 +181,6 @@ impl Paycheck {
             id
         });
 
-        let http = HttpClient::builder()
-            .user_agent("paycheck-sdk-rust/0.2.0")
-            .build()
-            .map_err(|e| PaycheckError::network(e.to_string()))?;
-
         Ok(Self {
             public_key: public_key.to_string(),
             base_url,
@@ -153,7 +188,6 @@ impl Paycheck {
             auto_refresh,
             device_id,
             device_type,
-            http,
         })
     }
 
@@ -163,7 +197,7 @@ impl Paycheck {
     ///
     /// Note: Redirect URL is configured per-project in the Paycheck dashboard,
     /// not per-request. This prevents open redirect vulnerabilities.
-    pub async fn checkout(
+    pub fn checkout(
         &self,
         product_id: &str,
         options: Option<CheckoutOptions>,
@@ -186,7 +220,7 @@ impl Paycheck {
             customer_id: opts.customer_id,
         };
 
-        self.post("/buy", &body).await
+        self.post("/buy", &body)
     }
 
     /// Validate the stored license.
@@ -255,7 +289,7 @@ impl Paycheck {
     }
 
     /// Online validation check (also checks revocation).
-    pub async fn validate_online(&self) -> Result<ValidateResult> {
+    pub fn validate_online(&self) -> Result<ValidateResult> {
         let Some(token) = self.get_token() else {
             return Ok(ValidateResult {
                 valid: false,
@@ -286,7 +320,7 @@ impl Paycheck {
             jti: claims.jti,
         };
 
-        match self.post::<ValidateResponse, _>("/validate", &body).await {
+        match self.post::<ValidateResponse, _>("/validate", &body) {
             Ok(r) => Ok(r.into()),
             Err(_) => Ok(ValidateResult {
                 valid: false,
@@ -308,7 +342,7 @@ impl Paycheck {
     /// # Example
     /// ```rust,ignore
     /// // On app startup for subscription apps
-    /// let result = paycheck.sync().await;
+    /// let result = paycheck.sync();
     ///
     /// if result.valid {
     ///     if result.offline {
@@ -323,7 +357,7 @@ impl Paycheck {
     ///     }
     /// }
     /// ```
-    pub async fn sync(&self) -> SyncResult {
+    pub fn sync(&self) -> SyncResult {
         let Some(token) = self.get_token() else {
             return SyncResult {
                 valid: false,
@@ -382,7 +416,7 @@ impl Paycheck {
             jti: claims.jti.clone(),
         };
 
-        match self.post::<ValidateResponse, _>("/validate", &body).await {
+        match self.post::<ValidateResponse, _>("/validate", &body) {
             Ok(response) => {
                 if !response.valid {
                     return SyncResult {
@@ -395,14 +429,13 @@ impl Paycheck {
                 }
 
                 // Check if server has updated expiration - refresh token if so
-                if response.license_exp != claims.license_exp {
-                    if let Ok(new_token) = self.refresh_token().await {
-                        if let Ok(new_claims) = decode_token(&new_token) {
-                            claims = new_claims;
-                        }
-                    }
-                    // Refresh failed, but validation passed - continue with current token
+                if response.license_exp != claims.license_exp
+                    && let Ok(new_token) = self.refresh_token()
+                    && let Ok(new_claims) = decode_token(&new_token)
+                {
+                    claims = new_claims;
                 }
+                // Refresh failed, but validation passed - continue with current token
 
                 // Check license expiration with potentially updated claims
                 if is_license_expired(&claims) {
@@ -512,7 +545,7 @@ impl Paycheck {
     }
 
     /// Activate with a short-lived activation code.
-    pub async fn activate_with_code(
+    pub fn activate_with_code(
         &self,
         code: &str,
         options: Option<DeviceInfo>,
@@ -535,7 +568,7 @@ impl Paycheck {
             device_name: options.and_then(|d| d.device_name),
         };
 
-        let response: RedeemResponse = self.post("/redeem", &body).await?;
+        let response: RedeemResponse = self.post("/redeem", &body)?;
 
         self.storage.set(keys::TOKEN, &response.token);
 
@@ -552,10 +585,10 @@ impl Paycheck {
     ///
     /// # Example
     /// ```rust,ignore
-    /// let result = paycheck.request_activation_code("user@example.com").await?;
+    /// let result = paycheck.request_activation_code("user@example.com")?;
     /// println!("{}", result.message);
     /// ```
-    pub async fn request_activation_code(&self, email: &str) -> Result<RequestCodeResult> {
+    pub fn request_activation_code(&self, email: &str) -> Result<RequestCodeResult> {
         #[derive(Serialize)]
         struct RequestCodeRequest {
             email: String,
@@ -567,7 +600,7 @@ impl Paycheck {
             public_key: self.public_key.clone(),
         };
 
-        let response: RequestCodeResponse = self.post("/activation/request-code", &body).await?;
+        let response: RequestCodeResponse = self.post("/activation/request-code", &body)?;
 
         Ok(response.into())
     }
@@ -625,7 +658,7 @@ impl Paycheck {
     }
 
     /// Refresh the JWT token.
-    pub async fn refresh_token(&self) -> Result<String> {
+    pub fn refresh_token(&self) -> Result<String> {
         let token = self.get_token().ok_or_else(PaycheckError::no_token)?;
 
         #[derive(Deserialize)]
@@ -633,7 +666,7 @@ impl Paycheck {
             token: String,
         }
 
-        let response: RefreshResponse = self.post_with_auth("/refresh", &(), &token).await?;
+        let response: RefreshResponse = self.post_with_auth("/refresh", &(), &token)?;
 
         self.storage.set(keys::TOKEN, &response.token);
         Ok(response.token)
@@ -642,12 +675,11 @@ impl Paycheck {
     // ==================== Device Management ====================
 
     /// Deactivate this device.
-    pub async fn deactivate(&self) -> Result<DeactivateResult> {
-        let token = self.ensure_fresh_token().await?;
+    pub fn deactivate(&self) -> Result<DeactivateResult> {
+        let token = self.ensure_fresh_token()?;
 
-        let response: DeactivateResponse = self
-            .post_with_auth("/devices/deactivate", &(), &token)
-            .await?;
+        let response: DeactivateResponse =
+            self.post_with_auth("/devices/deactivate", &(), &token)?;
 
         self.clear_token();
 
@@ -656,8 +688,8 @@ impl Paycheck {
 
     /// Get full license information including devices.
     /// Uses the stored JWT token for authentication.
-    pub async fn get_license_info(&self) -> Result<LicenseInfo> {
-        let token = self.ensure_fresh_token().await?;
+    pub fn get_license_info(&self) -> Result<LicenseInfo> {
+        let token = self.ensure_fresh_token()?;
 
         let url = format!(
             "{}/license?public_key={}",
@@ -665,7 +697,7 @@ impl Paycheck {
             urlencoding::encode(&self.public_key)
         );
 
-        let response: LicenseInfoResponse = self.get_with_auth(&url, &token).await?;
+        let response: LicenseInfoResponse = self.get_with_auth(&url, &token)?;
         Ok(response.into())
     }
 
@@ -707,109 +739,78 @@ impl Paycheck {
         Ok(result)
     }
 
-    // ==================== Internal Helpers ====================
+    // ==================== Internal HTTP Helpers ====================
 
-    async fn ensure_fresh_token(&self) -> Result<String> {
+    fn ensure_fresh_token(&self) -> Result<String> {
         let token = self.get_token().ok_or_else(PaycheckError::no_token)?;
 
-        if self.auto_refresh {
-            if let Ok(claims) = decode_token(&token) {
-                if is_jwt_expired(&claims) {
-                    return self.refresh_token().await;
-                }
-            }
+        if self.auto_refresh
+            && let Ok(claims) = decode_token(&token)
+            && is_jwt_expired(&claims)
+        {
+            return self.refresh_token();
         }
 
         Ok(token)
     }
 
-    async fn get_with_auth<T: for<'de> Deserialize<'de>>(
-        &self,
-        url: &str,
-        token: &str,
-    ) -> Result<T> {
-        let response = self
-            .http
-            .get(url)
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
-            .await
-            .map_err(|e| PaycheckError::network(e.to_string()))?;
-
-        self.handle_response(response).await
-    }
-
-    async fn post<T: for<'de> Deserialize<'de>, B: Serialize>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> Result<T> {
-        let url = format!("{}{}", self.base_url, path);
-
-        let response = self
-            .http
-            .post(&url)
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| PaycheckError::network(e.to_string()))?;
-
-        self.handle_response(response).await
-    }
-
-    async fn post_with_auth<T: for<'de> Deserialize<'de>, B: Serialize>(
-        &self,
-        path: &str,
-        body: &B,
-        token: &str,
-    ) -> Result<T> {
-        let url = format!("{}{}", self.base_url, path);
-
-        let response = self
-            .http
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| PaycheckError::network(e.to_string()))?;
-
-        self.handle_response(response).await
-    }
-
-    async fn handle_response<T: for<'de> Deserialize<'de>>(
-        &self,
-        response: reqwest::Response,
-    ) -> Result<T> {
-        let status = response.status().as_u16();
-
-        if !response.status().is_success() {
-            #[derive(Deserialize)]
-            struct ErrorResponse {
-                error: Option<String>,
-                details: Option<String>,
-            }
-
-            let error_body: ErrorResponse = response.json().await.unwrap_or(ErrorResponse {
-                error: Some("Unknown error".to_string()),
-                details: None,
-            });
-
-            let message = match (&error_body.error, &error_body.details) {
-                (Some(err), Some(details)) => format!("{}: {}", err, details),
-                (Some(err), None) => err.clone(),
-                (None, Some(details)) => details.clone(),
-                (None, None) => format!("Request failed: {}", status),
-            };
-            let code = map_status_to_error_code(status, &message);
-
-            return Err(PaycheckError::with_status(code, message, status));
-        }
+    fn get_with_auth<T: for<'de> Deserialize<'de>>(&self, url: &str, token: &str) -> Result<T> {
+        let response = ureq::get(url)
+            .header("Authorization", &format!("Bearer {}", token))
+            .header("User-Agent", "paycheck-sdk-rust/0.5.0")
+            .call()
+            .map_err(|e| self.map_ureq_error(e))?;
 
         response
-            .json()
-            .await
+            .into_body()
+            .read_json()
             .map_err(|e| PaycheckError::network(e.to_string()))
+    }
+
+    fn post<T: for<'de> Deserialize<'de>, B: Serialize>(&self, path: &str, body: &B) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+
+        let response = ureq::post(&url)
+            .header("User-Agent", "paycheck-sdk-rust/0.5.0")
+            .send_json(body)
+            .map_err(|e| self.map_ureq_error(e))?;
+
+        response
+            .into_body()
+            .read_json()
+            .map_err(|e| PaycheckError::network(e.to_string()))
+    }
+
+    fn post_with_auth<T: for<'de> Deserialize<'de>, B: Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+        token: &str,
+    ) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+
+        let response = ureq::post(&url)
+            .header("Authorization", &format!("Bearer {}", token))
+            .header("User-Agent", "paycheck-sdk-rust/0.5.0")
+            .send_json(body)
+            .map_err(|e| self.map_ureq_error(e))?;
+
+        response
+            .into_body()
+            .read_json()
+            .map_err(|e| PaycheckError::network(e.to_string()))
+    }
+
+    fn map_ureq_error(&self, error: ureq::Error) -> PaycheckError {
+        match error {
+            ureq::Error::StatusCode(status) => {
+                // Try to read error body
+                let message = format!("Request failed with status {}", status);
+                let code = map_status_to_error_code(status, &message);
+                PaycheckError::with_status(code, message, status)
+            }
+            _ => PaycheckError::network(error.to_string()),
+        }
     }
 }
 

@@ -2,7 +2,10 @@
 
 use crate::error::{PaycheckError, PaycheckErrorCode, Result};
 use crate::types::LicenseClaims;
-use base64::{engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD}, Engine};
+use base64::{
+    Engine,
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -20,11 +23,17 @@ pub fn decode_token(token: &str) -> Result<LicenseClaims> {
     }
 
     let payload = URL_SAFE_NO_PAD.decode(parts[1]).map_err(|_| {
-        PaycheckError::new(PaycheckErrorCode::ValidationError, "Failed to decode JWT payload")
+        PaycheckError::new(
+            PaycheckErrorCode::ValidationError,
+            "Failed to decode JWT payload",
+        )
     })?;
 
     let claims: LicenseClaims = serde_json::from_slice(&payload).map_err(|_| {
-        PaycheckError::new(PaycheckErrorCode::ValidationError, "Failed to parse JWT claims")
+        PaycheckError::new(
+            PaycheckErrorCode::ValidationError,
+            "Failed to parse JWT claims",
+        )
     })?;
 
     Ok(claims)

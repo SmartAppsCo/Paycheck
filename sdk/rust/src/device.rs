@@ -106,8 +106,8 @@ fn get_raw_machine_id() -> Result<String> {
 
 #[cfg(target_os = "windows")]
 fn get_raw_machine_id() -> Result<String> {
-    use winreg::enums::*;
     use winreg::RegKey;
+    use winreg::enums::*;
 
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let crypto = hklm

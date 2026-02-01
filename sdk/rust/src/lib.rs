@@ -6,16 +6,12 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use paycheck_sdk::{Paycheck, PaycheckOptions, DeviceType};
+//! use paycheck_sdk::Paycheck;
+//! use std::path::PathBuf;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Initialize with your project's public key
-//!     let paycheck = Paycheck::new("your-base64-public-key", PaycheckOptions {
-//!         base_url: Some("https://pay.myapp.com".into()),
-//!         device_type: Some(DeviceType::Machine),
-//!         ..Default::default()
-//!     })?;
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let data_dir = PathBuf::from("/path/to/app/data");
+//!     let paycheck = Paycheck::new("your-base64-public-key", &data_dir)?;
 //!
 //!     // Check if already licensed (works offline, verifies Ed25519 signature!)
 //!     if paycheck.is_licensed() {
@@ -23,8 +19,8 @@
 //!         return Ok(());
 //!     }
 //!
-//!     // Activate with code (from payment callback or email recovery)
-//!     let result = paycheck.activate_with_code("MYAPP-AB3D-EF5G", None).await?;
+//!     // Activate with code (blocking ~500ms)
+//!     let result = paycheck.activate_with_code("MYAPP-AB3D-EF5G", None)?;
 //!     println!("Activated! Tier: {}", result.tier);
 //!
 //!     // Feature gating
@@ -36,11 +32,31 @@
 //! }
 //! ```
 //!
+//! ## With Custom Options
+//!
+//! ```rust,ignore
+//! use paycheck_sdk::{Paycheck, PaycheckOptions, DeviceType};
+//!
+//! let paycheck = Paycheck::with_options(
+//!     "your-base64-public-key",
+//!     &data_dir,
+//!     PaycheckOptions {
+//!         base_url: Some("https://pay.myapp.com".into()),
+//!         device_type: Some(DeviceType::Uuid),
+//!         ..Default::default()
+//!     },
+//! )?;
+//! ```
+//!
+//! ## Storage
+//!
+//! License data is persisted to `{storage_dir}/paycheck.json`. The directory is
+//! created automatically if it doesn't exist.
+//!
 //! ## Features
 //!
-//! - `native-storage` (default): File-based storage in app data directory
-//! - `native-tls` (default): Use native TLS for HTTPS
-//! - `rustls-tls`: Use rustls for HTTPS (alternative to native-tls)
+//! - `rustls-tls` (default): Use rustls for HTTPS
+//! - `native-tls`: Use native TLS for HTTPS (alternative to rustls-tls)
 //!
 //! ## Offline-First Design
 //!
@@ -50,7 +66,6 @@
 //! - Ed25519 signature verification ensures JWT authenticity offline
 //! - License validity is checked via `license_exp` claim, not JWT `exp`
 //! - Tokens auto-refresh when network is available
-//! - JWTs can be refreshed up to 10 years after issuance
 //!
 //! ## Understanding Expiration Times
 //!
@@ -68,15 +83,15 @@
 //!
 //! See `sdk/CORE.md` for detailed documentation.
 
+pub mod blocking;
 pub mod device;
 pub mod error;
 pub mod jwt;
-pub mod paycheck;
 pub mod storage;
 pub mod types;
 
-// Main client
-pub use paycheck::{
+// Main exports
+pub use blocking::{
     CheckoutOptions, ImportResult, OfflineValidateResult, Paycheck, PaycheckOptions, SyncResult,
     DEFAULT_BASE_URL,
 };
@@ -85,7 +100,7 @@ pub use paycheck::{
 pub use error::{PaycheckError, PaycheckErrorCode, Result};
 
 // Storage
-pub use storage::{MemoryStorage, StorageAdapter};
+pub use storage::{FileStorage, StorageAdapter};
 
 // Types
 pub use types::{
@@ -94,15 +109,11 @@ pub use types::{
     LicenseStatus, RequestCodeResult, ValidateResult,
 };
 
-// Re-export storage implementations
-#[cfg(feature = "native-storage")]
-pub use storage::FileStorage;
-
-// Re-export device utilities
+// Device utilities
 pub use device::{generate_uuid, get_machine_id};
 
-// Re-export JWT utilities
+// JWT utilities
 pub use jwt::{
-    covers_version, decode_token, has_feature, is_jwt_expired, is_license_expired, verify_token,
-    verify_and_decode_token,
+    covers_version, decode_token, has_feature, is_jwt_expired, is_license_expired,
+    verify_and_decode_token, verify_token,
 };
