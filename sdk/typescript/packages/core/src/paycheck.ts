@@ -107,27 +107,39 @@ const DEFAULT_BASE_URL = 'https://api.paycheck.dev';
 const ACTIVATION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 /**
- * Normalize activation code by stripping non-alphanumeric characters.
+ * Format an activation code for display.
  *
- * Converts to uppercase and replaces any sequence of non-alphanumeric
- * characters with a single dash. This handles user input with accidental
- * dots, underscores, extra spaces, backticks (from email copy-paste), or
- * other characters.
+ * Normalizes user input to match the server's expected format:
+ * - Converts to uppercase
+ * - Replaces any non-alphanumeric characters with dashes
+ * - Trims leading/trailing separators
  *
- * Examples:
- * - "`C9MA-JUFF`" → "C9MA-JUFF" (backticks stripped)
- * - "MYAPP.AB3D.EF5G" → "MYAPP-AB3D-EF5G"
- * - "  myapp  ab3d  ef5g  " → "MYAPP-AB3D-EF5G"
+ * Use this to show users exactly what the server will see, or to
+ * format codes as users type them.
  *
- * @param code - Raw activation code input
- * @returns Normalized code in uppercase with dashes as separators
+ * @param code - Raw activation code input from user
+ * @returns Formatted code (e.g., "MYAPP-AB3D-EF5G" or "AB3D-EF5G")
+ *
+ * @example
+ * ```typescript
+ * // Format user input for display
+ * formatActivationCode('myapp ab3d ef5g')  // "MYAPP-AB3D-EF5G"
+ * formatActivationCode('`AB3D-EF5G`')      // "AB3D-EF5G" (backticks stripped)
+ * formatActivationCode('ab3d...ef5g')      // "AB3D-EF5G"
+ *
+ * // Use in an input handler
+ * <input onChange={(e) => setCode(formatActivationCode(e.target.value))} />
+ * ```
  */
-function normalizeActivationCode(code: string): string {
+export function formatActivationCode(code: string): string {
   return code
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, '-')
     .replace(/^-+|-+$/g, ''); // trim leading/trailing dashes
 }
+
+// Internal alias for the exported function (for backwards compatibility in this file)
+const normalizeActivationCode = formatActivationCode;
 
 /**
  * Validate activation code format and return normalized code.

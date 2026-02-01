@@ -16,18 +16,27 @@ pub const DEFAULT_BASE_URL: &str = "https://api.paycheck.dev";
 /// Valid characters for activation code parts (base32-like, excludes confusing 0/O/1/I)
 const ACTIVATION_CODE_CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-/// Normalize activation code by stripping non-alphanumeric characters.
+/// Format an activation code for display.
 ///
-/// Converts to uppercase and replaces any sequence of non-alphanumeric
-/// characters with a single dash. This handles user input with accidental
-/// dots, underscores, extra spaces, backticks (from email copy-paste), or
-/// other characters.
+/// Normalizes user input to match the server's expected format:
+/// - Converts to uppercase
+/// - Replaces any non-alphanumeric characters with dashes
+/// - Trims leading/trailing separators
 ///
-/// Examples:
-/// - "`C9MA-JUFF`" → "C9MA-JUFF" (backticks stripped)
-/// - "MYAPP.AB3D.EF5G" → "MYAPP-AB3D-EF5G"
-/// - "  myapp  ab3d  ef5g  " → "MYAPP-AB3D-EF5G"
-fn normalize_activation_code(code: &str) -> String {
+/// Use this to show users exactly what the server will see, or to
+/// format codes as users type them.
+///
+/// # Examples
+///
+/// ```
+/// use paycheck_sdk::format_activation_code;
+///
+/// // Format user input for display
+/// assert_eq!(format_activation_code("myapp ab3d ef5g"), "MYAPP-AB3D-EF5G");
+/// assert_eq!(format_activation_code("`AB3D-EF5G`"), "AB3D-EF5G");
+/// assert_eq!(format_activation_code("ab3d...ef5g"), "AB3D-EF5G");
+/// ```
+pub fn format_activation_code(code: &str) -> String {
     let upper = code.to_uppercase();
     let mut result = String::with_capacity(upper.len());
     let mut last_was_separator = true; // Start true to avoid leading dash
@@ -61,7 +70,7 @@ fn normalize_activation_code(code: &str) -> String {
 ///
 /// Returns the normalized code if valid, Err with message if invalid.
 fn validate_activation_code(code: &str) -> Result<String> {
-    let normalized = normalize_activation_code(code);
+    let normalized = format_activation_code(code);
     if normalized.is_empty() {
         return Err(PaycheckError::validation("Activation code is empty"));
     }
@@ -940,29 +949,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_normalize_activation_code() {
+    fn test_format_activation_code() {
         // Basic normalization
-        assert_eq!(normalize_activation_code("myapp-ab3d-ef5g"), "MYAPP-AB3D-EF5G");
+        assert_eq!(format_activation_code("myapp-ab3d-ef5g"), "MYAPP-AB3D-EF5G");
 
         // Multiple separators collapsed to single dash
-        assert_eq!(normalize_activation_code("MYAPP--AB3D--EF5G"), "MYAPP-AB3D-EF5G");
-        assert_eq!(normalize_activation_code("MYAPP  AB3D  EF5G"), "MYAPP-AB3D-EF5G");
+        assert_eq!(format_activation_code("MYAPP--AB3D--EF5G"), "MYAPP-AB3D-EF5G");
+        assert_eq!(format_activation_code("MYAPP  AB3D  EF5G"), "MYAPP-AB3D-EF5G");
 
         // Non-alphanumeric characters replaced with dashes
-        assert_eq!(normalize_activation_code("MYAPP.AB3D.EF5G"), "MYAPP-AB3D-EF5G");
-        assert_eq!(normalize_activation_code("MYAPP_AB3D_EF5G"), "MYAPP-AB3D-EF5G");
-        assert_eq!(normalize_activation_code("MYAPP...AB3D___EF5G"), "MYAPP-AB3D-EF5G");
+        assert_eq!(format_activation_code("MYAPP.AB3D.EF5G"), "MYAPP-AB3D-EF5G");
+        assert_eq!(format_activation_code("MYAPP_AB3D_EF5G"), "MYAPP-AB3D-EF5G");
+        assert_eq!(format_activation_code("MYAPP...AB3D___EF5G"), "MYAPP-AB3D-EF5G");
 
         // Leading/trailing separators removed
-        assert_eq!(normalize_activation_code("  MYAPP-AB3D-EF5G  "), "MYAPP-AB3D-EF5G");
-        assert_eq!(normalize_activation_code("---MYAPP-AB3D-EF5G---"), "MYAPP-AB3D-EF5G");
+        assert_eq!(format_activation_code("  MYAPP-AB3D-EF5G  "), "MYAPP-AB3D-EF5G");
+        assert_eq!(format_activation_code("---MYAPP-AB3D-EF5G---"), "MYAPP-AB3D-EF5G");
 
         // Mixed separators
-        assert_eq!(normalize_activation_code("MYAPP - AB3D - EF5G"), "MYAPP-AB3D-EF5G");
+        assert_eq!(format_activation_code("MYAPP - AB3D - EF5G"), "MYAPP-AB3D-EF5G");
 
         // Backticks from email copy-paste (common issue)
-        assert_eq!(normalize_activation_code("`C9MA-JUFF`"), "C9MA-JUFF");
-        assert_eq!(normalize_activation_code("`MYAPP-C9MA-JUFF`"), "MYAPP-C9MA-JUFF");
+        assert_eq!(format_activation_code("`C9MA-JUFF`"), "C9MA-JUFF");
+        assert_eq!(format_activation_code("`MYAPP-C9MA-JUFF`"), "MYAPP-C9MA-JUFF");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 // Main client
-export { Paycheck, createPaycheck } from './paycheck';
+export { Paycheck, createPaycheck, formatActivationCode } from './paycheck';
 export type {
   PaycheckOptions,
   OfflineValidateResult,

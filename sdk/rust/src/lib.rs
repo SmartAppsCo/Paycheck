@@ -92,8 +92,8 @@ pub mod types;
 
 // Main exports
 pub use blocking::{
-    CheckoutOptions, ImportResult, OfflineValidateResult, Paycheck, PaycheckOptions, SyncResult,
-    DEFAULT_BASE_URL,
+    format_activation_code, CheckoutOptions, ImportResult, OfflineValidateResult, Paycheck,
+    PaycheckOptions, SyncResult, DEFAULT_BASE_URL,
 };
 
 // Error types
