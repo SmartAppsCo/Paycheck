@@ -266,18 +266,19 @@ impl Paycheck {
         let device_type = options.device_type.unwrap_or(DeviceType::Machine);
         let auto_refresh = options.auto_refresh.unwrap_or(true);
 
-        let device_id = options.device_id.unwrap_or_else(|| {
-            if let Some(id) = storage.get(keys::DEVICE_ID) {
-                return id;
+        // Determine device_id based on type:
+        // - Machine: always derive fresh (deterministic, shouldn't be stored)
+        // - Uuid: persist in storage (random, needs to be stable across runs)
+        let device_id = options.device_id.unwrap_or_else(|| match device_type {
+            DeviceType::Machine => get_machine_id().unwrap_or_else(|_| generate_uuid()),
+            DeviceType::Uuid => {
+                if let Some(id) = storage.get(keys::DEVICE_ID) {
+                    return id;
+                }
+                let id = generate_uuid();
+                storage.set(keys::DEVICE_ID, &id);
+                id
             }
-
-            let id = match device_type {
-                DeviceType::Machine => get_machine_id().unwrap_or_else(|_| generate_uuid()),
-                DeviceType::Uuid => generate_uuid(),
-            };
-
-            storage.set(keys::DEVICE_ID, &id);
-            id
         });
 
         Ok(Self {
