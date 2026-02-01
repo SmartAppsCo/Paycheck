@@ -8,17 +8,17 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-paycheck-sdk = "0.2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+paycheck-sdk = "0.6"
 ```
+
+The SDK is **fully synchronous** - no async runtime required. This makes it ideal for desktop apps using sync UI frameworks (Slint, egui, iced).
 
 ## Quick Start
 
 ```rust
 use paycheck_sdk::{Paycheck, PaycheckOptions, DeviceType};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize with your project's public key from the Paycheck dashboard
     let paycheck = Paycheck::new("your-base64-public-key", Default::default())?;
 
@@ -37,7 +37,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Activate with code (from payment callback or email recovery)
-    let result = paycheck.activate_with_code("MYAPP-AB3D-EF5G", None).await?;
+    // Accepts "PREFIX-XXXX-XXXX" or just "XXXX-XXXX" (server prepends prefix)
+    let result = paycheck.activate_with_code("AB3D-EF5G", None)?;
     println!("Activated! Features: {:?}", result.features);
 
     // Feature gating
@@ -54,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Crate Features
 
 - `native-storage` (default): File-based storage in app data directory
-- `native-tls` (default): Use native TLS for HTTPS
+- `native-tls` (default): Use native TLS for HTTPS (via ureq)
 - `rustls-tls`: Use rustls for HTTPS (alternative to native-tls)
 
 ### Device Types
@@ -92,20 +93,20 @@ pub struct PaycheckOptions {
 
 ```rust
 // Start checkout (redirect URL is configured on your project, not here)
-let result = paycheck.checkout("product-uuid", None).await?;
+let result = paycheck.checkout("product-uuid", None)?;
 println!("Redirect to: {}", result.checkout_url);
 
 // With options
 let result = paycheck.checkout("product-uuid", Some(CheckoutOptions {
     customer_id: Some("customer-123".into()),
     ..Default::default()
-})).await?;
+}))?;
 
 // Parse callback (after payment redirects to your configured redirect_url)
 let result = paycheck.handle_callback("https://myapp.com/success?code=MYAPP-AB3D-EF5G&status=success")?;
 if result.status == CallbackStatus::Success {
     if let Some(code) = result.code {
-        paycheck.activate_with_code(&code, None).await?;
+        paycheck.activate_with_code(&code, None)?;
     }
 }
 ```
@@ -113,17 +114,18 @@ if result.status == CallbackStatus::Success {
 ### Activation
 
 ```rust
-// Activate with activation code (PREFIX-XXXX-XXXX format, 30 min TTL)
-let result = paycheck.activate_with_code("MYAPP-AB3D-EF5G", None).await?;
+// Activate with activation code (30 min TTL)
+// Accepts "PREFIX-XXXX-XXXX" or just "XXXX-XXXX" (server prepends project prefix)
+let result = paycheck.activate_with_code("AB3D-EF5G", None)?;
 println!("Activated! Tier: {}", result.tier);
 
 // With device name
-let result = paycheck.activate_with_code("MYAPP-AB3D-EF5G", Some(DeviceInfo {
+let result = paycheck.activate_with_code("AB3D-EF5G", Some(DeviceInfo {
     device_name: Some("John's MacBook".into()),
-})).await?;
+}))?;
 
 // Request activation code sent to purchase email (for license recovery)
-let result = paycheck.request_activation_code("user@example.com").await?;
+let result = paycheck.request_activation_code("user@example.com")?;
 println!("{}", result.message);
 
 // Offline activation - import JWT directly (clipboard, QR code, etc.)
@@ -151,7 +153,7 @@ if paycheck.is_licensed() {
 
 // Sync with server (for subscription apps)
 // Checks for updates, refreshes token if needed, falls back to offline
-let result = paycheck.sync().await;
+let result = paycheck.sync();
 if result.valid {
     if result.offline {
         println!("Offline mode - using cached license");
@@ -162,7 +164,7 @@ if result.valid {
 }
 
 // Online validation (also checks revocation)
-let result = paycheck.validate_online().await?;
+let result = paycheck.validate_online()?;
 if result.valid {
     println!("License is valid online");
 }
@@ -175,7 +177,7 @@ if result.valid {
 let token = paycheck.get_token();
 
 // Refresh expired token
-let new_token = paycheck.refresh_token().await?;
+let new_token = paycheck.refresh_token()?;
 
 // Clear stored token
 paycheck.clear_token();
@@ -214,14 +216,14 @@ if paycheck.covers_version(version_timestamp) {
 
 ```rust
 // Get full license info
-let info = paycheck.get_license_info().await?;
+let info = paycheck.get_license_info()?;
 match info.device_limit {
     Some(limit) => println!("Devices: {}/{}", info.device_count, limit),
     None => println!("Devices: {} (unlimited)", info.device_count),
 }
 
 // Deactivate current device
-let result = paycheck.deactivate().await?;
+let result = paycheck.deactivate()?;
 println!("Remaining devices: {}", result.remaining_devices);
 ```
 
@@ -268,9 +270,10 @@ let paycheck = Paycheck::new("your-public-key", PaycheckOptions {
 ```rust
 use paycheck_sdk::{PaycheckError, PaycheckErrorCode};
 
-match paycheck.activate_with_code("INVALID-CODE", None).await {
+match paycheck.activate_with_code("INVALID-CODE", None) {
     Ok(result) => println!("Activated!"),
     Err(e) => match e.code {
+        PaycheckErrorCode::ValidationError => println!("Invalid code format"),
         PaycheckErrorCode::InvalidCode => println!("Invalid or expired activation code"),
         PaycheckErrorCode::DeviceLimitReached => println!("Too many devices"),
         PaycheckErrorCode::LicenseRevoked => println!("License was revoked"),

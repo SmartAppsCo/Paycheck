@@ -38,7 +38,8 @@ if (valid) {
   console.log('Licensed! Tier:', claims.tier);
 } else {
   // Activate with code (from payment callback or email recovery)
-  const result = await paycheck.activateWithCode('MYAPP-AB3D-EF5G');
+  // Accepts "PREFIX-XXXX-XXXX" or just "XXXX-XXXX" (server prepends prefix)
+  const result = await paycheck.activateWithCode('AB3D-EF5G');
   console.log('Activated! Features:', result.features);
 }
 
@@ -154,9 +155,11 @@ interface PaycheckOptions {
 
 #### Activation
 
-- `activateWithCode(code, deviceInfo?)` - Activate with activation code (PREFIX-XXXX-XXXX format)
+- `activateWithCode(code, deviceInfo?)` - Activate with activation code (accepts `PREFIX-XXXX-XXXX` or `XXXX-XXXX`)
 - `requestActivationCode(email)` - Request activation code sent to purchase email
 - `importToken(token)` - Import JWT directly (offline activation)
+
+**Note:** `activateWithCode` validates the code format client-side before making an API request. This prevents unnecessary network calls for malformed codes. Throws `VALIDATION_ERROR` for invalid format.
 
 #### Validation (with Ed25519 signature verification)
 
@@ -208,7 +211,7 @@ const {
   error,        // Error message if validation failed
   synced,       // Whether server was reached (sync mode only)
   offline,      // Whether in offline mode (sync mode only)
-  activateWithCode, // Activate with code (PREFIX-XXXX-XXXX format)
+  activateWithCode, // Activate with code (PREFIX-XXXX-XXXX or XXXX-XXXX)
   requestActivationCode, // Request code sent to purchase email
   importToken,  // Import JWT directly (offline activation)
   refresh,      // Refresh token
@@ -296,6 +299,9 @@ try {
 } catch (error) {
   if (error instanceof PaycheckError) {
     switch (error.code) {
+      case 'VALIDATION_ERROR':
+        console.log('Invalid code format'); // Client-side validation
+        break;
       case 'INVALID_CODE':
         console.log('Invalid or expired activation code');
         break;

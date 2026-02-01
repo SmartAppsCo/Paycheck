@@ -200,12 +200,21 @@ ActivationResult:
 
 ### `activateWithCode(code: string, deviceInfo?: DeviceInfo) -> Promise<ActivationResult>`
 
-Exchanges a short-lived redemption code for a JWT.
+Exchanges a short-lived activation code for a JWT.
+
+```
+code: string  # Accepts two formats:
+              # - Full: "PREFIX-XXXX-XXXX" (e.g., "MYAPP-AB3D-EF5G")
+              # - Bare: "XXXX-XXXX" (e.g., "AB3D-EF5G") - server prepends project prefix
+```
 
 **Behavior:**
+- Validates code format client-side before making API request (avoids unnecessary network calls)
 - POST to `/redeem` with code in JSON body (not URL params for security)
 - Includes `public_key`, `device_id`, `device_type` in request body
-- Redemption codes expire in 30 minutes and are single-use
+- Server normalizes bare codes by prepending the project's configured prefix
+- Activation codes expire in 30 minutes and are single-use
+- Throws `VALIDATION_ERROR` if code format is invalid (wrong length, invalid characters)
 
 ---
 
