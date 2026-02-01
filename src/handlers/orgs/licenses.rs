@@ -2,7 +2,7 @@ use axum::{
     extract::{Extension, Query, State},
     http::HeaderMap,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::db::{AppState, queries};
 use crate::error::{AppError, OptionExt, Result, msg};
@@ -280,16 +280,36 @@ pub async fn create_license(
     }))
 }
 
-/// Request body for updating a license (email correction)
+/// Deserialize a double Option field where:
+/// - Field absent in JSON → None (don't update)
+/// - Field present with null → Some(None) (set to NULL in DB)
+/// - Field present with value → Some(Some(value)) (set to value)
+fn deserialize_optional_nullable<'de, D, T>(deserializer: D) -> std::result::Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    let value: Option<T> = Option::deserialize(deserializer)?;
+    Ok(Some(value))
+}
+
+/// Request body for updating a license
 #[derive(Debug, Deserialize)]
 pub struct UpdateLicenseBody {
     /// New email to hash and store (fixes typo'd purchase email)
     pub email: Option<String>,
+    /// Developer-managed customer identifier
+    pub customer_id: Option<String>,
+    /// License expiration timestamp (null = perpetual)
+    #[serde(default, deserialize_with = "deserialize_optional_nullable")]
+    pub expires_at: Option<Option<i64>>,
+    /// Updates expiration timestamp (null = all versions)
+    #[serde(default, deserialize_with = "deserialize_optional_nullable")]
+    pub updates_expires_at: Option<Option<i64>>,
 }
 
-/// PATCH /orgs/{org_id}/projects/{project_id}/licenses/{license_id}
-/// Update a license's email hash to fix typo'd purchase emails.
-/// This enables self-service recovery with the corrected email address.
+/// PUT /orgs/{org_id}/projects/{project_id}/licenses/{license_id}
+/// Update a license's fields.
 pub async fn update_license(
     State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
@@ -320,25 +340,67 @@ pub async fn update_license(
     let project = queries::get_project_by_id(&conn, &path.project_id)?
         .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
+    // Track changes for audit log
+    let mut changes = serde_json::Map::new();
+
     // Update email hash if provided
     if let Some(ref email) = body.email {
         let new_email_hash = state.email_hasher.hash(email);
-        let old_email_hash = license.email_hash.clone();
-        queries::update_license_email_hash(&conn, &license.id, &new_email_hash)?;
-
-        // Apply change in memory to avoid re-fetching
+        changes.insert(
+            "old_email_hash".to_string(),
+            serde_json::json!(license.email_hash),
+        );
         license.email_hash = Some(new_email_hash);
+    }
 
-        // Audit log the email change (log old hash for investigation, not new email for privacy)
+    // Update customer_id if provided
+    if let Some(ref customer_id) = body.customer_id {
+        changes.insert(
+            "old_customer_id".to_string(),
+            serde_json::json!(license.customer_id),
+        );
+        license.customer_id = Some(customer_id.clone());
+    }
+
+    // Update expires_at if provided (Option<Option<i64>> to allow setting to null)
+    if let Some(expires_at) = body.expires_at {
+        changes.insert(
+            "old_expires_at".to_string(),
+            serde_json::json!(license.expires_at),
+        );
+        license.expires_at = expires_at;
+    }
+
+    // Update updates_expires_at if provided
+    if let Some(updates_expires_at) = body.updates_expires_at {
+        changes.insert(
+            "old_updates_expires_at".to_string(),
+            serde_json::json!(license.updates_expires_at),
+        );
+        license.updates_expires_at = updates_expires_at;
+    }
+
+    // Only update if there are changes
+    if !changes.is_empty() {
+        queries::update_license(
+            &conn,
+            &license.id,
+            license.email_hash.as_deref(),
+            license.customer_id.as_deref(),
+            license.expires_at,
+            license.updates_expires_at,
+        )?;
+
+        changes.insert(
+            "impersonator".to_string(),
+            ctx.impersonator_json().unwrap_or(serde_json::Value::Null),
+        );
+
         AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
             .actor(ActorType::User, Some(&ctx.member.user_id))
-            .action(AuditAction::UpdateLicenseEmail)
+            .action(AuditAction::UpdateLicense)
             .resource("license", &license.id)
-            .details(&serde_json::json!({
-                "old_email_hash": old_email_hash,
-                "reason": "email_correction",
-                "impersonator": ctx.impersonator_json()
-            }))
+            .details(&serde_json::Value::Object(changes))
             .org(&path.org_id)
             .project(&path.project_id)
             .names(&ctx.audit_names().project(project.name.clone()))
@@ -346,7 +408,7 @@ pub async fn update_license(
             .save()?;
 
         tracing::info!(
-            "License email updated by admin: {} (project: {})",
+            "License updated by admin: {} (project: {})",
             license.id,
             path.project_id
         );

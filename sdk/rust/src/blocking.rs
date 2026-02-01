@@ -13,6 +13,64 @@ use url::Url;
 /// Default Paycheck API URL
 pub const DEFAULT_BASE_URL: &str = "https://api.paycheck.dev";
 
+/// Valid characters for activation code parts (base32-like, excludes confusing 0/O/1/I)
+const ACTIVATION_CODE_CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/// Validate activation code format.
+///
+/// Accepts two formats:
+/// - `PREFIX-XXXX-XXXX` (full code with prefix)
+/// - `XXXX-XXXX` (bare code, server will prepend project prefix)
+///
+/// Returns Ok(()) if valid, Err with message if invalid.
+/// Accepts various separators (dashes, spaces) and trims whitespace.
+fn validate_activation_code(code: &str) -> Result<()> {
+    let trimmed = code.trim();
+    if trimmed.is_empty() {
+        return Err(PaycheckError::validation("Activation code is empty"));
+    }
+
+    // Split on whitespace or dashes
+    let parts: Vec<&str> = trimmed
+        .split(|c: char| c.is_whitespace() || c == '-')
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    // Determine which parts contain the XXXX-XXXX code
+    let code_parts: &[&str] = match parts.len() {
+        3 => &parts[1..], // PREFIX-XXXX-XXXX: validate parts 2 and 3
+        2 => &parts[..],  // XXXX-XXXX: validate both parts
+        _ => {
+            return Err(PaycheckError::validation(
+                "Invalid activation code format (expected PREFIX-XXXX-XXXX or XXXX-XXXX)",
+            ));
+        }
+    };
+
+    // Validate the XXXX parts (must be exactly 4 characters from valid set)
+    for (i, part) in code_parts.iter().enumerate() {
+        if part.len() != 4 {
+            return Err(PaycheckError::validation(format!(
+                "Activation code part {} must be 4 characters (got {})",
+                i + 1,
+                part.len()
+            )));
+        }
+
+        let upper = part.to_uppercase();
+        for c in upper.bytes() {
+            if !ACTIVATION_CODE_CHARS.contains(&c) {
+                return Err(PaycheckError::validation(format!(
+                    "Invalid character '{}' in activation code",
+                    c as char
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Configuration options for the Paycheck client
 #[derive(Clone, Default)]
 pub struct PaycheckOptions {
@@ -545,11 +603,17 @@ impl Paycheck {
     }
 
     /// Activate with a short-lived activation code.
+    ///
+    /// The code must be in PREFIX-XXXX-XXXX format. The SDK validates the format
+    /// before making a network request to avoid unnecessary API calls.
     pub fn activate_with_code(
         &self,
         code: &str,
         options: Option<DeviceInfo>,
     ) -> Result<ActivationResult> {
+        // Validate code format before making network request
+        validate_activation_code(code)?;
+
         #[derive(Serialize)]
         struct RedeemRequest {
             public_key: String,
@@ -835,4 +899,71 @@ pub struct CheckoutOptions {
     pub provider: Option<String>,
     /// Your customer identifier (flows through to license)
     pub customer_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_activation_code_full() {
+        // Full code format: PREFIX-XXXX-XXXX
+        assert!(validate_activation_code("MYAPP-AB3D-EF5G").is_ok());
+
+        // Spaces instead of dashes
+        assert!(validate_activation_code("MYAPP AB3D EF5G").is_ok());
+
+        // Mixed separators
+        assert!(validate_activation_code("MYAPP-AB3D EF5G").is_ok());
+
+        // Extra whitespace
+        assert!(validate_activation_code("  MYAPP-AB3D-EF5G  ").is_ok());
+
+        // Lowercase (should be accepted, converted internally)
+        assert!(validate_activation_code("myapp-ab3d-ef5g").is_ok());
+
+        // All valid characters in code parts
+        assert!(validate_activation_code("TEST-ABCD-2345").is_ok());
+        assert!(validate_activation_code("TEST-HJKM-6789").is_ok());
+    }
+
+    #[test]
+    fn test_validate_activation_code_bare() {
+        // Bare code format: XXXX-XXXX (server prepends prefix)
+        assert!(validate_activation_code("AB3D-EF5G").is_ok());
+
+        // Bare code with space
+        assert!(validate_activation_code("AB3D EF5G").is_ok());
+
+        // Extra whitespace
+        assert!(validate_activation_code("  AB3D-EF5G  ").is_ok());
+
+        // Lowercase
+        assert!(validate_activation_code("ab3d-ef5g").is_ok());
+    }
+
+    #[test]
+    fn test_validate_activation_code_invalid() {
+        // Empty
+        assert!(validate_activation_code("").is_err());
+        assert!(validate_activation_code("   ").is_err());
+
+        // Wrong number of parts (1 or 4+)
+        assert!(validate_activation_code("AB3DEF5G").is_err()); // 1 part (no separator)
+        assert!(validate_activation_code("MYAPP-AB3D-EF5G-XXXX").is_err()); // 4 parts
+
+        // Wrong length in code parts (full code)
+        assert!(validate_activation_code("MYAPP-ABC-EF5G").is_err()); // 3 chars
+        assert!(validate_activation_code("MYAPP-ABCDE-EF5G").is_err()); // 5 chars
+
+        // Wrong length in code parts (bare code)
+        assert!(validate_activation_code("ABC-EF5G").is_err()); // 3 chars
+        assert!(validate_activation_code("AB3D-EF5").is_err()); // 3 chars
+
+        // Invalid characters (0, O, 1, I are excluded to avoid confusion)
+        assert!(validate_activation_code("MYAPP-AB0D-EF5G").is_err()); // 0 (looks like O)
+        assert!(validate_activation_code("MYAPP-ABOD-EF5G").is_err()); // O (looks like 0)
+        assert!(validate_activation_code("AB0D-EF5G").is_err()); // 0 in bare code
+        assert!(validate_activation_code("ABID-EF5G").is_err()); // I in bare code
+    }
 }

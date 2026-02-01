@@ -1,7 +1,7 @@
 meta {
-  name: Update License
+  name: Update License (Impersonated)
   type: http
-  seq: 4
+  seq: 14
 }
 
 put {
@@ -11,7 +11,11 @@ put {
 }
 
 auth:bearer {
-  token: {{org_member_api_key}}
+  token: {{operator_api_key}}
+}
+
+headers {
+  X-On-Behalf-Of: {{user_id}}
 }
 
 body:json {
@@ -24,7 +28,7 @@ body:json {
 }
 
 docs {
-  Update a license's fields.
+  Update a license's fields (impersonated).
 
   All fields are optional - only include the fields you want to update.
 
@@ -48,7 +52,7 @@ docs {
     ... other license fields ...
   }
 
-  Requires: write access to the project (admin or owner role)
+  Requires the impersonated member to have write access to the project.
 
   Use cases:
   - Fix typo'd purchase email for self-service recovery

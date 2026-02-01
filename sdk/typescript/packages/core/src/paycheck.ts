@@ -103,6 +103,66 @@ export interface CallbackActivationResult {
 /** Default Paycheck API URL */
 const DEFAULT_BASE_URL = 'https://api.paycheck.dev';
 
+/** Valid characters for activation code parts (base32-like, excludes confusing 0/O/1/I) */
+const ACTIVATION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/**
+ * Validate activation code format.
+ *
+ * Accepts two formats:
+ * - `PREFIX-XXXX-XXXX` (full code with prefix)
+ * - `XXXX-XXXX` (bare code, server will prepend project prefix)
+ *
+ * @throws PaycheckError if format is invalid
+ */
+function validateActivationCode(code: string): void {
+  const trimmed = code.trim();
+  if (!trimmed) {
+    throw new PaycheckError('VALIDATION_ERROR', 'Activation code is empty');
+  }
+
+  // Split on whitespace or dashes
+  const parts = trimmed
+    .split(/[\s-]+/)
+    .filter((s) => s.length > 0);
+
+  // Determine which parts contain the XXXX-XXXX code
+  let codeParts: string[];
+  if (parts.length === 3) {
+    // PREFIX-XXXX-XXXX: validate parts 2 and 3
+    codeParts = parts.slice(1);
+  } else if (parts.length === 2) {
+    // XXXX-XXXX: validate both parts
+    codeParts = parts;
+  } else {
+    throw new PaycheckError(
+      'VALIDATION_ERROR',
+      'Invalid activation code format (expected PREFIX-XXXX-XXXX or XXXX-XXXX)'
+    );
+  }
+
+  // Validate the XXXX parts (must be exactly 4 characters from valid set)
+  for (let i = 0; i < codeParts.length; i++) {
+    const part = codeParts[i];
+    if (part.length !== 4) {
+      throw new PaycheckError(
+        'VALIDATION_ERROR',
+        `Activation code part ${i + 1} must be 4 characters (got ${part.length})`
+      );
+    }
+
+    const upper = part.toUpperCase();
+    for (const c of upper) {
+      if (!ACTIVATION_CODE_CHARS.includes(c)) {
+        throw new PaycheckError(
+          'VALIDATION_ERROR',
+          `Invalid character '${c}' in activation code`
+        );
+      }
+    }
+  }
+}
+
 /**
  * Converts a snake_case string to camelCase
  */
@@ -574,6 +634,9 @@ export class Paycheck {
     code: string,
     options?: DeviceInfo
   ): Promise<ActivationResult> {
+    // Validate format before hitting the API
+    validateActivationCode(code);
+
     interface RedeemResponse {
       token: string;
       license_exp: number | null;

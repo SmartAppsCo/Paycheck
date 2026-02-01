@@ -22,15 +22,15 @@ const MAX_DEVICE_NAME_LEN: usize = 256;
 
 /// Normalize an activation code to canonical format (PREFIX-XXXX-XXXX).
 ///
-/// The email displays codes with spaces instead of dashes for easier copying,
-/// so we accept both formats:
-/// - `PREFIX-XXXX-XXXX` (canonical)
+/// Accepts multiple formats for user convenience:
+/// - `PREFIX-XXXX-XXXX` (canonical, full code)
 /// - `PREFIX-XXXX XXXX` (email display format)
-/// - `PREFIX- XXXX XXXX` (email text format with extra space)
+/// - `XXXX-XXXX` (bare code without prefix)
+/// - `XXXX XXXX` (bare code with space)
 ///
-/// Also handles extra whitespace that users might accidentally include.
-fn normalize_activation_code(code: &str) -> String {
-    // Remove extra whitespace and normalize to dashes
+/// When a bare code (2 parts) is provided, the project's prefix is prepended.
+/// This allows apps to show the prefix as a visual hint without requiring users to type it.
+fn normalize_activation_code(code: &str, project_prefix: &str) -> String {
     let trimmed = code.trim();
 
     // Split on any whitespace or dashes
@@ -39,12 +39,13 @@ fn normalize_activation_code(code: &str) -> String {
         .filter(|s| !s.is_empty())
         .collect();
 
-    // If we have exactly 3 parts (PREFIX, XXXX, XXXX), join with dashes
-    if parts.len() == 3 {
-        format!("{}-{}-{}", parts[0], parts[1], parts[2])
-    } else {
-        // Fallback: just trim whitespace
-        trimmed.to_string()
+    match parts.len() {
+        // Full code: PREFIX-XXXX-XXXX
+        3 => format!("{}-{}-{}", parts[0], parts[1], parts[2]),
+        // Bare code: XXXX-XXXX (prepend project prefix)
+        2 => format!("{}-{}-{}", project_prefix, parts[0], parts[1]),
+        // Fallback: return as-is (will fail validation)
+        _ => trimmed.to_string(),
     }
 }
 
@@ -142,8 +143,8 @@ pub async fn redeem_with_code(
         .ok()
         .ok_or_else(|| AppError::BadRequest(msg::INVALID_DEVICE_TYPE.into()))?;
 
-    // Normalize the code (accept both dash and space separators)
-    let normalized_code = normalize_activation_code(&req.code);
+    // Normalize the code (accept full code or bare XXXX-XXXX format)
+    let normalized_code = normalize_activation_code(&req.code, &project.license_key_prefix);
 
     // Atomically claim the activation code (prevents race conditions where multiple
     // concurrent requests could use the same code to create multiple devices)
@@ -285,45 +286,85 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_normalize_activation_code() {
-        // Canonical format (no change)
+    fn test_normalize_activation_code_full() {
+        // Full code formats (prefix included in input)
         assert_eq!(
-            normalize_activation_code("MYAPP-AB3D-EF5G"),
+            normalize_activation_code("MYAPP-AB3D-EF5G", "MYAPP"),
             "MYAPP-AB3D-EF5G"
         );
 
         // Email HTML display format (space between code parts)
         assert_eq!(
-            normalize_activation_code("MYAPP-AB3D EF5G"),
+            normalize_activation_code("MYAPP-AB3D EF5G", "MYAPP"),
             "MYAPP-AB3D-EF5G"
         );
 
         // Email text format (extra space after prefix)
         assert_eq!(
-            normalize_activation_code("MYAPP-  AB3D EF5G"),
+            normalize_activation_code("MYAPP-  AB3D EF5G", "MYAPP"),
             "MYAPP-AB3D-EF5G"
         );
 
         // All spaces
         assert_eq!(
-            normalize_activation_code("MYAPP AB3D EF5G"),
+            normalize_activation_code("MYAPP AB3D EF5G", "MYAPP"),
             "MYAPP-AB3D-EF5G"
         );
 
         // Leading/trailing whitespace
         assert_eq!(
-            normalize_activation_code("  MYAPP-AB3D-EF5G  "),
+            normalize_activation_code("  MYAPP-AB3D-EF5G  ", "MYAPP"),
             "MYAPP-AB3D-EF5G"
         );
 
         // Tabs and mixed whitespace
         assert_eq!(
-            normalize_activation_code("MYAPP\tAB3D  EF5G"),
+            normalize_activation_code("MYAPP\tAB3D  EF5G", "MYAPP"),
+            "MYAPP-AB3D-EF5G"
+        );
+    }
+
+    #[test]
+    fn test_normalize_activation_code_bare() {
+        // Bare code formats (prefix prepended from project)
+        assert_eq!(
+            normalize_activation_code("AB3D-EF5G", "MYAPP"),
             "MYAPP-AB3D-EF5G"
         );
 
-        // Non-standard format preserved (fallback)
-        assert_eq!(normalize_activation_code("invalid"), "invalid");
-        assert_eq!(normalize_activation_code("  invalid  "), "invalid");
+        // Bare code with space
+        assert_eq!(
+            normalize_activation_code("AB3D EF5G", "MYAPP"),
+            "MYAPP-AB3D-EF5G"
+        );
+
+        // Bare code with whitespace
+        assert_eq!(
+            normalize_activation_code("  AB3D-EF5G  ", "MYAPP"),
+            "MYAPP-AB3D-EF5G"
+        );
+
+        // Different prefix
+        assert_eq!(
+            normalize_activation_code("XY12-ZW34", "OTHERAPP"),
+            "OTHERAPP-XY12-ZW34"
+        );
+    }
+
+    #[test]
+    fn test_normalize_activation_code_invalid() {
+        // Non-standard format preserved (fallback - will fail lookup)
+        assert_eq!(
+            normalize_activation_code("invalid", "MYAPP"),
+            "invalid"
+        );
+        assert_eq!(
+            normalize_activation_code("  invalid  ", "MYAPP"),
+            "invalid"
+        );
+        assert_eq!(
+            normalize_activation_code("TOO-MANY-PARTS-HERE", "MYAPP"),
+            "TOO-MANY-PARTS-HERE"
+        );
     }
 }

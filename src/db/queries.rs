@@ -3401,16 +3401,18 @@ pub fn get_license_by_subscription(
     )
 }
 
-/// Update a license's email hash (for fixing typo'd purchase emails).
-/// This enables self-service recovery with the corrected email address.
-pub fn update_license_email_hash(
+/// Update a license's fields.
+pub fn update_license(
     conn: &Connection,
     license_id: &str,
-    email_hash: &str,
+    email_hash: Option<&str>,
+    customer_id: Option<&str>,
+    expires_at: Option<i64>,
+    updates_expires_at: Option<i64>,
 ) -> Result<bool> {
     let affected = conn.execute(
-        "UPDATE licenses SET email_hash = ?1 WHERE id = ?2",
-        params![email_hash, license_id],
+        "UPDATE licenses SET email_hash = ?1, customer_id = ?2, expires_at = ?3, updates_expires_at = ?4 WHERE id = ?5",
+        params![email_hash, customer_id, expires_at, updates_expires_at, license_id],
     )?;
     Ok(affected > 0)
 }

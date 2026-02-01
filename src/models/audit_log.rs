@@ -64,7 +64,7 @@ pub enum AuditAction {
 
     // License management
     CreateLicense,
-    UpdateLicenseEmail,
+    UpdateLicense,
     RevokeLicense,
 
     // Activation

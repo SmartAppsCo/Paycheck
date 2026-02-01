@@ -20,7 +20,7 @@ pub use service_configs::*;
 
 use axum::{
     Router, middleware,
-    routing::{delete, get, patch, post, put},
+    routing::{delete, get, post, put},
 };
 
 use crate::config::RateLimitConfig;
@@ -170,7 +170,7 @@ pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<App
         )
         .route(
             "/orgs/{org_id}/projects/{project_id}/licenses/{license_id}",
-            patch(update_license),
+            put(update_license),
         )
         .route(
             "/orgs/{org_id}/projects/{project_id}/licenses/{license_id}/revoke",
