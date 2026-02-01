@@ -187,6 +187,8 @@ async fn test_callback_project_redirect_url() {
             email_from: None,
             email_enabled: true,
             email_webhook_url: None,
+            payment_config_id: None,
+            email_config_id: None,
         };
         let (private_key, public_key) = paycheck::jwt::generate_keypair();
         let project = queries::create_project(

@@ -526,8 +526,10 @@ async fn test_validate_perpetual_license_returns_valid() {
             updates_exp_days: None,
             activation_limit: Some(5),
             device_limit: Some(3),
-        device_inactive_days: None,
+            device_inactive_days: None,
             features: vec![],
+            payment_config_id: None,
+            email_config_id: None,
         };
         let product =
             queries::create_product(&mut conn, &project.id, &input).expect("Failed to create product");

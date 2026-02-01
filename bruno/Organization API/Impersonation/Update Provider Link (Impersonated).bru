@@ -1,0 +1,36 @@
+meta {
+  name: Update Provider Link (Impersonated)
+  type: http
+  seq: 10
+}
+
+put {
+  url: {{base_url}}/orgs/{{org_id}}/projects/{{project_id}}/products/{{product_id}}/provider-links/{{link_id}}
+  body: json
+  auth: bearer
+}
+
+headers {
+  X-On-Behalf-Of: {{user_id}}
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+body:json {
+  {
+    "linked_id": "price_updated_1234567890"
+  }
+}
+
+docs {
+  Update a provider link using operator impersonation.
+
+  Requirements:
+  - Operator must have admin or owner role
+  - X-On-Behalf-Of must be a user_id of a member with owner/admin role in the org
+
+  Fields:
+  - linked_id: Provider's price/variant ID (e.g., "price_1ABC..." for Stripe)
+}

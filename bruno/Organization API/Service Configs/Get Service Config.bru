@@ -1,0 +1,25 @@
+meta {
+  name: Get Service Config
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/orgs/{{org_id}}/service-configs/{{config_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_member_api_key}}
+}
+
+docs {
+  Get a specific service config by ID.
+  Requires admin role.
+
+  Response includes masked credentials (secrets replaced with ***).
+
+  To get full unmasked credentials (operator only), use:
+  GET /operators/organizations/{org_id}/payment-provider
+}

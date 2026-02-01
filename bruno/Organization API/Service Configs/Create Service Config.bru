@@ -1,0 +1,70 @@
+meta {
+  name: Create Service Config
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/orgs/{{org_id}}/service-configs
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_member_api_key}}
+}
+
+body:json {
+  {
+    "name": "Production Stripe",
+    "provider": "stripe",
+    "stripe_config": {
+      "secret_key": "sk_live_xxx",
+      "publishable_key": "pk_live_xxx",
+      "webhook_secret": "whsec_xxx"
+    }
+  }
+}
+
+docs {
+  Create a named service config for the organization.
+  Requires admin role.
+
+  Request body:
+  - name: Unique name for this config
+  - provider: "stripe", "lemonsqueezy", or "resend"
+  - stripe_config: Required if provider is "stripe"
+  - ls_config: Required if provider is "lemonsqueezy"
+  - resend_api_key: Required if provider is "resend"
+
+  Stripe example:
+  {
+    "name": "Production Stripe",
+    "provider": "stripe",
+    "stripe_config": {
+      "secret_key": "sk_live_xxx",
+      "publishable_key": "pk_live_xxx",
+      "webhook_secret": "whsec_xxx"
+    }
+  }
+
+  LemonSqueezy example:
+  {
+    "name": "Production LemonSqueezy",
+    "provider": "lemonsqueezy",
+    "ls_config": {
+      "api_key": "ls_xxx",
+      "store_id": "123456",
+      "webhook_secret": "lswhsec_xxx"
+    }
+  }
+
+  Resend example:
+  {
+    "name": "Production Email",
+    "provider": "resend",
+    "resend_api_key": "re_xxx"
+  }
+
+  After creating, assign via payment_config_id or email_config_id on org/project/product.
+}

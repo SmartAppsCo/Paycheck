@@ -107,11 +107,13 @@ impl std::fmt::Display for ServiceProvider {
     }
 }
 
-/// Organization service configuration (encrypted external service credentials)
+/// Named service configuration (encrypted external service credentials).
+/// Stored at org level as a reusable pool that can be referenced from org, project, or product.
 #[derive(Debug, Clone, Serialize)]
-pub struct OrgServiceConfig {
+pub struct ServiceConfig {
     pub id: String,
     pub org_id: String,
+    pub name: String,
     pub category: ServiceCategory,
     pub provider: ServiceProvider,
     #[serde(skip)]
@@ -120,7 +122,7 @@ pub struct OrgServiceConfig {
     pub updated_at: i64,
 }
 
-impl OrgServiceConfig {
+impl ServiceConfig {
     /// Decrypt as Stripe config. Panics if provider is not Stripe.
     pub fn decrypt_stripe_config(&self, master_key: &MasterKey) -> Result<StripeConfig> {
         debug_assert_eq!(self.provider, ServiceProvider::Stripe);
@@ -149,4 +151,16 @@ impl OrgServiceConfig {
             .map_err(|_| AppError::Internal("Invalid UTF-8 in Resend API key".into()))?;
         Ok(api_key)
     }
+}
+
+/// Source of a configuration in hierarchical lookup (for API responses)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConfigSource {
+    /// Configuration from the product level (highest priority)
+    Product,
+    /// Configuration from the project level
+    Project,
+    /// Configuration from the organization level (lowest priority/fallback)
+    Org,
 }

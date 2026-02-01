@@ -42,6 +42,11 @@ pub enum AuditAction {
     UpdateProject,
     DeleteProject,
 
+    // Service config management
+    CreateServiceConfig,
+    UpdateServiceConfig,
+    DeleteServiceConfig,
+
     // Project member management
     CreateProjectMember,
     UpdateProjectMember,

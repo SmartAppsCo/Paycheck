@@ -57,10 +57,10 @@ pub const USER_COLS: &str =
     "id, email, name, operator_role, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
 pub const ORGANIZATION_COLS: &str =
-    "id, name, payment_provider, created_at, updated_at, deleted_at, deleted_cascade_depth";
+    "id, name, payment_config_id, email_config_id, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
-pub const ORG_SERVICE_CONFIG_COLS: &str =
-    "id, org_id, category, provider, config_encrypted, created_at, updated_at";
+pub const SERVICE_CONFIG_COLS: &str =
+    "id, org_id, name, category, provider, config_encrypted, created_at, updated_at";
 
 pub const ORG_MEMBER_COLS: &str =
     "id, user_id, org_id, role, created_at, updated_at, deleted_at, deleted_cascade_depth";
@@ -71,11 +71,11 @@ pub const API_KEY_COLS: &str = "id, user_id, name, key_prefix, key_hash, user_ma
 
 pub const API_KEY_SCOPE_COLS: &str = "api_key_id, org_id, project_id, access";
 
-pub const PROJECT_COLS: &str = "id, org_id, name, license_key_prefix, private_key, public_key, redirect_url, email_from, email_enabled, email_webhook_url, created_at, updated_at, deleted_at, deleted_cascade_depth";
+pub const PROJECT_COLS: &str = "id, org_id, name, license_key_prefix, private_key, public_key, redirect_url, email_from, email_enabled, email_webhook_url, payment_config_id, email_config_id, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
 pub const PROJECT_MEMBER_COLS: &str = "id, org_member_id, project_id, role, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
-pub const PRODUCT_COLS: &str = "id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, device_inactive_days, features, price_cents, currency, created_at, deleted_at, deleted_cascade_depth";
+pub const PRODUCT_COLS: &str = "id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, device_inactive_days, features, price_cents, currency, payment_config_id, email_config_id, created_at, deleted_at, deleted_cascade_depth";
 
 pub const PROVIDER_LINK_COLS: &str = "id, product_id, provider, linked_id, created_at, updated_at";
 
@@ -116,25 +116,27 @@ impl FromRow for Organization {
         Ok(Organization {
             id: row.get(0)?,
             name: row.get(1)?,
-            payment_provider: row.get(2)?,
-            created_at: row.get(3)?,
-            updated_at: row.get(4)?,
-            deleted_at: row.get(5)?,
-            deleted_cascade_depth: row.get(6)?,
+            payment_config_id: row.get(2)?,
+            email_config_id: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+            deleted_at: row.get(6)?,
+            deleted_cascade_depth: row.get(7)?,
         })
     }
 }
 
-impl FromRow for OrgServiceConfig {
+impl FromRow for ServiceConfig {
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        Ok(OrgServiceConfig {
+        Ok(ServiceConfig {
             id: row.get(0)?,
             org_id: row.get(1)?,
-            category: parse_enum(row, 2, "category")?,
-            provider: parse_enum(row, 3, "provider")?,
-            config_encrypted: row.get(4)?,
-            created_at: row.get(5)?,
-            updated_at: row.get(6)?,
+            name: row.get(2)?,
+            category: parse_enum(row, 3, "category")?,
+            provider: parse_enum(row, 4, "provider")?,
+            config_encrypted: row.get(5)?,
+            created_at: row.get(6)?,
+            updated_at: row.get(7)?,
         })
     }
 }
@@ -212,10 +214,12 @@ impl FromRow for Project {
             email_from: row.get(7)?,
             email_enabled: row.get::<_, i32>(8)? != 0,
             email_webhook_url: row.get(9)?,
-            created_at: row.get(10)?,
-            updated_at: row.get(11)?,
-            deleted_at: row.get(12)?,
-            deleted_cascade_depth: row.get(13)?,
+            payment_config_id: row.get(10)?,
+            email_config_id: row.get(11)?,
+            created_at: row.get(12)?,
+            updated_at: row.get(13)?,
+            deleted_at: row.get(14)?,
+            deleted_cascade_depth: row.get(15)?,
         })
     }
 }
@@ -269,9 +273,11 @@ impl FromRow for Product {
             features: serde_json::from_str(&features_str).unwrap_or_default(),
             price_cents: row.get(10)?,
             currency: row.get(11)?,
-            created_at: row.get(12)?,
-            deleted_at: row.get(13)?,
-            deleted_cascade_depth: row.get(14)?,
+            payment_config_id: row.get(12)?,
+            email_config_id: row.get(13)?,
+            created_at: row.get(14)?,
+            deleted_at: row.get(15)?,
+            deleted_cascade_depth: row.get(16)?,
         })
     }
 }

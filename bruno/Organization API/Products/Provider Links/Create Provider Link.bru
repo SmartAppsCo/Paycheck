@@ -31,4 +31,12 @@ docs {
   - linked_id: Provider's price/variant ID (required)
     - For Stripe: Price ID (e.g., "price_1ABC...")
     - For LemonSqueezy: Variant ID
+
+  Provider links vs service configs:
+  - Service configs: API credentials (which Stripe account to use)
+  - Provider links: Product mapping (which price_id to charge)
+
+  The payment flow uses both:
+  1. Service config determines the Stripe/LS account (from product/project/org)
+  2. Provider link determines the price_id to create a checkout session
 }

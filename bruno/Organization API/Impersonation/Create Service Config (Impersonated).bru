@@ -1,0 +1,57 @@
+meta {
+  name: Create Service Config (Impersonated)
+  type: http
+  seq: 21
+}
+
+post {
+  url: {{base_url}}/orgs/{{org_id}}/service-configs
+  body: json
+  auth: bearer
+}
+
+headers {
+  X-On-Behalf-Of: {{user_id}}
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+body:json {
+  {
+    "name": "Production Stripe",
+    "provider": "stripe",
+    "stripe_config": {
+      "secret_key": "sk_live_xxx",
+      "publishable_key": "pk_live_xxx",
+      "webhook_secret": "whsec_xxx"
+    }
+  }
+}
+
+docs {
+  Create a named service config using operator impersonation.
+
+  Requirements:
+  - Operator must have admin or owner role
+  - X-On-Behalf-Of must be a user_id of a member with admin access
+
+  Request body:
+  - name: Unique name for this config
+  - provider: "stripe", "lemonsqueezy", or "resend"
+  - stripe_config: Required if provider is "stripe"
+  - ls_config: Required if provider is "lemonsqueezy"
+  - resend_api_key: Required if provider is "resend"
+
+  Stripe example:
+  { "name": "Prod Stripe", "provider": "stripe", "stripe_config": {...} }
+
+  LemonSqueezy example:
+  { "name": "Prod LS", "provider": "lemonsqueezy", "ls_config": {...} }
+
+  Resend example:
+  { "name": "Prod Email", "provider": "resend", "resend_api_key": "re_xxx" }
+
+  After creating, assign via payment_config_id or email_config_id on org/project/product.
+}

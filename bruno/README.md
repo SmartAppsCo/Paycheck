@@ -45,12 +45,27 @@ Follows the customer journey:
 | Seq | Folder | Contents |
 |-----|--------|----------|
 | 1 | Members | Org member CRUD + API keys |
-| 2 | Projects | Project CRUD + project members |
+| 2 | Projects | Project CRUD + project members + project payment config |
 | 3 | Products | Product CRUD + Provider Links subfolder |
 | 4 | Licenses | License CRUD + Revoke, Send Code, Deactivate |
 | 5 | Audit Logs | Query audit logs |
 | 6 | Impersonation | Operator impersonation examples |
 | 7 | (root file) | Get Payment Provider Config (Masked) |
+
+## Projects Folder Request Order
+
+| Seq | Request | Description |
+|-----|---------|-------------|
+| 1 | List Projects | List all projects in org |
+| 2 | Create Project | Create a new project |
+| 3 | Get Project | Get project details |
+| 4 | Update Project | Update project settings |
+| 5 | Delete Project | Soft-delete project |
+| 6 | Restore Project | Restore soft-deleted project |
+| 7 | Get Project Payment Config | View effective payment config with sources |
+| 8 | Update Project Payment Config | Set project-level payment overrides |
+| 9 | Delete Project Payment Config | Remove overrides, revert to org config |
+| 10-14 | Project Members | CRUD for project member assignments |
 
 ## Operator API Grouping
 

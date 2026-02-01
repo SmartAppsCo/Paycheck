@@ -6,18 +6,31 @@ use serde::{Deserialize, Serialize};
 use crate::db::{AppState, queries};
 use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path};
-use crate::models::{LemonSqueezyConfig, LicenseWithProduct, StripeConfig};
+use crate::models::{LemonSqueezyConfig, LicenseWithProduct, ServiceCategory, StripeConfig};
+
+/// A single payment config entry with full (unmasked) credentials
+#[derive(Debug, Serialize)]
+pub struct FullPaymentConfigEntry {
+    pub config_id: String,
+    pub name: String,
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stripe_config: Option<StripeConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ls_config: Option<LemonSqueezyConfig>,
+}
 
 #[derive(Debug, Serialize)]
 pub struct FullPaymentConfigResponse {
     pub org_id: String,
     pub org_name: String,
-    pub stripe_config: Option<StripeConfig>,
-    pub ls_config: Option<LemonSqueezyConfig>,
+    /// All payment configs for this organization (full credentials, not masked)
+    pub configs: Vec<FullPaymentConfigEntry>,
 }
 
-/// Get full (unmasked) payment provider configuration for an organization.
+/// Get full (unmasked) payment provider configurations for an organization.
 /// This is for operator support staff to debug customer payment issues.
+/// Returns ALL named payment configs (there can be multiple per org now).
 pub async fn get_org_payment_config(
     State(state): State<AppState>,
     Path(org_id): Path<String>,
@@ -26,11 +39,34 @@ pub async fn get_org_payment_config(
 
     let org = queries::get_organization_by_id(&conn, &org_id)?.or_not_found(msg::ORG_NOT_FOUND)?;
 
-    let stripe_config = queries::get_org_stripe_config(&conn, &org_id, &state.master_key)?;
-    let ls_config = queries::get_org_ls_config(&conn, &org_id, &state.master_key)?;
+    // Get all payment-category configs for this org
+    let payment_configs = queries::list_service_configs_for_org_by_category(&conn, &org_id, ServiceCategory::Payment)?;
+
+    let mut configs = Vec::with_capacity(payment_configs.len());
+    for config in payment_configs {
+        let (stripe_config, ls_config) = match config.provider.as_str() {
+            "stripe" => {
+                let stripe = config.decrypt_stripe_config(&state.master_key)?;
+                (Some(stripe), None)
+            }
+            "lemonsqueezy" => {
+                let ls = config.decrypt_ls_config(&state.master_key)?;
+                (None, Some(ls))
+            }
+            _ => (None, None),
+        };
+        configs.push(FullPaymentConfigEntry {
+            config_id: config.id,
+            name: config.name,
+            provider: config.provider.as_str().to_string(),
+            stripe_config,
+            ls_config,
+        });
+    }
 
     tracing::info!(
-        "OPERATOR: Retrieved payment config for organization {} ({})",
+        "OPERATOR: Retrieved {} payment configs for organization {} ({})",
+        configs.len(),
         org.name,
         org_id
     );
@@ -38,8 +74,7 @@ pub async fn get_org_payment_config(
     Ok(Json(FullPaymentConfigResponse {
         org_id,
         org_name: org.name,
-        stripe_config,
-        ls_config,
+        configs,
     }))
 }
 

@@ -17,9 +17,9 @@ auth:bearer {
 body:json {
   {
     "name": "Pro License (Updated)",
-    "price_cents": 3999,
     "device_limit": 10,
-    "features": ["advanced-export", "cloud-sync", "priority-support", "beta-access"]
+    "features": ["advanced-export", "cloud-sync", "priority-support", "beta-access"],
+    "payment_config_id": "cfg_xxx"
   }
 }
 
@@ -30,14 +30,26 @@ docs {
   Fields:
   - name: Display name
   - tier: Tier identifier
-  - price_cents: Price in cents (for display/reference)
-  - currency: Currency code (e.g., "usd")
   - license_exp_days: Days until license expires (null = perpetual)
   - updates_exp_days: Days until update access ends (null = perpetual)
   - activation_limit: Max activations (null = unlimited)
   - device_limit: Max concurrent devices (null = unlimited)
-  - device_inactive_days: Days before inactive devices don't count against limit (null = disabled)
+  - device_inactive_days: Days before inactive devices don't count against limit
   - features: Array of feature flags
+  - payment_config_id: ID of a service config for payment (overrides project/org)
+  - email_config_id: ID of a service config for email (overrides project/org)
+
+  Config inheritance (3-level override):
+  - Product config > Project config > Org config
+  - Both payment and email configs follow this pattern
+
+  Use case for product-level config:
+  - Sell via Stripe in US, LemonSqueezy in EU (different products, different configs)
+  - Use test credentials for a "free trial" product
+  - Use different Resend sender for premium vs free products
+
+  To use project's config (inherit), set to null:
+  { "payment_config_id": null, "email_config_id": null }
 
   IMPORTANT: license_exp_days and updates_exp_days
   - null = perpetual license (never expires)

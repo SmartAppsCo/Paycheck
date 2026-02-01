@@ -18,6 +18,15 @@ where
     Ok(Some(value))
 }
 
+/// String-specific version for fields like payment_config_id
+fn deserialize_optional_nullable_string<'de, D>(deserializer: D) -> std::result::Result<Option<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value: Option<String> = Option::deserialize(deserializer)?;
+    Ok(Some(value))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Product {
     pub id: String,
@@ -38,6 +47,10 @@ pub struct Product {
     pub price_cents: Option<i64>,
     /// Currency code (e.g., "usd")
     pub currency: Option<String>,
+    /// Payment config override (null = inherit from project)
+    pub payment_config_id: Option<String>,
+    /// Email config override (null = inherit from project)
+    pub email_config_id: Option<String>,
     pub created_at: i64,
     /// Soft delete timestamp (None = active, Some = deleted at this time)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -69,6 +82,12 @@ pub struct CreateProduct {
     pub price_cents: Option<i64>,
     #[serde(default)]
     pub currency: Option<String>,
+    /// Payment config override (null = inherit from project)
+    #[serde(default)]
+    pub payment_config_id: Option<String>,
+    /// Email config override (null = inherit from project)
+    #[serde(default)]
+    pub email_config_id: Option<String>,
 }
 
 impl CreateProduct {
@@ -102,6 +121,12 @@ pub struct UpdateProduct {
     pub price_cents: Option<Option<i64>>,
     #[serde(default, deserialize_with = "deserialize_optional_nullable")]
     pub currency: Option<Option<String>>,
+    /// Payment config override (use Some(None) to clear, None to leave unchanged)
+    #[serde(default, deserialize_with = "deserialize_optional_nullable_string")]
+    pub payment_config_id: Option<Option<String>>,
+    /// Email config override (use Some(None) to clear, None to leave unchanged)
+    #[serde(default, deserialize_with = "deserialize_optional_nullable_string")]
+    pub email_config_id: Option<Option<String>>,
 }
 
 impl UpdateProduct {

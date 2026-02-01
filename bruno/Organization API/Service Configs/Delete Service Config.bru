@@ -1,0 +1,29 @@
+meta {
+  name: Delete Service Config
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{base_url}}/orgs/{{org_id}}/service-configs/{{config_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_member_api_key}}
+}
+
+docs {
+  Delete a service config.
+  Requires admin role.
+
+  IMPORTANT: This will fail if the config is currently referenced by:
+  - The organization's payment_config_id or email_config_id
+  - Any project's payment_config_id or email_config_id
+  - Any product's payment_config_id
+
+  To delete a config that's in use:
+  1. First update the org/project/product to use a different config or null
+  2. Then delete the config
+}

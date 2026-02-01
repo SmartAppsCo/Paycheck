@@ -18,13 +18,11 @@ body:json {
   {
     "name": "Pro License",
     "tier": "pro",
-    "price_cents": 2999,
-    "currency": "usd",
-    "license_exp_days": 365,
-    "updates_exp_days": 365,
-    "activation_limit": 10,
-    "device_limit": 5,
-    "device_inactive_days": 90,
+    "license_exp_days": null,
+    "updates_exp_days": null,
+    "activation_limit": null,
+    "device_limit": 3,
+    "device_inactive_days": 30,
     "features": ["advanced-export", "cloud-sync", "priority-support"]
   }
 }
@@ -35,14 +33,14 @@ docs {
   Fields:
   - name: Display name
   - tier: Tier identifier (used in JWT claims)
-  - price_cents: Price in cents (for display/reference)
-  - currency: Currency code (e.g., "usd")
   - license_exp_days: Days until license expires (null = perpetual, never expires)
   - updates_exp_days: Days until update access ends (null = perpetual)
   - activation_limit: Max activations (null = unlimited)
   - device_limit: Max concurrent devices (null = unlimited)
   - device_inactive_days: Days before inactive devices don't count against limit (null = disabled)
   - features: Array of feature flags for hasFeature() checks
+  - payment_config_id: Override payment config for this product (null = inherit from project)
+  - email_config_id: Override email config for this product (null = inherit from project)
 
   IMPORTANT: license_exp_days and updates_exp_days
   - null = perpetual license (never expires) - use for one-time purchases
@@ -55,4 +53,9 @@ docs {
   - One-time with 1yr updates: license_exp_days=null, updates_exp_days=365
   - Monthly subscription: license_exp_days=30, updates_exp_days=30
   - Annual subscription: license_exp_days=365, updates_exp_days=365
+
+  Config Inheritance (3-level):
+  - Product configs override project configs, which override org configs
+  - Set payment_config_id/email_config_id to a service config ID to override
+  - Leave as null to inherit from parent level
 }

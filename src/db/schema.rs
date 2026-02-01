@@ -54,37 +54,41 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         -- Unique constraint for project-level scopes (project_id is NOT NULL)
         CREATE UNIQUE INDEX IF NOT EXISTS idx_api_key_scopes_project_unique ON api_key_scopes(api_key_id, org_id, project_id) WHERE project_id IS NOT NULL;
 
+        -- Service configs (encrypted credentials for external services)
+        -- Named configs as a reusable pool at org level.
+        -- Uses envelope encryption: config JSON encrypted with DEK derived from org_id.
+        -- Can be referenced from org, project, or product level for 3-level override.
+        CREATE TABLE IF NOT EXISTS service_configs (
+            id TEXT PRIMARY KEY,
+            org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            config_encrypted BLOB NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(org_id, name),
+            CHECK (category IN ('payment', 'email')),
+            CHECK (
+                (category = 'payment' AND provider IN ('stripe', 'lemonsqueezy')) OR
+                (category = 'email' AND provider IN ('resend'))
+            )
+        );
+        CREATE INDEX IF NOT EXISTS idx_service_configs_org ON service_configs(org_id);
+        CREATE INDEX IF NOT EXISTS idx_service_configs_org_provider ON service_configs(org_id, provider);
+
         -- Organizations (customers - indie devs, companies)
         CREATE TABLE IF NOT EXISTS organizations (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
-            payment_provider TEXT CHECK (payment_provider IS NULL OR payment_provider IN ('stripe', 'lemonsqueezy')),
+            payment_config_id TEXT REFERENCES service_configs(id) ON DELETE SET NULL,
+            email_config_id TEXT REFERENCES service_configs(id) ON DELETE SET NULL,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             deleted_at INTEGER,
             deleted_cascade_depth INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_organizations_active ON organizations(id) WHERE deleted_at IS NULL;
-
-        -- Organization service configs (normalized from org columns)
-        -- Stores encrypted credentials for external services (payment, email, etc.)
-        CREATE TABLE IF NOT EXISTS org_service_configs (
-            id TEXT PRIMARY KEY,
-            org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-            category TEXT NOT NULL,
-            provider TEXT NOT NULL,
-            config_encrypted BLOB NOT NULL,
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            UNIQUE(org_id, provider),
-            CHECK (
-                (category = 'payment' AND provider IN ('stripe', 'lemonsqueezy')) OR
-                (category = 'email' AND provider IN ('resend'))
-            )
-        );
-        CREATE INDEX IF NOT EXISTS idx_org_service_configs_org ON org_service_configs(org_id);
-        CREATE INDEX IF NOT EXISTS idx_org_service_configs_lookup ON org_service_configs(org_id, provider);
-        CREATE INDEX IF NOT EXISTS idx_org_service_configs_category ON org_service_configs(org_id, category);
 
         -- Organization members (references users for identity)
         CREATE TABLE IF NOT EXISTS org_members (
@@ -114,6 +118,8 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             email_from TEXT,
             email_enabled INTEGER NOT NULL DEFAULT 1,
             email_webhook_url TEXT,
+            payment_config_id TEXT REFERENCES service_configs(id) ON DELETE SET NULL,
+            email_config_id TEXT REFERENCES service_configs(id) ON DELETE SET NULL,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             deleted_at INTEGER,
@@ -153,6 +159,8 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             features TEXT NOT NULL DEFAULT '[]',
             price_cents INTEGER,
             currency TEXT,
+            payment_config_id TEXT REFERENCES service_configs(id) ON DELETE SET NULL,
+            email_config_id TEXT REFERENCES service_configs(id) ON DELETE SET NULL,
             created_at INTEGER NOT NULL,
             deleted_at INTEGER,
             deleted_cascade_depth INTEGER,

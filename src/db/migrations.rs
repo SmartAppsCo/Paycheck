@@ -39,17 +39,20 @@ pub struct Migration {
 
 /// All migrations in order.
 /// Add new migrations to the end of this list.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    description: "v0.3.0 baseline",
-    target: MigrationTarget::Main,
-    up: migration_001_baseline_main,
-}, Migration {
-    version: 1,
-    description: "v0.3.0 baseline",
-    target: MigrationTarget::Audit,
-    up: migration_001_baseline_audit,
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        description: "v0.5.0 baseline",
+        target: MigrationTarget::Main,
+        up: migration_001_baseline_main,
+    },
+    Migration {
+        version: 1,
+        description: "v0.5.0 baseline",
+        target: MigrationTarget::Audit,
+        up: migration_001_baseline_audit,
+    },
+];
 
 /// Migration errors.
 #[derive(Debug, Error)]
@@ -330,7 +333,7 @@ mod tests {
 
         run_migrations(&mut conn, db_path_str, MigrationTarget::Main, 1).unwrap();
 
-        // Should be at version 1
+        // Should be at version 1 (latest main migration)
         assert_eq!(get_version(&conn).unwrap(), 1);
 
         // Backup should exist
@@ -355,7 +358,7 @@ mod tests {
 
         let mut conn = Connection::open(&db_path).unwrap();
 
-        // Set version to current
+        // Set version to current (version 1 is the latest for Main)
         set_version(&conn, 1).unwrap();
 
         run_migrations(&mut conn, db_path_str, MigrationTarget::Main, 1).unwrap();
@@ -385,7 +388,7 @@ mod tests {
         // Run with backups disabled (0)
         run_migrations(&mut conn, db_path_str, MigrationTarget::Main, 0).unwrap();
 
-        // Should still migrate
+        // Should still migrate to latest version
         assert_eq!(get_version(&conn).unwrap(), 1);
 
         // No backup should be created

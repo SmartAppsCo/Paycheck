@@ -33,13 +33,14 @@ docs {
   success page if not configured).
 
   Provider selection logic:
-  1. If 'provider' param specified -> use that
-  2. Else if organization has 'payment_provider' set -> use that
-  3. Else if only one provider configured on org -> use it
-  4. Else -> error (must specify 'provider' param)
+  1. If 'provider' param specified -> use that provider
+  2. Else -> infer from the effective payment config
 
-  Payment configuration (Stripe/LemonSqueezy keys) is set at the organization level,
-  not per-project. All projects in an organization share the same payment providers.
+  Payment config inheritance (3-level):
+  - Product payment_config_id > Project payment_config_id > Org payment_config_id
+
+  The server looks up the effective payment config and uses its provider.
+  If no payment config is set at any level, returns an error.
 
   Returns:
   {

@@ -1,0 +1,47 @@
+meta {
+  name: Update Service Config
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{base_url}}/orgs/{{org_id}}/service-configs/{{config_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_member_api_key}}
+}
+
+body:json {
+  {
+    "name": "Production Stripe (Updated)",
+    "stripe_config": {
+      "secret_key": "sk_live_new_key",
+      "publishable_key": "pk_live_new_key",
+      "webhook_secret": "whsec_new_secret"
+    }
+  }
+}
+
+docs {
+  Update a service config.
+  Requires admin role.
+
+  All fields are optional - only include fields you want to update.
+
+  Request body:
+  - name: New name for this config
+  - stripe_config: Updated Stripe config (if this is a Stripe config)
+  - ls_config: Updated LemonSqueezy config (if this is a LS config)
+  - resend_api_key: Updated Resend API key (if this is a Resend config)
+
+  If updating config, provide the complete config object.
+  Partial config updates are not supported.
+
+  Examples:
+  - Stripe: { "stripe_config": { "secret_key": "sk_xxx", "publishable_key": "pk_xxx", "webhook_secret": "whsec_xxx" } }
+  - LemonSqueezy: { "ls_config": { "api_key": "ls_xxx", "store_id": "123", "webhook_secret": "lswhsec_xxx" } }
+  - Resend: { "resend_api_key": "re_xxx" }
+}

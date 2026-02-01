@@ -116,11 +116,13 @@ pub trait WebhookProvider: Send + Sync {
     /// Extract signature from request headers.
     fn extract_signature(&self, headers: &HeaderMap) -> Result<String, WebhookResult>;
 
-    /// Verify webhook signature against organization configuration.
+    /// Verify webhook signature against payment configuration.
+    /// Uses hierarchical lookup: project-level config first, then org-level fallback.
     /// The connection is passed so implementations can fetch configs from the service configs table.
     fn verify_signature(
         &self,
         conn: &Connection,
+        project: &Project,
         org: &Organization,
         master_key: &MasterKey,
         body: &Bytes,
@@ -375,8 +377,8 @@ async fn handle_checkout<P: WebhookProvider>(
         "Organization not found",
     )?;
 
-    // Verify signature
-    match provider.verify_signature(&conn, &org, &state.master_key, body, signature) {
+    // Verify signature using hierarchical config (project first, then org)
+    match provider.verify_signature(&conn, &project, &org, &state.master_key, body, signature) {
         Ok(true) => {}
         Ok(false) => return Err((StatusCode::UNAUTHORIZED, "Invalid signature")),
         Err(e) => return Err(e),
@@ -478,8 +480,8 @@ async fn handle_renewal<P: WebhookProvider>(
         "Organization not found",
     )?;
 
-    // Verify signature
-    match provider.verify_signature(&conn, &org, &state.master_key, body, signature) {
+    // Verify signature using hierarchical config (project first, then org)
+    match provider.verify_signature(&conn, &project, &org, &state.master_key, body, signature) {
         Ok(true) => {}
         Ok(false) => return Err((StatusCode::UNAUTHORIZED, "Invalid signature")),
         Err(e) => return Err(e),
@@ -562,8 +564,8 @@ async fn handle_cancellation<P: WebhookProvider>(
         "Organization not found",
     )?;
 
-    // Verify signature
-    match provider.verify_signature(&conn, &org, &state.master_key, body, signature) {
+    // Verify signature using hierarchical config (project first, then org)
+    match provider.verify_signature(&conn, &project, &org, &state.master_key, body, signature) {
         Ok(true) => {}
         Ok(false) => return Err((StatusCode::UNAUTHORIZED, "Invalid signature")),
         Err(e) => return Err(e),

@@ -11,7 +11,7 @@ use crate::extractors::{Json, Path};
 use crate::middleware::OperatorContext;
 use crate::models::{
     ActorType, AuditAction, CreateOrgMember, CreateOrganization, OrgMemberRole, Organization,
-    OrganizationPublic, ServiceProvider, UpdateOrganization,
+    OrganizationPublic, UpdateOrganization,
 };
 use crate::pagination::Paginated;
 use crate::util::AuditLogBuilder;
@@ -19,24 +19,15 @@ use std::collections::HashMap;
 
 /// Helper to convert Organization to OrganizationPublic by querying service configs
 fn org_to_public(conn: &Connection, org: Organization) -> Result<OrganizationPublic> {
-    let configs = queries::get_org_service_configs(conn, &org.id)?;
+    let configs = queries::list_service_configs_for_org(conn, &org.id)?;
 
-    // Group providers by category
-    let mut configured_services: HashMap<String, Vec<String>> = HashMap::new();
-    for config in configs {
-        configured_services
-            .entry(config.category.as_str().to_string())
-            .or_default()
-            .push(config.provider.as_str().to_string());
-    }
+    // Build a map of config id -> name for the available configs
+    let service_configs: HashMap<String, String> = configs
+        .into_iter()
+        .map(|c| (c.id, c.name))
+        .collect();
 
-    // Build defaults map from org's payment_provider
-    let mut defaults: HashMap<String, String> = HashMap::new();
-    if let Some(ref provider) = org.payment_provider {
-        defaults.insert("payment".to_string(), provider.clone());
-    }
-
-    Ok(OrganizationPublic::from_with_configs(org, configured_services, defaults))
+    Ok(OrganizationPublic::from_with_configs(org, service_configs))
 }
 
 /// Helper to convert multiple Organizations to OrganizationPublic
@@ -168,99 +159,30 @@ pub async fn update_organization(
     // Verify organization exists
     let existing = queries::get_organization_by_id(&conn, &id)?.or_not_found(msg::ORG_NOT_FOUND)?;
 
-    // Track what configs are being updated for audit
-    let mut stripe_updated = false;
-    let mut ls_updated = false;
-    let mut resend_updated = false;
-
-    // Handle Stripe config: Some(Some(config)) = set, Some(None) = clear, None = unchanged
-    if let Some(ref stripe_config_opt) = input.stripe_config {
-        match stripe_config_opt {
-            Some(config) => {
-                let json = serde_json::to_string(config)?;
-                let encrypted = state.master_key.encrypt_private_key(&id, json.as_bytes())?;
-                queries::upsert_org_service_config(&conn, &id, ServiceProvider::Stripe, &encrypted)?;
-                stripe_updated = true;
-            }
-            None => {
-                // Clear the config - also clear payment_provider if it was stripe
-                if queries::delete_org_service_config(&conn, &id, ServiceProvider::Stripe)? {
-                    stripe_updated = true;
-                    if existing.payment_provider.as_deref() == Some("stripe") {
-                        queries::clear_org_payment_provider(&conn, &id)?;
-                    }
-                }
-            }
+    // Validate config IDs reference configs owned by this org
+    if let Some(Some(ref config_id)) = input.payment_config_id {
+        let config = queries::get_service_config_by_id(&conn, config_id)?
+            .ok_or_else(|| AppError::BadRequest("payment_config_id not found".into()))?;
+        if config.org_id != id {
+            return Err(AppError::BadRequest("payment_config_id does not belong to this organization".into()));
+        }
+        if !config.provider.is_payment() {
+            return Err(AppError::BadRequest("payment_config_id must reference a payment provider config".into()));
         }
     }
 
-    // Handle LemonSqueezy config
-    if let Some(ref ls_config_opt) = input.ls_config {
-        match ls_config_opt {
-            Some(config) => {
-                let json = serde_json::to_string(config)?;
-                let encrypted = state.master_key.encrypt_private_key(&id, json.as_bytes())?;
-                queries::upsert_org_service_config(&conn, &id, ServiceProvider::LemonSqueezy, &encrypted)?;
-                ls_updated = true;
-            }
-            None => {
-                // Clear the config - also clear payment_provider if it was lemonsqueezy
-                if queries::delete_org_service_config(&conn, &id, ServiceProvider::LemonSqueezy)? {
-                    ls_updated = true;
-                    if existing.payment_provider.as_deref() == Some("lemonsqueezy") {
-                        queries::clear_org_payment_provider(&conn, &id)?;
-                    }
-                }
-            }
+    if let Some(Some(ref config_id)) = input.email_config_id {
+        let config = queries::get_service_config_by_id(&conn, config_id)?
+            .ok_or_else(|| AppError::BadRequest("email_config_id not found".into()))?;
+        if config.org_id != id {
+            return Err(AppError::BadRequest("email_config_id does not belong to this organization".into()));
+        }
+        if !config.provider.is_email() {
+            return Err(AppError::BadRequest("email_config_id must reference an email provider config".into()));
         }
     }
 
-    // Handle Resend API key
-    if let Some(ref resend_opt) = input.resend_api_key {
-        match resend_opt {
-            Some(api_key) => {
-                let encrypted = state.master_key.encrypt_private_key(&id, api_key.as_bytes())?;
-                queries::upsert_org_service_config(&conn, &id, ServiceProvider::Resend, &encrypted)?;
-                resend_updated = true;
-            }
-            None => {
-                if queries::delete_org_service_config(&conn, &id, ServiceProvider::Resend)? {
-                    resend_updated = true;
-                }
-            }
-        }
-    }
-
-    // Validate payment_provider before setting
-    if let Some(Some(ref provider)) = input.payment_provider {
-        let provider_enum = match provider.as_str() {
-            "stripe" => ServiceProvider::Stripe,
-            "lemonsqueezy" => ServiceProvider::LemonSqueezy,
-            _ => return Err(AppError::BadRequest(msg::INVALID_PROVIDER.into())),
-        };
-
-        // Check if config exists (either already in DB or being set in this request)
-        let has_config = match provider_enum {
-            ServiceProvider::Stripe => {
-                input.stripe_config.as_ref().map(|o| o.is_some()).unwrap_or(false)
-                    || queries::org_has_service_config(&conn, &id, ServiceProvider::Stripe)?
-            }
-            ServiceProvider::LemonSqueezy => {
-                input.ls_config.as_ref().map(|o| o.is_some()).unwrap_or(false)
-                    || queries::org_has_service_config(&conn, &id, ServiceProvider::LemonSqueezy)?
-            }
-            _ => false,
-        };
-
-        if !has_config {
-            return Err(AppError::BadRequest(format!(
-                "Cannot set payment_provider to '{}': no {} configuration exists. Configure {} first.",
-                provider, provider, provider
-            )));
-        }
-    }
-
-    // Update basic org fields (name, payment_provider)
+    // Update org fields (name, payment_config_id, email_config_id)
     queries::update_organization(&conn, &id, &input)?;
 
     // Fetch updated organization
@@ -274,9 +196,8 @@ pub async fn update_organization(
         .details(&serde_json::json!({
             "old_name": existing.name,
             "new_name": input.name,
-            "stripe_updated": stripe_updated,
-            "ls_updated": ls_updated,
-            "resend_updated": resend_updated
+            "payment_config_id": input.payment_config_id,
+            "email_config_id": input.email_config_id
         }))
         .names(&ctx.audit_names().resource(organization.name.clone()))
         .auth_method(&ctx.auth_method)

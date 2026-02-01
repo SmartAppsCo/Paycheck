@@ -15,14 +15,17 @@ auth:bearer {
 }
 
 docs {
-  Get full (unmasked) payment provider configuration for an organization.
+  Get the org's default payment service config (unmasked).
   This is for operator support staff to debug customer payment issues.
 
-  Returns the complete Stripe and LemonSqueezy API keys and webhook secrets.
+  Returns the complete API keys and webhook secrets for the org's default payment config.
+  Use /orgs/{org_id}/service-configs to see all configs (masked).
 
   Response includes:
-  - org_id: Organization ID
-  - org_name: Organization name
-  - stripe_config: Full Stripe configuration (unmasked)
-  - ls_config: Full LemonSqueezy configuration (unmasked)
+  - config_id: The service config ID
+  - name: Config name (e.g., "Production Stripe")
+  - provider: "stripe" or "lemonsqueezy"
+  - config: Full unmasked configuration
+
+  Note: This only returns the org-level default. Projects and products may override.
 }

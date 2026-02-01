@@ -143,6 +143,8 @@ pub fn create_test_project(
         email_from: None,
         email_enabled: true,
         email_webhook_url: None,
+        payment_config_id: None,
+        email_config_id: None,
     };
     let (private_key, public_key) = jwt::generate_keypair();
     queries::create_project(conn, org_id, &input, &private_key, &public_key, master_key)
@@ -162,6 +164,8 @@ pub fn create_test_product(conn: &Connection, project_id: &str, name: &str, tier
         features: vec!["feature1".to_string(), "feature2".to_string()],
         price_cents: Some(4999),
         currency: Some("usd".to_string()),
+        payment_config_id: None,
+        email_config_id: None,
     };
     queries::create_product(conn, project_id, &input).expect("Failed to create test product")
 }
@@ -316,8 +320,13 @@ pub fn setup_stripe_config(conn: &Connection, org_id: &str, master_key: &MasterK
     let encrypted = master_key
         .encrypt_private_key(org_id, &config_json)
         .expect("Failed to encrypt Stripe config");
-    queries::upsert_org_service_config(conn, org_id, ServiceProvider::Stripe, &encrypted)
-        .expect("Failed to set Stripe config");
+    let service_config = queries::create_service_config(conn, org_id, "Test Stripe", ServiceProvider::Stripe, &encrypted)
+        .expect("Failed to create Stripe config");
+    // Set as org's payment config
+    conn.execute(
+        "UPDATE organizations SET payment_config_id = ?1 WHERE id = ?2",
+        rusqlite::params![&service_config.id, org_id],
+    ).expect("Failed to set org payment_config_id");
 }
 
 /// Set up LemonSqueezy config for an organization
@@ -331,8 +340,13 @@ pub fn setup_lemonsqueezy_config(conn: &Connection, org_id: &str, master_key: &M
     let encrypted = master_key
         .encrypt_private_key(org_id, &config_json)
         .expect("Failed to encrypt LS config");
-    queries::upsert_org_service_config(conn, org_id, ServiceProvider::LemonSqueezy, &encrypted)
-        .expect("Failed to set LemonSqueezy config");
+    let service_config = queries::create_service_config(conn, org_id, "Test LemonSqueezy", ServiceProvider::LemonSqueezy, &encrypted)
+        .expect("Failed to create LemonSqueezy config");
+    // Set as org's payment config
+    conn.execute(
+        "UPDATE organizations SET payment_config_id = ?1 WHERE id = ?2",
+        rusqlite::params![&service_config.id, org_id],
+    ).expect("Failed to set org payment_config_id");
 }
 
 /// Set up both Stripe and LemonSqueezy configs for an organization

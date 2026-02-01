@@ -1,7 +1,7 @@
 meta {
   name: Create Product (Impersonated)
   type: http
-  seq: 5
+  seq: 6
 }
 
 post {
@@ -22,13 +22,11 @@ body:json {
   {
     "name": "Pro",
     "tier": "pro",
-    "price_cents": 2999,
-    "currency": "usd",
-    "license_exp_days": 30,
-    "updates_exp_days": 30,
-    "activation_limit": 10,
-    "device_limit": 5,
-    "device_inactive_days": 90,
+    "license_exp_days": null,
+    "updates_exp_days": null,
+    "activation_limit": null,
+    "device_limit": 3,
+    "device_inactive_days": 30,
     "features": ["unlimited-projects", "priority-support", "api-access"]
   }
 }
@@ -51,4 +49,9 @@ docs {
   - One-time with 1yr updates: license_exp_days=null, updates_exp_days=365
   - Monthly subscription: license_exp_days=30, updates_exp_days=30
   - Annual subscription: license_exp_days=365, updates_exp_days=365
+
+  Config Inheritance (3-level):
+  - Product configs override project configs, which override org configs
+  - Optional fields: payment_config_id, email_config_id
+  - Leave unset/null to inherit from parent level
 }

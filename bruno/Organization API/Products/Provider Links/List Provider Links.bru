@@ -17,4 +17,12 @@ auth:bearer {
 docs {
   List all provider links for a product.
   Returns links for each provider (stripe, lemonsqueezy) if configured.
+
+  Provider links map your Paycheck product to payment provider product IDs:
+  - Stripe: price_id (from Stripe Dashboard or API)
+  - LemonSqueezy: variant_id
+
+  This is separate from service configs (API credentials):
+  - Service configs: WHERE to send payments (which Stripe account)
+  - Provider links: WHAT to charge (which price in that account)
 }

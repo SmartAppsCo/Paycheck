@@ -8,8 +8,8 @@ use crate::models::*;
 
 use super::from_row::{
     ACTIVATION_CODE_COLS, API_KEY_COLS, API_KEY_SCOPE_COLS, DEVICE_COLS, LICENSE_COLS,
-    ORG_MEMBER_COLS, ORG_MEMBER_WITH_USER_COLS, ORG_SERVICE_CONFIG_COLS, ORGANIZATION_COLS,
-    PAYMENT_SESSION_COLS, PRODUCT_COLS, PROJECT_COLS, PROJECT_MEMBER_COLS, PROVIDER_LINK_COLS,
+    ORG_MEMBER_COLS, ORG_MEMBER_WITH_USER_COLS, ORGANIZATION_COLS, PAYMENT_SESSION_COLS,
+    PRODUCT_COLS, PROJECT_COLS, PROJECT_MEMBER_COLS, PROVIDER_LINK_COLS, SERVICE_CONFIG_COLS,
     USER_COLS, query_all, query_one,
 };
 
@@ -1163,15 +1163,16 @@ pub fn create_organization(conn: &Connection, input: &CreateOrganization) -> Res
     let now = now();
 
     conn.execute(
-        "INSERT INTO organizations (id, name, payment_provider, created_at, updated_at)
-         VALUES (?1, ?2, NULL, ?3, ?4)",
+        "INSERT INTO organizations (id, name, payment_config_id, email_config_id, created_at, updated_at)
+         VALUES (?1, ?2, NULL, NULL, ?3, ?4)",
         params![&id, &input.name, now, now],
     )?;
 
     Ok(Organization {
         id,
         name: input.name.clone(),
-        payment_provider: None,
+        payment_config_id: None,
+        email_config_id: None,
         created_at: now,
         updated_at: now,
         deleted_at: None,
@@ -1231,196 +1232,429 @@ pub fn list_organizations_paginated(
     Ok((items, total))
 }
 
-/// Update organization's basic fields (name, payment_provider).
-/// Service configs (stripe, lemonsqueezy, resend) are managed via upsert_org_service_config.
+/// Update organization's basic fields (name, config assignments).
+/// Service configs are created/managed via service_configs CRUD functions.
 pub fn update_organization(
     conn: &Connection,
     id: &str,
     input: &UpdateOrganization,
 ) -> Result<bool> {
-    let now = now();
-    let mut updated = false;
+    let mut builder = UpdateBuilder::new("organizations", id).with_updated_at();
 
     if let Some(ref name) = input.name {
-        conn.execute(
-            "UPDATE organizations SET name = ?1, updated_at = ?2 WHERE id = ?3",
-            params![name, now, id],
-        )?;
-        updated = true;
+        builder = builder.set("name", name.clone());
     }
-    if let Some(ref payment_provider) = input.payment_provider {
-        // Some(None) clears the value, Some(Some(value)) sets it
-        conn.execute(
-            "UPDATE organizations SET payment_provider = ?1, updated_at = ?2 WHERE id = ?3",
-            params![payment_provider, now, id],
-        )?;
-        updated = true;
+
+    // Handle payment_config_id: Option<Option<String>>
+    if let Some(ref payment_config_id) = input.payment_config_id {
+        builder = builder.set_nullable("payment_config_id", payment_config_id.clone());
     }
-    Ok(updated)
+
+    // Handle email_config_id: Option<Option<String>>
+    if let Some(ref email_config_id) = input.email_config_id {
+        builder = builder.set_nullable("email_config_id", email_config_id.clone());
+    }
+
+    let result: Option<Organization> = builder.execute_returning(conn, ORGANIZATION_COLS)?;
+    Ok(result.is_some())
 }
 
-/// Clear the organization's payment_provider field
-pub fn clear_org_payment_provider(conn: &Connection, id: &str) -> Result<()> {
-    conn.execute(
-        "UPDATE organizations SET payment_provider = NULL, updated_at = ?1 WHERE id = ?2",
-        params![now(), id],
-    )?;
-    Ok(())
-}
+// ============ Named Service Configs ============
 
-// ============ Organization Service Configs ============
-
-/// Get a service config for an org by provider
-pub fn get_org_service_config(
+/// Create a named service config
+pub fn create_service_config(
     conn: &Connection,
     org_id: &str,
+    name: &str,
     provider: ServiceProvider,
-) -> Result<Option<OrgServiceConfig>> {
+    encrypted_config: &[u8],
+) -> Result<ServiceConfig> {
+    let id = gen_id();
+    let now = now();
+    let category = provider.category();
+
+    conn.execute(
+        "INSERT INTO service_configs (id, org_id, name, category, provider, config_encrypted, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+        params![&id, org_id, name, category.as_str(), provider.as_str(), encrypted_config, now],
+    )?;
+
+    Ok(ServiceConfig {
+        id,
+        org_id: org_id.to_string(),
+        name: name.to_string(),
+        category,
+        provider,
+        config_encrypted: encrypted_config.to_vec(),
+        created_at: now,
+        updated_at: now,
+    })
+}
+
+/// Get a service config by ID
+pub fn get_service_config_by_id(conn: &Connection, id: &str) -> Result<Option<ServiceConfig>> {
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM org_service_configs WHERE org_id = ?1 AND provider = ?2",
-            ORG_SERVICE_CONFIG_COLS
+            "SELECT {} FROM service_configs WHERE id = ?1",
+            SERVICE_CONFIG_COLS
         ),
-        params![org_id, provider.as_str()],
+        &[&id],
     )
 }
 
-/// Get all service configs for an org
-pub fn get_org_service_configs(conn: &Connection, org_id: &str) -> Result<Vec<OrgServiceConfig>> {
+/// List all service configs for an org
+pub fn list_service_configs_for_org(conn: &Connection, org_id: &str) -> Result<Vec<ServiceConfig>> {
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM org_service_configs WHERE org_id = ?1 ORDER BY provider",
-            ORG_SERVICE_CONFIG_COLS
+            "SELECT {} FROM service_configs WHERE org_id = ?1 ORDER BY name",
+            SERVICE_CONFIG_COLS
         ),
         &[&org_id],
     )
 }
 
-/// Get service configs for an org by category
-pub fn get_org_service_configs_by_category(
+/// List service configs for an org filtered by category
+pub fn list_service_configs_for_org_by_category(
     conn: &Connection,
     org_id: &str,
     category: ServiceCategory,
-) -> Result<Vec<OrgServiceConfig>> {
+) -> Result<Vec<ServiceConfig>> {
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM org_service_configs WHERE org_id = ?1 AND category = ?2 ORDER BY provider",
-            ORG_SERVICE_CONFIG_COLS
+            "SELECT {} FROM service_configs WHERE org_id = ?1 AND category = ?2 ORDER BY name",
+            SERVICE_CONFIG_COLS
         ),
         params![org_id, category.as_str()],
     )
 }
 
-/// Check if an org has a specific service config
-pub fn org_has_service_config(
+/// List service configs for an org filtered by provider
+pub fn list_service_configs_for_org_by_provider(
     conn: &Connection,
     org_id: &str,
     provider: ServiceProvider,
-) -> Result<bool> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM org_service_configs WHERE org_id = ?1 AND provider = ?2",
-        params![org_id, provider.as_str()],
-        |row| row.get(0),
-    )?;
-    Ok(count > 0)
-}
-
-/// Upsert a service config (insert or update if exists)
-pub fn upsert_org_service_config(
-    conn: &Connection,
-    org_id: &str,
-    provider: ServiceProvider,
-    encrypted_config: &[u8],
-) -> Result<OrgServiceConfig> {
-    let now = now();
-    let id = gen_id();
-    let category = provider.category();
-
-    conn.execute(
-        "INSERT INTO org_service_configs (id, org_id, category, provider, config_encrypted, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
-         ON CONFLICT(org_id, provider) DO UPDATE SET
-             config_encrypted = excluded.config_encrypted,
-             updated_at = excluded.updated_at",
-        params![id, org_id, category.as_str(), provider.as_str(), encrypted_config, now],
-    )?;
-
-    // Return the config (either newly inserted or updated)
-    get_org_service_config(conn, org_id, provider)?
-        .ok_or_else(|| AppError::Internal("Config not found after upsert".into()))
-}
-
-/// Delete a service config
-pub fn delete_org_service_config(
-    conn: &Connection,
-    org_id: &str,
-    provider: ServiceProvider,
-) -> Result<bool> {
-    let deleted = conn.execute(
-        "DELETE FROM org_service_configs WHERE org_id = ?1 AND provider = ?2",
-        params![org_id, provider.as_str()],
-    )?;
-    Ok(deleted > 0)
-}
-
-/// List all service configs (for key rotation)
-pub fn list_all_org_service_configs(conn: &Connection) -> Result<Vec<OrgServiceConfig>> {
+) -> Result<Vec<ServiceConfig>> {
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM org_service_configs ORDER BY org_id, provider",
-            ORG_SERVICE_CONFIG_COLS
+            "SELECT {} FROM service_configs WHERE org_id = ?1 AND provider = ?2 ORDER BY name",
+            SERVICE_CONFIG_COLS
+        ),
+        params![org_id, provider.as_str()],
+    )
+}
+
+/// Update a service config's name and/or encrypted config
+pub fn update_service_config(
+    conn: &Connection,
+    id: &str,
+    name: Option<&str>,
+    encrypted_config: Option<&[u8]>,
+) -> Result<Option<ServiceConfig>> {
+    let mut builder = UpdateBuilder::new("service_configs", id).with_updated_at();
+
+    if let Some(n) = name {
+        builder = builder.set("name", n.to_string());
+    }
+    if let Some(enc) = encrypted_config {
+        builder = builder.set("config_encrypted", enc.to_vec());
+    }
+
+    builder.execute_returning(conn, SERVICE_CONFIG_COLS)
+}
+
+/// Delete a service config (fails if still referenced)
+pub fn delete_service_config(conn: &Connection, id: &str) -> Result<bool> {
+    // Check if referenced by org, project, or product
+    let usage = get_service_config_usage(conn, id)?;
+    if !usage.orgs.is_empty() || !usage.projects.is_empty() || !usage.products.is_empty() {
+        return Err(AppError::BadRequest(
+            "Cannot delete service config that is still in use".into(),
+        ));
+    }
+
+    let deleted = conn.execute("DELETE FROM service_configs WHERE id = ?1", params![id])?;
+    Ok(deleted > 0)
+}
+
+/// Get usage information for a service config (which orgs/projects/products reference it)
+pub struct ServiceConfigUsage {
+    pub orgs: Vec<String>,
+    pub projects: Vec<String>,
+    pub products: Vec<String>,
+}
+
+pub fn get_service_config_usage(conn: &Connection, config_id: &str) -> Result<ServiceConfigUsage> {
+    // Orgs using this config
+    let orgs: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT id FROM organizations WHERE (payment_config_id = ?1 OR email_config_id = ?1) AND deleted_at IS NULL"
+        )?;
+        stmt.query_map([config_id], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+    };
+
+    // Projects using this config
+    let projects: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT id FROM projects WHERE (payment_config_id = ?1 OR email_config_id = ?1) AND deleted_at IS NULL"
+        )?;
+        stmt.query_map([config_id], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+    };
+
+    // Products using this config
+    let products: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT id FROM products WHERE payment_config_id = ?1 AND deleted_at IS NULL"
+        )?;
+        stmt.query_map([config_id], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+    };
+
+    Ok(ServiceConfigUsage { orgs, projects, products })
+}
+
+/// List all service configs (for key rotation)
+pub fn list_all_service_configs(conn: &Connection) -> Result<Vec<ServiceConfig>> {
+    query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM service_configs ORDER BY org_id, name",
+            SERVICE_CONFIG_COLS
         ),
         &[],
     )
 }
 
 /// Update encrypted config for a specific config row (for key rotation)
-pub fn update_org_service_config_encrypted(
+pub fn update_service_config_encrypted(
     conn: &Connection,
     config_id: &str,
     encrypted_config: &[u8],
 ) -> Result<()> {
     conn.execute(
-        "UPDATE org_service_configs SET config_encrypted = ?1, updated_at = ?2 WHERE id = ?3",
+        "UPDATE service_configs SET config_encrypted = ?1, updated_at = ?2 WHERE id = ?3",
         params![encrypted_config, now(), config_id],
     )?;
     Ok(())
 }
 
-// ============ Service Config Helper Functions ============
+// ============ 3-Level Config Lookup (Product → Project → Org) ============
 
-/// Get decrypted Stripe config for an org
-pub fn get_org_stripe_config(
+/// Get effective payment config with 3-level lookup: product → project → org.
+/// Returns the config along with its source level.
+pub fn get_effective_payment_config(
     conn: &Connection,
-    org_id: &str,
-    master_key: &MasterKey,
-) -> Result<Option<StripeConfig>> {
-    let config = get_org_service_config(conn, org_id, ServiceProvider::Stripe)?;
-    config.map(|c| c.decrypt_stripe_config(master_key)).transpose()
+    product: &Product,
+    project: &Project,
+    org: &Organization,
+    provider: ServiceProvider,
+    _master_key: &MasterKey,
+) -> Result<Option<(ServiceConfig, ConfigSource)>> {
+    // 1. Check product level
+    if let Some(ref config_id) = product.payment_config_id {
+        if let Some(config) = get_service_config_by_id(conn, config_id)? {
+            if config.provider == provider {
+                return Ok(Some((config, ConfigSource::Product)));
+            }
+        }
+    }
+
+    // 2. Check project level
+    if let Some(ref config_id) = project.payment_config_id {
+        if let Some(config) = get_service_config_by_id(conn, config_id)? {
+            if config.provider == provider {
+                return Ok(Some((config, ConfigSource::Project)));
+            }
+        }
+    }
+
+    // 3. Check org level
+    if let Some(ref config_id) = org.payment_config_id {
+        if let Some(config) = get_service_config_by_id(conn, config_id)? {
+            if config.provider == provider {
+                return Ok(Some((config, ConfigSource::Org)));
+            }
+        }
+    }
+
+    Ok(None)
 }
 
-/// Get decrypted LemonSqueezy config for an org
-pub fn get_org_ls_config(
+/// Get effective Stripe config with 3-level lookup.
+pub fn get_effective_stripe_config(
     conn: &Connection,
-    org_id: &str,
+    product: &Product,
+    project: &Project,
+    org: &Organization,
     master_key: &MasterKey,
-) -> Result<Option<LemonSqueezyConfig>> {
-    let config = get_org_service_config(conn, org_id, ServiceProvider::LemonSqueezy)?;
-    config.map(|c| c.decrypt_ls_config(master_key)).transpose()
+) -> Result<Option<(StripeConfig, ConfigSource)>> {
+    if let Some((config, source)) = get_effective_payment_config(conn, product, project, org, ServiceProvider::Stripe, master_key)? {
+        let stripe_config = config.decrypt_stripe_config(master_key)?;
+        return Ok(Some((stripe_config, source)));
+    }
+    Ok(None)
 }
 
-/// Get decrypted Resend API key for an org
-pub fn get_org_resend_api_key(
+/// Get effective LemonSqueezy config with 3-level lookup.
+pub fn get_effective_ls_config(
     conn: &Connection,
-    org_id: &str,
+    product: &Product,
+    project: &Project,
+    org: &Organization,
     master_key: &MasterKey,
-) -> Result<Option<String>> {
-    let config = get_org_service_config(conn, org_id, ServiceProvider::Resend)?;
-    config.map(|c| c.decrypt_resend_api_key(master_key)).transpose()
+) -> Result<Option<(LemonSqueezyConfig, ConfigSource)>> {
+    if let Some((config, source)) = get_effective_payment_config(conn, product, project, org, ServiceProvider::LemonSqueezy, master_key)? {
+        let ls_config = config.decrypt_ls_config(master_key)?;
+        return Ok(Some((ls_config, source)));
+    }
+    Ok(None)
+}
+
+/// Get Stripe config with 2-level lookup (project → org).
+/// Used for webhook verification where product context is not available.
+pub fn get_stripe_config_for_webhook(
+    conn: &Connection,
+    project: &Project,
+    org: &Organization,
+    master_key: &MasterKey,
+) -> Result<Option<(StripeConfig, ConfigSource)>> {
+    // 1. Check project level
+    if let Some(ref config_id) = project.payment_config_id {
+        if let Some(config) = get_service_config_by_id(conn, config_id)? {
+            if config.provider == ServiceProvider::Stripe {
+                let stripe_config = config.decrypt_stripe_config(master_key)?;
+                return Ok(Some((stripe_config, ConfigSource::Project)));
+            }
+        }
+    }
+
+    // 2. Check org level
+    if let Some(ref config_id) = org.payment_config_id {
+        if let Some(config) = get_service_config_by_id(conn, config_id)? {
+            if config.provider == ServiceProvider::Stripe {
+                let stripe_config = config.decrypt_stripe_config(master_key)?;
+                return Ok(Some((stripe_config, ConfigSource::Org)));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+/// Get LemonSqueezy config with 2-level lookup (project → org).
+/// Used for webhook verification where product context is not available.
+pub fn get_ls_config_for_webhook(
+    conn: &Connection,
+    project: &Project,
+    org: &Organization,
+    master_key: &MasterKey,
+) -> Result<Option<(LemonSqueezyConfig, ConfigSource)>> {
+    // 1. Check project level
+    if let Some(ref config_id) = project.payment_config_id {
+        if let Some(config) = get_service_config_by_id(conn, config_id)? {
+            if config.provider == ServiceProvider::LemonSqueezy {
+                let ls_config = config.decrypt_ls_config(master_key)?;
+                return Ok(Some((ls_config, ConfigSource::Project)));
+            }
+        }
+    }
+
+    // 2. Check org level
+    if let Some(ref config_id) = org.payment_config_id {
+        if let Some(config) = get_service_config_by_id(conn, config_id)? {
+            if config.provider == ServiceProvider::LemonSqueezy {
+                let ls_config = config.decrypt_ls_config(master_key)?;
+                return Ok(Some((ls_config, ConfigSource::Org)));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+/// Get effective email config with 3-level lookup: product → project → org.
+pub fn get_effective_email_config(
+    conn: &Connection,
+    product: &Product,
+    project: &Project,
+    org: &Organization,
+    master_key: &MasterKey,
+) -> Result<Option<(String, ConfigSource)>> {
+    // 1. Check product level
+    if let Some(ref config_id) = product.email_config_id {
+        if let Some(config) = get_service_config_by_id(conn, config_id)? {
+            if config.provider == ServiceProvider::Resend {
+                let api_key = config.decrypt_resend_api_key(master_key)?;
+                return Ok(Some((api_key, ConfigSource::Product)));
+            }
+        }
+    }
+
+    // 2. Check project level
+    if let Some(ref config_id) = project.email_config_id {
+        if let Some(config) = get_service_config_by_id(conn, config_id)? {
+            if config.provider == ServiceProvider::Resend {
+                let api_key = config.decrypt_resend_api_key(master_key)?;
+                return Ok(Some((api_key, ConfigSource::Project)));
+            }
+        }
+    }
+
+    // 3. Check org level
+    if let Some(ref config_id) = org.email_config_id {
+        if let Some(config) = get_service_config_by_id(conn, config_id)? {
+            if config.provider == ServiceProvider::Resend {
+                let api_key = config.decrypt_resend_api_key(master_key)?;
+                return Ok(Some((api_key, ConfigSource::Org)));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+/// Check if an effective payment config exists for a provider at any level
+/// (product → project → org). Does not decrypt - just checks existence.
+pub fn has_effective_payment_config(
+    conn: &Connection,
+    product: &Product,
+    project: &Project,
+    org: &Organization,
+    provider: ServiceProvider,
+) -> Result<bool> {
+    // 1. Check product level
+    if let Some(ref config_id) = product.payment_config_id {
+        if let Some(config) = get_service_config_by_id(conn, config_id)? {
+            if config.provider == provider {
+                return Ok(true);
+            }
+        }
+    }
+
+    // 2. Check project level
+    if let Some(ref config_id) = project.payment_config_id {
+        if let Some(config) = get_service_config_by_id(conn, config_id)? {
+            if config.provider == provider {
+                return Ok(true);
+            }
+        }
+    }
+
+    // 3. Check org level
+    if let Some(ref config_id) = org.payment_config_id {
+        if let Some(config) = get_service_config_by_id(conn, config_id)? {
+            if config.provider == provider {
+                return Ok(true);
+            }
+        }
+    }
+
+    Ok(false)
 }
 
 pub fn delete_organization(conn: &Connection, id: &str) -> Result<bool> {
@@ -1894,9 +2128,9 @@ pub fn create_project(
     let encrypted_private_key = master_key.encrypt_private_key(&id, private_key)?;
 
     conn.execute(
-        "INSERT INTO projects (id, org_id, name, license_key_prefix, private_key, public_key, redirect_url, email_from, email_enabled, email_webhook_url, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-        params![&id, org_id, &input.name, &input.license_key_prefix, &encrypted_private_key, public_key, &input.redirect_url, &input.email_from, input.email_enabled, &input.email_webhook_url, now, now],
+        "INSERT INTO projects (id, org_id, name, license_key_prefix, private_key, public_key, redirect_url, email_from, email_enabled, email_webhook_url, payment_config_id, email_config_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        params![&id, org_id, &input.name, &input.license_key_prefix, &encrypted_private_key, public_key, &input.redirect_url, &input.email_from, input.email_enabled, &input.email_webhook_url, &input.payment_config_id, &input.email_config_id, now, now],
     )?;
 
     Ok(Project {
@@ -1910,6 +2144,8 @@ pub fn create_project(
         email_from: input.email_from.clone(),
         email_enabled: input.email_enabled,
         email_webhook_url: input.email_webhook_url.clone(),
+        payment_config_id: input.payment_config_id.clone(),
+        email_config_id: input.email_config_id.clone(),
         created_at: now,
         updated_at: now,
         deleted_at: None,
@@ -2041,6 +2277,16 @@ pub fn update_project(conn: &Connection, id: &str, input: &UpdateProject) -> Res
     // Handle email_webhook_url: Option<Option<String>>
     if let Some(ref email_webhook_url) = input.email_webhook_url {
         builder = builder.set_nullable("email_webhook_url", email_webhook_url.clone());
+    }
+
+    // Handle payment_config_id: Option<Option<String>>
+    if let Some(ref payment_config_id) = input.payment_config_id {
+        builder = builder.set_nullable("payment_config_id", payment_config_id.clone());
+    }
+
+    // Handle email_config_id: Option<Option<String>>
+    if let Some(ref email_config_id) = input.email_config_id {
+        builder = builder.set_nullable("email_config_id", email_config_id.clone());
     }
 
     builder.execute_returning(conn, PROJECT_COLS)
@@ -2283,8 +2529,8 @@ pub fn create_product(
     let features_json = serde_json::to_string(&input.features)?;
 
     conn.execute(
-        "INSERT INTO products (id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, device_inactive_days, features, price_cents, currency, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        "INSERT INTO products (id, project_id, name, tier, license_exp_days, updates_exp_days, activation_limit, device_limit, device_inactive_days, features, price_cents, currency, payment_config_id, email_config_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             &id,
             project_id,
@@ -2298,6 +2544,8 @@ pub fn create_product(
             &features_json,
             input.price_cents,
             &input.currency,
+            &input.payment_config_id,
+            &input.email_config_id,
             now
         ],
     )?;
@@ -2315,6 +2563,8 @@ pub fn create_product(
         features: input.features.clone(),
         price_cents: input.price_cents,
         currency: input.currency.clone(),
+        payment_config_id: input.payment_config_id.clone(),
+        email_config_id: input.email_config_id.clone(),
         created_at: now,
         deleted_at: None,
         deleted_cascade_depth: None,
@@ -2390,7 +2640,7 @@ pub fn update_product(conn: &Connection, id: &str, input: &UpdateProduct) -> Res
         .map(serde_json::to_string)
         .transpose()?;
 
-    UpdateBuilder::new("products", id)
+    let mut builder = UpdateBuilder::new("products", id)
         .set_opt("name", input.name.clone())
         .set_opt("tier", input.tier.clone())
         .set_opt("license_exp_days", input.license_exp_days)
@@ -2400,8 +2650,19 @@ pub fn update_product(conn: &Connection, id: &str, input: &UpdateProduct) -> Res
         .set_opt("device_inactive_days", input.device_inactive_days)
         .set_opt("features", features_json)
         .set_opt("price_cents", input.price_cents)
-        .set_opt("currency", input.currency.clone())
-        .execute_returning(conn, PRODUCT_COLS)
+        .set_opt("currency", input.currency.clone());
+
+    // Handle payment_config_id: Option<Option<String>>
+    if let Some(ref payment_config_id) = input.payment_config_id {
+        builder = builder.set_nullable("payment_config_id", payment_config_id.clone());
+    }
+
+    // Handle email_config_id: Option<Option<String>>
+    if let Some(ref email_config_id) = input.email_config_id {
+        builder = builder.set_nullable("email_config_id", email_config_id.clone());
+    }
+
+    builder.execute_returning(conn, PRODUCT_COLS)
 }
 
 pub fn delete_product(conn: &Connection, id: &str) -> Result<bool> {

@@ -4,7 +4,7 @@
 //! when the master key is rotated.
 //!
 //! Note: Licenses are no longer encrypted, so only project private keys
-//! and organization payment configs need rotation.
+//! and service configs (org-level) need rotation.
 
 #[path = "../common/mod.rs"]
 mod common;
@@ -48,7 +48,8 @@ fn rotate_project_key(
     Ok(())
 }
 
-/// Simulate key rotation for all of an organization's service configs
+/// Simulate key rotation for all service configs in an organization.
+/// All service configs are now org-level and use org_id for DEK derivation.
 fn rotate_org_service_configs(
     conn: &Connection,
     org_id: &str,
@@ -56,25 +57,22 @@ fn rotate_org_service_configs(
     new_key: &MasterKey,
 ) -> Result<(), String> {
     // Get all service configs for this org
-    let configs = queries::list_all_org_service_configs(conn)
-        .map_err(|e| format!("Failed to list service configs: {}", e))?
-        .into_iter()
-        .filter(|c| c.org_id == org_id)
-        .collect::<Vec<_>>();
+    let configs = queries::list_service_configs_for_org(conn, org_id)
+        .map_err(|e| format!("Failed to list service configs: {}", e))?;
 
     for config in configs {
-        // Decrypt with old key
+        // Decrypt with old key (org_id is used as context for encryption)
         let plaintext = old_key
-            .decrypt_private_key(&config.org_id, &config.config_encrypted)
+            .decrypt_private_key(org_id, &config.config_encrypted)
             .map_err(|e| format!("Failed to decrypt {} config: {}", config.provider.as_str(), e))?;
 
         // Re-encrypt with new key
         let new_enc = new_key
-            .encrypt_private_key(&config.org_id, &plaintext)
+            .encrypt_private_key(org_id, &plaintext)
             .map_err(|e| format!("Failed to re-encrypt {} config: {}", config.provider.as_str(), e))?;
 
         // Update in database
-        queries::update_org_service_config_encrypted(conn, &config.id, &new_enc)
+        queries::update_service_config_encrypted(conn, &config.id, &new_enc)
             .map_err(|e| format!("Failed to update {} config: {}", config.provider.as_str(), e))?;
     }
 
@@ -101,6 +99,8 @@ fn test_project_private_key_reencrypts_with_new_master_key() {
         email_from: None,
         email_enabled: true,
         email_webhook_url: None,
+        payment_config_id: None,
+        email_config_id: None,
     };
     let project = queries::create_project(
         &conn,
@@ -147,7 +147,7 @@ fn test_project_private_key_reencrypts_with_new_master_key() {
     );
 }
 
-// ============ Organization Payment Config Rotation ============
+// ============ Organization Service Config Rotation ============
 
 #[test]
 fn test_org_stripe_config_reencrypts_with_new_master_key() {
@@ -164,13 +164,14 @@ fn test_org_stripe_config_reencrypts_with_new_master_key() {
         .encrypt_private_key(&org.id, stripe_config.as_bytes())
         .unwrap();
 
-    queries::upsert_org_service_config(&conn, &org.id, ServiceProvider::Stripe, &encrypted_stripe)
+    queries::create_service_config(&conn, &org.id, "Test Stripe", ServiceProvider::Stripe, &encrypted_stripe)
         .unwrap();
 
     // Verify we can decrypt with old key
-    let fetched = queries::get_org_service_config(&conn, &org.id, ServiceProvider::Stripe)
-        .unwrap()
-        .expect("Stripe config should exist");
+    let configs = queries::list_service_configs_for_org_by_provider(&conn, &org.id, ServiceProvider::Stripe)
+        .expect("Query failed");
+    assert!(!configs.is_empty(), "Stripe config should exist");
+    let fetched = &configs[0];
     let decrypted = old_key
         .decrypt_private_key(&org.id, &fetched.config_encrypted)
         .expect("Should decrypt with old key");
@@ -185,9 +186,9 @@ fn test_org_stripe_config_reencrypts_with_new_master_key() {
         .expect("Rotation should succeed");
 
     // Verify old key no longer works
-    let fetched = queries::get_org_service_config(&conn, &org.id, ServiceProvider::Stripe)
-        .unwrap()
-        .expect("Stripe config should still exist");
+    let configs = queries::list_service_configs_for_org_by_provider(&conn, &org.id, ServiceProvider::Stripe)
+        .expect("Query failed");
+    let fetched = &configs[0];
     let result = old_key.decrypt_private_key(&org.id, &fetched.config_encrypted);
     assert!(
         result.is_err(),
@@ -220,13 +221,14 @@ fn test_org_lemonsqueezy_config_reencrypts_with_new_master_key() {
         .encrypt_private_key(&org.id, ls_config.as_bytes())
         .unwrap();
 
-    queries::upsert_org_service_config(&conn, &org.id, ServiceProvider::LemonSqueezy, &encrypted_ls)
+    queries::create_service_config(&conn, &org.id, "Test LemonSqueezy", ServiceProvider::LemonSqueezy, &encrypted_ls)
         .unwrap();
 
     // Verify we can decrypt with old key
-    let fetched = queries::get_org_service_config(&conn, &org.id, ServiceProvider::LemonSqueezy)
-        .unwrap()
-        .expect("LemonSqueezy config should exist");
+    let configs = queries::list_service_configs_for_org_by_provider(&conn, &org.id, ServiceProvider::LemonSqueezy)
+        .expect("Query failed");
+    assert!(!configs.is_empty(), "LemonSqueezy config should exist");
+    let fetched = &configs[0];
     let decrypted = old_key
         .decrypt_private_key(&org.id, &fetched.config_encrypted)
         .expect("Should decrypt with old key");
@@ -241,9 +243,9 @@ fn test_org_lemonsqueezy_config_reencrypts_with_new_master_key() {
         .expect("Rotation should succeed");
 
     // Verify old key no longer works
-    let fetched = queries::get_org_service_config(&conn, &org.id, ServiceProvider::LemonSqueezy)
-        .unwrap()
-        .expect("LemonSqueezy config should still exist");
+    let configs = queries::list_service_configs_for_org_by_provider(&conn, &org.id, ServiceProvider::LemonSqueezy)
+        .expect("Query failed");
+    let fetched = &configs[0];
     let result = old_key.decrypt_private_key(&org.id, &fetched.config_encrypted);
     assert!(
         result.is_err(),
@@ -258,6 +260,61 @@ fn test_org_lemonsqueezy_config_reencrypts_with_new_master_key() {
         decrypted,
         ls_config.as_bytes(),
         "decrypted LemonSqueezy config should match original JSON after rotation with new key"
+    );
+}
+
+// ============ DEK Isolation Test ============
+
+#[test]
+fn test_service_config_uses_org_id_for_dek_derivation() {
+    // This test ensures the DEK (Data Encryption Key) is derived from org_id,
+    // so different orgs have isolated encryption even with the same master key.
+    let mut conn = setup_test_db();
+    let master_key = MasterKey::from_bytes(OLD_KEY_BYTES);
+
+    // Create two orgs
+    let org1 = create_test_org(&mut conn, "Org 1");
+    let org2 = create_test_org(&mut conn, "Org 2");
+
+    // Same plaintext config for both orgs
+    let config_json = r#"{"secret_key":"sk_test","publishable_key":"pk_test","webhook_secret":"whsec"}"#;
+
+    // Encrypt for org 1
+    let encrypted1 = master_key
+        .encrypt_private_key(&org1.id, config_json.as_bytes())
+        .unwrap();
+    queries::create_service_config(&conn, &org1.id, "Stripe Config", ServiceProvider::Stripe, &encrypted1)
+        .unwrap();
+
+    // Encrypt for org 2
+    let encrypted2 = master_key
+        .encrypt_private_key(&org2.id, config_json.as_bytes())
+        .unwrap();
+    queries::create_service_config(&conn, &org2.id, "Stripe Config", ServiceProvider::Stripe, &encrypted2)
+        .unwrap();
+
+    // The ciphertexts should be different (different DEKs from different org IDs)
+    assert_ne!(
+        encrypted1, encrypted2,
+        "Same plaintext encrypted for different orgs should produce different ciphertext"
+    );
+
+    // But both should decrypt to the same plaintext
+    let decrypted1 = master_key
+        .decrypt_private_key(&org1.id, &encrypted1)
+        .unwrap();
+    let decrypted2 = master_key
+        .decrypt_private_key(&org2.id, &encrypted2)
+        .unwrap();
+
+    assert_eq!(decrypted1.as_slice(), config_json.as_bytes());
+    assert_eq!(decrypted2.as_slice(), config_json.as_bytes());
+
+    // Cross-org decryption should fail (wrong DEK)
+    let cross_decrypt = master_key.decrypt_private_key(&org1.id, &encrypted2);
+    assert!(
+        cross_decrypt.is_err(),
+        "Decrypting org2's config with org1's DEK should fail"
     );
 }
 

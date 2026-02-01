@@ -16,7 +16,7 @@ use common::{
 
 use paycheck::db::AppState;
 use paycheck::handlers;
-use paycheck::models::OperatorRole;
+use paycheck::models::{OperatorRole, ServiceProvider};
 
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -776,83 +776,31 @@ mod organization_tests {
     }
 
     #[tokio::test]
-    async fn test_update_organization_with_stripe_config() {
+    async fn test_update_organization_with_payment_config_id() {
         let (app, state) = operator_app();
         let master_key = test_master_key();
 
         let org_id: String;
         let api_key: String;
+        let config_id: String;
 
         {
             let mut conn = state.db.get().unwrap();
             let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
             let org = create_test_org(&mut conn, "Test Org");
-            org_id = org.id;
-            api_key = key;
-        }
-
-        let body = json!({
-            "stripe_config": {
-                "secret_key": "sk_test_123",
-                "publishable_key": "pk_test_123",
-                "webhook_secret": "whsec_123"
-            }
-        });
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri(format!("/operators/organizations/{}", org_id))
-                    .header("content-type", "application/json")
-                    .header("Authorization", format!("Bearer {}", api_key))
-                    .body(Body::from(serde_json::to_string(&body).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            response.status(),
-            axum::http::StatusCode::OK,
-            "Update organization with Stripe config should return 200 OK"
-        );
-
-        // Verify config was encrypted and stored
-        let conn = state.db.get().unwrap();
-        let stripe_config =
-            queries::get_org_stripe_config(&conn, &org_id, &master_key).unwrap();
-        assert!(
-            stripe_config.is_some(),
-            "Stripe config should be stored and decryptable"
-        );
-        let config = stripe_config.unwrap();
-        assert_eq!(
-            config.secret_key, "sk_test_123",
-            "Stripe secret key should match submitted value"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_update_organization_with_payment_provider() {
-        let (app, state) = operator_app();
-        let master_key = test_master_key();
-
-        let org_id: String;
-        let api_key: String;
-
-        {
-            let mut conn = state.db.get().unwrap();
-            let (_, key) = create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
-            let org = create_test_org(&mut conn, "Test Org");
-            // Must set up Stripe config before we can set payment_provider to "stripe"
+            // Set up Stripe config first - this creates the config and sets it as org default
             setup_stripe_config(&mut conn, &org.id, &master_key);
+            // Get the config ID
+            let configs = queries::list_service_configs_for_org_by_provider(&conn, &org.id, ServiceProvider::Stripe)
+                .expect("Query failed");
+            config_id = configs[0].id.clone();
             org_id = org.id;
             api_key = key;
         }
 
+        // Update the organization to set a different payment_config_id (same config, just testing the update)
         let body = json!({
-            "payment_provider": "stripe"
+            "payment_config_id": config_id
         });
 
         let response = app
@@ -871,17 +819,18 @@ mod organization_tests {
         assert_eq!(
             response.status(),
             axum::http::StatusCode::OK,
-            "Update organization with payment provider should return 200 OK"
+            "Update organization with payment_config_id should return 200 OK"
         );
 
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-
+        // Verify the org's payment_config_id was set
+        let conn = state.db.get().unwrap();
+        let org = queries::get_organization_by_id(&conn, &org_id)
+            .expect("Query failed")
+            .expect("Org not found");
         assert_eq!(
-            json["defaults"]["payment"], "stripe",
-            "Default payment provider should be updated to stripe"
+            org.payment_config_id,
+            Some(config_id),
+            "Organization's payment_config_id should be set"
         );
     }
 
@@ -1027,17 +976,21 @@ mod payment_config_tests {
             json["org_name"], "Test Org",
             "Response should include correct org_name"
         );
-        // Stripe config should be decrypted
+        // With new named configs architecture, configs are returned as an array
+        let configs = json["configs"].as_array().expect("configs should be an array");
+        assert_eq!(configs.len(), 1, "should have one Stripe config");
+        let stripe_entry = &configs[0];
+        assert_eq!(stripe_entry["provider"], "stripe");
         assert!(
-            json["stripe_config"].is_object(),
+            stripe_entry["stripe_config"].is_object(),
             "Stripe config should be present as object"
         );
         assert_eq!(
-            json["stripe_config"]["secret_key"], "sk_test_abc123xyz789",
+            stripe_entry["stripe_config"]["secret_key"], "sk_test_abc123xyz789",
             "Stripe secret key should be decrypted"
         );
         assert_eq!(
-            json["stripe_config"]["webhook_secret"], "whsec_test123secret456",
+            stripe_entry["stripe_config"]["webhook_secret"], "whsec_test123secret456",
             "Stripe webhook secret should be decrypted"
         );
     }
@@ -1089,17 +1042,21 @@ mod payment_config_tests {
             json["org_id"], org_id,
             "Response should include correct org_id"
         );
-        // LemonSqueezy config should be decrypted
+        // With new named configs architecture, configs are returned as an array
+        let configs = json["configs"].as_array().expect("configs should be an array");
+        assert_eq!(configs.len(), 1, "should have one LemonSqueezy config");
+        let ls_entry = &configs[0];
+        assert_eq!(ls_entry["provider"], "lemonsqueezy");
         assert!(
-            json["ls_config"].is_object(),
+            ls_entry["ls_config"].is_object(),
             "LemonSqueezy config should be present as object"
         );
         assert_eq!(
-            json["ls_config"]["api_key"], "ls_test_key_abcdefghij",
+            ls_entry["ls_config"]["api_key"], "ls_test_key_abcdefghij",
             "LemonSqueezy API key should be decrypted"
         );
         assert_eq!(
-            json["ls_config"]["webhook_secret"], "ls_whsec_test_secret",
+            ls_entry["ls_config"]["webhook_secret"], "ls_whsec_test_secret",
             "LemonSqueezy webhook secret should be decrypted"
         );
     }

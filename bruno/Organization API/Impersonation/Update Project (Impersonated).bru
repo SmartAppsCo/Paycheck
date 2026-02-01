@@ -25,7 +25,9 @@ body:json {
     "redirect_url": "https://myapp.com/activated",
     "email_from": "support@myapp.com",
     "email_enabled": true,
-    "email_webhook_url": null
+    "email_webhook_url": null,
+    "payment_config_id": "cfg_xxx",
+    "email_config_id": "cfg_yyy"
   }
 }
 
@@ -40,11 +42,18 @@ docs {
   - name: Project display name
   - license_key_prefix: Prefix for activation codes (e.g., "MYAPP" -> "MYAPP-XXXX-XXXX")
   - redirect_url: Post-payment redirect URL (set to null to use Paycheck success page)
-  - email_from: "From" address for activation emails (REQUIRES org resend_api_key, set to null to clear)
+  - email_from: "From" address for activation emails (requires org email config)
   - email_enabled: Enable/disable email delivery for this project
   - email_webhook_url: Webhook URL for DIY email delivery (set to null to disable)
+  - payment_config_id: ID of a service config to use for payments (overrides org default)
+  - email_config_id: ID of a service config to use for email (overrides org default)
 
-  Redirect URL:
-  - After payment, users are redirected to this URL with ?code=XXX&project_id=XXX&status=success
-  - Set to null to use Paycheck's hosted success page
+  Config inheritance:
+  - Product payment_config_id > Project payment_config_id > Org payment_config_id
+  - Project email_config_id > Org email_config_id
+
+  Email delivery modes:
+  1. Resend API (default): Set email_config_id to a Resend config, set email_from
+  2. Webhook: Set email_webhook_url for DIY delivery (receives activation data via POST)
+  3. Disabled: Set email_enabled=false (retrieve codes via admin API only)
 }

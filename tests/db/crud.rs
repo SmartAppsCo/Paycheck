@@ -170,10 +170,8 @@ fn test_update_organization() {
 
     let update = UpdateOrganization {
         name: Some("Updated Name".to_string()),
-        stripe_config: None,
-        ls_config: None,
-        resend_api_key: None,
-        payment_provider: None,
+        payment_config_id: None,
+        email_config_id: None,
     };
     queries::update_organization(&conn, &org.id, &update).expect("Update failed");
 
@@ -363,26 +361,28 @@ fn test_update_org_stripe_config() {
     // Set up Stripe config using the new service config table
     setup_stripe_config(&conn, &org.id, &master_key);
 
-    // Verify config exists
+    // Verify config exists by listing configs for this provider
+    let configs = queries::list_service_configs_for_org_by_provider(&conn, &org.id, ServiceProvider::Stripe)
+        .expect("Query failed");
     assert!(
-        queries::org_has_service_config(&conn, &org.id, ServiceProvider::Stripe)
-            .expect("Query failed"),
+        !configs.is_empty(),
         "org should have Stripe config after setup"
     );
 
-    // Verify we can decrypt it
-    let decrypted = queries::get_org_stripe_config(&conn, &org.id, &master_key)
-        .expect("Query failed")
-        .expect("Config not found");
+    // Get the config and verify we can decrypt it
+    let raw_config = &configs[0];
+    let decrypted: StripeConfig = serde_json::from_slice(
+        &master_key
+            .decrypt_private_key(&org.id, &raw_config.config_encrypted)
+            .expect("Decryption failed"),
+    )
+    .expect("JSON parse failed");
     assert_eq!(
         decrypted.secret_key, "sk_test_abc123xyz789",
         "decrypted secret key should match input"
     );
 
     // Verify the raw data is actually encrypted (has magic bytes)
-    let raw_config = queries::get_org_service_config(&conn, &org.id, ServiceProvider::Stripe)
-        .expect("Query failed")
-        .expect("Config should exist");
     assert!(
         raw_config.config_encrypted.starts_with(b"ENC1"),
         "config should be encrypted with ENC1 magic bytes"
@@ -398,17 +398,22 @@ fn test_update_org_lemonsqueezy_config() {
     // Set up LemonSqueezy config using the new service config table
     setup_lemonsqueezy_config(&conn, &org.id, &master_key);
 
-    // Verify config exists
+    // Verify config exists by listing configs for this provider
+    let configs = queries::list_service_configs_for_org_by_provider(&conn, &org.id, ServiceProvider::LemonSqueezy)
+        .expect("Query failed");
     assert!(
-        queries::org_has_service_config(&conn, &org.id, ServiceProvider::LemonSqueezy)
-            .expect("Query failed"),
+        !configs.is_empty(),
         "org should have LemonSqueezy config after setup"
     );
 
-    // Verify we can decrypt it
-    let decrypted = queries::get_org_ls_config(&conn, &org.id, &master_key)
-        .expect("Query failed")
-        .expect("Config not found");
+    // Get the config and verify we can decrypt it
+    let raw_config = &configs[0];
+    let decrypted: LemonSqueezyConfig = serde_json::from_slice(
+        &master_key
+            .decrypt_private_key(&org.id, &raw_config.config_encrypted)
+            .expect("Decryption failed"),
+    )
+    .expect("JSON parse failed");
     assert_eq!(
         decrypted.api_key, "ls_test_key_abcdefghij",
         "decrypted API key should match input"
@@ -418,10 +423,7 @@ fn test_update_org_lemonsqueezy_config() {
         "decrypted store_id should match input"
     );
 
-    // Verify encryption
-    let raw_config = queries::get_org_service_config(&conn, &org.id, ServiceProvider::LemonSqueezy)
-        .expect("Query failed")
-        .expect("Config should exist");
+    // Verify the raw data is actually encrypted (has magic bytes)
     assert!(
         raw_config.config_encrypted.starts_with(b"ENC1"),
         "config should be encrypted with ENC1 magic bytes"
@@ -435,53 +437,40 @@ fn test_update_org_both_payment_configs() {
     let org = create_test_org(&mut conn, "Test Org");
 
     // Set up both configs using the helper functions
+    // Note: setup_both_payment_configs creates both configs, with LS being set as default last
     setup_both_payment_configs(&conn, &org.id, &master_key);
 
-    // Set payment provider
-    let update = UpdateOrganization {
-        name: None,
-        stripe_config: None,
-        ls_config: None,
-        resend_api_key: None,
-        payment_provider: Some(Some("stripe".to_string())),
-    };
-    queries::update_organization(&conn, &org.id, &update).expect("Update failed");
-
-    // Both configs should be present and decryptable
+    // Both configs should exist for this org (owned by org)
+    let stripe_configs = queries::list_service_configs_for_org_by_provider(&conn, &org.id, ServiceProvider::Stripe)
+        .expect("Query failed");
     assert!(
-        queries::org_has_service_config(&conn, &org.id, ServiceProvider::Stripe)
-            .expect("Query failed"),
+        !stripe_configs.is_empty(),
         "org should have Stripe config"
     );
+    let ls_configs = queries::list_service_configs_for_org_by_provider(&conn, &org.id, ServiceProvider::LemonSqueezy)
+        .expect("Query failed");
     assert!(
-        queries::org_has_service_config(&conn, &org.id, ServiceProvider::LemonSqueezy)
-            .expect("Query failed"),
+        !ls_configs.is_empty(),
         "org should have LemonSqueezy config"
     );
 
-    let stripe = queries::get_org_stripe_config(&conn, &org.id, &master_key)
-        .expect("Stripe query failed")
-        .expect("Stripe config not found");
-    assert_eq!(
-        stripe.secret_key, "sk_test_abc123xyz789",
-        "Stripe secret key should match input"
-    );
-
-    let ls = queries::get_org_ls_config(&conn, &org.id, &master_key)
-        .expect("LS query failed")
-        .expect("LS config not found");
-    assert_eq!(
-        ls.api_key, "ls_test_key_abcdefghij",
-        "LemonSqueezy API key should match input"
-    );
-
-    let updated = queries::get_organization_by_id(&conn, &org.id)
+    // Verify the org has a payment_config_id set (the LS config, since it was set last)
+    let updated_org = queries::get_organization_by_id(&conn, &org.id)
         .expect("Query failed")
         .expect("Organization not found");
+    assert!(
+        updated_org.payment_config_id.is_some(),
+        "org should have a payment_config_id set"
+    );
+
+    // The payment_config_id should point to a LemonSqueezy config (set last by setup_both_payment_configs)
+    let config = queries::get_service_config_by_id(&conn, updated_org.payment_config_id.as_ref().unwrap())
+        .expect("Query failed")
+        .expect("Config not found");
     assert_eq!(
-        updated.payment_provider,
-        Some("stripe".to_string()),
-        "payment_provider should be set to stripe"
+        config.provider,
+        ServiceProvider::LemonSqueezy,
+        "org's default payment config should be LemonSqueezy (set last)"
     );
 }
 
@@ -495,8 +484,19 @@ fn test_payment_config_wrong_key_fails() {
     // Set up Stripe config using the correct key
     setup_stripe_config(&conn, &org.id, &master_key);
 
+    // Get the org to find its payment_config_id
+    let org = queries::get_organization_by_id(&conn, &org.id)
+        .expect("Query failed")
+        .expect("Org not found");
+    let config_id = org.payment_config_id.expect("Config ID should be set");
+
+    // Get the encrypted config
+    let config = queries::get_service_config_by_id(&conn, &config_id)
+        .expect("Query failed")
+        .expect("Config not found");
+
     // Decryption with wrong key should fail
-    let result = queries::get_org_stripe_config(&conn, &org.id, &wrong_key);
+    let result = wrong_key.decrypt_private_key(&org.id, &config.config_encrypted);
     assert!(result.is_err(), "Decryption with wrong key should fail");
 }
 
@@ -600,6 +600,8 @@ fn test_update_product() {
             "feature2".to_string(),
             "feature3".to_string(),
         ]),
+        payment_config_id: None,
+        email_config_id: None,
     };
 
     queries::update_product(&mut conn, &product.id, &update).expect("Update failed");
@@ -638,6 +640,8 @@ fn test_update_product() {
         device_limit: Some(None),     // Set to unlimited
         device_inactive_days: None,
         features: None,
+        payment_config_id: None,
+        email_config_id: None,
     };
 
     queries::update_product(&mut conn, &product.id, &update_to_unlimited).expect("Update to unlimited failed");
@@ -670,6 +674,8 @@ fn test_update_product() {
         device_limit: None,
         device_inactive_days: Some(Some(30)), // Set to 30 days
         features: None,
+        payment_config_id: None,
+        email_config_id: None,
     };
     queries::update_product(&mut conn, &product.id, &set_inactive_days)
         .expect("Setting device_inactive_days failed");
@@ -694,6 +700,8 @@ fn test_update_product() {
         device_limit: None,
         device_inactive_days: Some(None), // Clear device_inactive_days
         features: None,
+        payment_config_id: None,
+        email_config_id: None,
     };
     queries::update_product(&mut conn, &product.id, &clear_nullable_fields)
         .expect("Clearing nullable fields failed");

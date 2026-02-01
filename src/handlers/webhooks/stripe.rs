@@ -8,7 +8,7 @@ use rusqlite::Connection;
 
 use crate::crypto::MasterKey;
 use crate::db::{AppState, queries};
-use crate::models::Organization;
+use crate::models::{Organization, Project};
 use crate::payments::{
     StripeCheckoutSession, StripeClient, StripeInvoice, StripeSubscription, StripeWebhookEvent,
 };
@@ -38,6 +38,7 @@ impl WebhookProvider for StripeWebhookProvider {
     fn verify_signature(
         &self,
         conn: &Connection,
+        project: &Project,
         org: &Organization,
         master_key: &MasterKey,
         body: &Bytes,
@@ -46,11 +47,12 @@ impl WebhookProvider for StripeWebhookProvider {
         // Handle both missing and corrupted configs gracefully by returning 200 OK.
         // This prevents payment providers from retrying indefinitely on 5xx errors
         // and avoids leaking internal state about config status.
-        let stripe_config = match queries::get_org_stripe_config(conn, &org.id, master_key) {
-            Ok(Some(config)) => config,
+        // Uses 2-level lookup for webhooks: project → org (no product context in webhooks).
+        let stripe_config = match queries::get_stripe_config_for_webhook(conn, project, org, master_key) {
+            Ok(Some((config, _source))) => config,
             Ok(None) => return Err((StatusCode::OK, "Stripe not configured")),
             Err(e) => {
-                tracing::error!("Failed to decrypt Stripe config for org {}: {}", org.id, e);
+                tracing::error!("Failed to decrypt Stripe config for project {} / org {}: {}", project.id, org.id, e);
                 // Return OK to prevent retry storms - treat corrupted config as unusable
                 return Err((StatusCode::OK, "Stripe config unavailable"));
             }

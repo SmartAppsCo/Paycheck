@@ -31,11 +31,9 @@ pub async fn create_project(
     // Look up org for audit log
     let org = queries::get_organization_by_id(&conn, &org_id)?.or_not_found(msg::ORG_NOT_FOUND)?;
 
-    // Validate email_from requires org to have resend_api_key
+    // Validate email_from requires org to have an email config set
     if input.email_from.is_some() {
-        let org_resend_key =
-            queries::get_org_resend_api_key(&conn, &org_id, &state.master_key)?;
-        if org_resend_key.is_none() {
+        if org.email_config_id.is_none() {
             return Err(AppError::BadRequest(
                 msg::EMAIL_FROM_REQUIRES_ORG_RESEND_KEY.into(),
             ));
@@ -139,12 +137,10 @@ pub async fn update_project(
     let existing = queries::get_project_by_id(&conn, &path.project_id)?
         .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
-    // Validate email_from requires org to have resend_api_key
+    // Validate email_from requires org to have an email config set
     // Some(Some(value)) = setting to a value, Some(None) = clearing, None = unchanged
     if matches!(input.email_from, Some(Some(_))) {
-        let org_resend_key =
-            queries::get_org_resend_api_key(&conn, &path.org_id, &state.master_key)?;
-        if org_resend_key.is_none() {
+        if org.email_config_id.is_none() {
             return Err(AppError::BadRequest(
                 msg::EMAIL_FROM_REQUIRES_ORG_RESEND_KEY.into(),
             ));
@@ -207,15 +203,29 @@ pub async fn delete_project(
     Ok(Json(serde_json::json!({ "success": true })))
 }
 
+/// A masked payment config entry
+#[derive(Debug, serde::Serialize)]
+pub struct MaskedPaymentConfigEntry {
+    pub config_id: String,
+    pub name: String,
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stripe_config: Option<StripeConfigMasked>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ls_config: Option<LemonSqueezyConfigMasked>,
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct PaymentConfigResponse {
     pub org_id: String,
-    pub stripe_config: Option<StripeConfigMasked>,
-    pub ls_config: Option<LemonSqueezyConfigMasked>,
-    pub payment_provider: Option<String>,
+    /// All payment configs for this organization (masked)
+    pub configs: Vec<MaskedPaymentConfigEntry>,
+    /// The default payment config ID for the org
+    pub default_payment_config_id: Option<String>,
 }
 
-/// Get payment provider configuration for the organization (masked for security)
+/// Get payment provider configurations for the organization (masked for security).
+/// Use /service-configs for full CRUD operations on configs.
 pub async fn get_payment_config(
     State(state): State<AppState>,
     Extension(ctx): Extension<OrgMemberContext>,
@@ -227,19 +237,35 @@ pub async fn get_payment_config(
     let conn = state.db.get()?;
     let org = queries::get_organization_by_id(&conn, &org_id)?.or_not_found(msg::ORG_NOT_FOUND)?;
 
-    let stripe_config = queries::get_org_stripe_config(&conn, &org_id, &state.master_key)?
-        .as_ref()
-        .map(StripeConfigMasked::from);
+    // Get all payment configs for this org
+    let payment_configs = queries::list_service_configs_for_org_by_category(&conn, &org_id, crate::models::ServiceCategory::Payment)?;
 
-    let ls_config = queries::get_org_ls_config(&conn, &org_id, &state.master_key)?
-        .as_ref()
-        .map(LemonSqueezyConfigMasked::from);
+    let mut configs = Vec::with_capacity(payment_configs.len());
+    for config in payment_configs {
+        let (stripe_config, ls_config) = match config.provider.as_str() {
+            "stripe" => {
+                let stripe = config.decrypt_stripe_config(&state.master_key)?;
+                (Some(StripeConfigMasked::from(&stripe)), None)
+            }
+            "lemonsqueezy" => {
+                let ls = config.decrypt_ls_config(&state.master_key)?;
+                (None, Some(LemonSqueezyConfigMasked::from(&ls)))
+            }
+            _ => (None, None),
+        };
+        configs.push(MaskedPaymentConfigEntry {
+            config_id: config.id,
+            name: config.name,
+            provider: config.provider.as_str().to_string(),
+            stripe_config,
+            ls_config,
+        });
+    }
 
     Ok(Json(PaymentConfigResponse {
         org_id,
-        stripe_config,
-        ls_config,
-        payment_provider: org.payment_provider,
+        configs,
+        default_payment_config_id: org.payment_config_id,
     }))
 }
 

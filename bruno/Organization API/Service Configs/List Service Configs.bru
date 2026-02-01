@@ -1,0 +1,38 @@
+meta {
+  name: List Service Configs
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/orgs/{{org_id}}/service-configs
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{org_member_api_key}}
+}
+
+params:query {
+  ~category: payment
+  ~provider: stripe
+}
+
+docs {
+  List all service configs for an organization.
+  Requires admin role.
+
+  Query parameters (all optional):
+  - category: Filter by category ("payment" or "email")
+  - provider: Filter by provider ("stripe", "lemonsqueezy", "resend")
+
+  Response includes masked credentials (secrets replaced with ***).
+
+  Examples:
+  - List all configs: GET /orgs/{org_id}/service-configs
+  - List payment configs: GET /orgs/{org_id}/service-configs?category=payment
+  - List email configs: GET /orgs/{org_id}/service-configs?category=email
+  - List Stripe configs: GET /orgs/{org_id}/service-configs?provider=stripe
+  - List Resend configs: GET /orgs/{org_id}/service-configs?provider=resend
+}

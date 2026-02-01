@@ -1,0 +1,29 @@
+meta {
+  name: Get Service Config (Impersonated)
+  type: http
+  seq: 22
+}
+
+get {
+  url: {{base_url}}/orgs/{{org_id}}/service-configs/{{config_id}}
+  body: none
+  auth: bearer
+}
+
+headers {
+  X-On-Behalf-Of: {{user_id}}
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+docs {
+  Get a service config by ID using operator impersonation.
+
+  Requirements:
+  - Operator must have admin or owner role
+  - X-On-Behalf-Of must be a user_id of a member with admin access
+
+  Response includes masked credentials (secrets replaced with ***).
+}

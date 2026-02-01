@@ -21,33 +21,50 @@ body:json {
     "redirect_url": "https://myapp.com/activated",
     "email_from": "support@myapp.com",
     "email_enabled": true,
-    "email_webhook_url": null
+    "email_webhook_url": null,
+    "payment_config_id": "cfg_xxx",
+    "email_config_id": "cfg_yyy"
   }
 }
 
 docs {
-  Update a project (requires write access).
+  Update a project (requires admin access).
   All fields are optional - only include fields you want to update.
 
   Fields:
   - name: Project display name
   - license_key_prefix: Prefix for activation codes (e.g., "MYAPP" -> "MYAPP-XXXX-XXXX")
   - redirect_url: Post-payment redirect URL (set to null to use Paycheck success page)
-  - email_from: "From" address for activation emails (REQUIRES org resend_api_key, set to null to clear)
+  - email_from: "From" address for activation emails (requires org email config)
   - email_enabled: Enable/disable email delivery for this project
   - email_webhook_url: Webhook URL for DIY email delivery (set to null to disable)
+  - payment_config_id: ID of a service config to use for payments (overrides org default)
+  - email_config_id: ID of a service config to use for email (overrides org default)
+
+  Config inheritance (3-level override):
+  - Product payment_config_id > Project payment_config_id > Org payment_config_id
+  - Project email_config_id > Org email_config_id
+
+  To use org's default config, set to null:
+  { "payment_config_id": null }
+
+  To set a specific config, use a config ID from /orgs/{org_id}/service-configs:
+  { "payment_config_id": "cfg_abc123" }
 
   Redirect URL:
   - After payment, users are redirected to this URL with ?code=XXX&project_id=XXX&status=success
   - Set to null to use Paycheck's hosted success page
-  - One URL per project (no allowlist needed - project = environment)
 
-  Email configuration:
-  - To use Resend email with custom from address, org must have resend_api_key configured
-  - To switch to webhook mode: set email_webhook_url to your endpoint URL
-  - To disable email entirely: set email_enabled to false
-  - To clear a setting, set it to null
+  Email delivery modes:
+  1. Resend API (default): Set email_config_id to a Resend config, set email_from
+  2. Webhook: Set email_webhook_url for DIY delivery (receives activation data via POST)
+  3. Disabled: Set email_enabled=false (retrieve codes via admin API only)
 
-  Note: Payment configuration (Stripe, LemonSqueezy) and Resend API key are managed
-  at the organization level. Use PUT /operators/organizations/{org_id}.
+  Email setup example:
+  1. Create Resend config at org level: POST /orgs/{org_id}/service-configs
+     { "name": "My Resend", "provider": "resend", "resend_api_key": "re_xxx" }
+  2. Set org default: PUT /operators/organizations/{org_id}
+     { "email_config_id": "cfg_abc123" }
+  3. Configure project: PUT /orgs/{org_id}/projects/{project_id}
+     { "email_from": "noreply@myapp.com", "email_enabled": true }
 }

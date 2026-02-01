@@ -1,13 +1,15 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result, msg};
-use crate::models::project::{LemonSqueezyConfig, StripeConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Organization {
     pub id: String,
     pub name: String,
-    pub payment_provider: Option<String>,
+    /// Default payment service config for this org (can be overridden at project/product level)
+    pub payment_config_id: Option<String>,
+    /// Default email service config for this org (can be overridden at project level)
+    pub email_config_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     /// Soft delete timestamp (None = active, Some = deleted at this time)
@@ -38,20 +40,12 @@ impl CreateOrganization {
 #[derive(Debug, Deserialize)]
 pub struct UpdateOrganization {
     pub name: Option<String>,
-    /// Stripe config - use Some(config) to set, Some(None) to clear, None to leave unchanged
-    #[serde(default, deserialize_with = "deserialize_optional_stripe_config")]
-    pub stripe_config: Option<Option<StripeConfig>>,
-    /// LemonSqueezy config - use Some(config) to set, Some(None) to clear, None to leave unchanged
-    #[serde(default, deserialize_with = "deserialize_optional_ls_config")]
-    pub ls_config: Option<Option<LemonSqueezyConfig>>,
-    /// Resend API key for email delivery (overrides system default)
-    /// Use Some(None) to clear and fall back to system default, None to leave unchanged
+    /// Default payment config ID - use Some(id) to set, Some(None) to clear, None to leave unchanged
     #[serde(default, deserialize_with = "deserialize_optional_field")]
-    pub resend_api_key: Option<Option<String>>,
-    /// Payment provider ("stripe" or "lemonsqueezy")
-    /// Use Some(None) to clear, None to leave unchanged
+    pub payment_config_id: Option<Option<String>>,
+    /// Default email config ID - use Some(id) to set, Some(None) to clear, None to leave unchanged
     #[serde(default, deserialize_with = "deserialize_optional_field")]
-    pub payment_provider: Option<Option<String>>,
+    pub email_config_id: Option<Option<String>>,
 }
 
 impl UpdateOrganization {
@@ -60,14 +54,6 @@ impl UpdateOrganization {
             && name.trim().is_empty()
         {
             return Err(AppError::BadRequest(msg::NAME_EMPTY.into()));
-        }
-        // payment_provider can be cleared with null, but if set it shouldn't be empty
-        if let Some(Some(ref provider)) = self.payment_provider
-            && provider.trim().is_empty()
-        {
-            return Err(AppError::BadRequest(
-                "payment_provider cannot be empty".into(),
-            ));
         }
         Ok(())
     }
@@ -86,35 +72,19 @@ where
     Ok(Some(Option::deserialize(deserializer)?))
 }
 
-fn deserialize_optional_stripe_config<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<Option<StripeConfig>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(Some(Option::deserialize(deserializer)?))
-}
-
-fn deserialize_optional_ls_config<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<Option<LemonSqueezyConfig>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(Some(Option::deserialize(deserializer)?))
-}
-
-/// Public view of an organization (includes configured services)
+/// Public view of an organization (includes configured services summary)
 #[derive(Debug, Clone, Serialize)]
 pub struct OrganizationPublic {
     pub id: String,
     pub name: String,
-    /// Configured external services grouped by category
-    /// e.g. { "payment": ["stripe", "lemonsqueezy"], "email": ["resend"] }
-    pub configured_services: std::collections::HashMap<String, Vec<String>>,
-    /// Default providers by category
-    /// e.g. { "payment": "stripe" }
-    pub defaults: std::collections::HashMap<String, String>,
+    /// Default payment config ID for this org
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payment_config_id: Option<String>,
+    /// Default email config ID for this org
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_config_id: Option<String>,
+    /// Available service configs for this org (id -> name mapping)
+    pub service_configs: std::collections::HashMap<String, String>,
     pub created_at: i64,
     pub updated_at: i64,
     /// Soft delete timestamp (None = active, Some = deleted at this time)
@@ -126,17 +96,17 @@ pub struct OrganizationPublic {
 }
 
 impl OrganizationPublic {
-    /// Create OrganizationPublic with configured services and defaults
+    /// Create OrganizationPublic with service configs summary
     pub fn from_with_configs(
         org: Organization,
-        configured_services: std::collections::HashMap<String, Vec<String>>,
-        defaults: std::collections::HashMap<String, String>,
+        service_configs: std::collections::HashMap<String, String>,
     ) -> Self {
         Self {
             id: org.id,
             name: org.name,
-            configured_services,
-            defaults,
+            payment_config_id: org.payment_config_id,
+            email_config_id: org.email_config_id,
+            service_configs,
             created_at: org.created_at,
             updated_at: org.updated_at,
             deleted_at: org.deleted_at,

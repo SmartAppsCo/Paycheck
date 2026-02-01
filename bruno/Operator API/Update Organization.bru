@@ -17,51 +17,44 @@ auth:bearer {
 body:json {
   {
     "name": "Updated Org Name",
-    "stripe_config": {
-      "secret_key": "sk_test_xxx",
-      "publishable_key": "pk_test_xxx",
-      "webhook_secret": "whsec_xxx"
-    },
-    "ls_config": {
-      "api_key": "ls_xxx",
-      "store_id": "store_123",
-      "webhook_secret": "whsec_ls_xxx"
-    },
-    "resend_api_key": "re_xxx",
-    "payment_provider": "stripe"
+    "payment_config_id": "cfg_xxx",
+    "email_config_id": "cfg_yyy"
   }
 }
 
 docs {
   Update an organization (requires admin+ operator role).
   All fields are optional - only include fields you want to update.
-  
+
   Fields:
   - name: Organization display name
-  - stripe_config: Stripe payment configuration
-    - secret_key: Stripe secret API key (sk_test_xxx or sk_live_xxx)
-    - publishable_key: Stripe publishable key (pk_test_xxx or pk_live_xxx)
-    - webhook_secret: Stripe webhook signing secret (whsec_xxx)
-  - ls_config: LemonSqueezy payment configuration
-    - api_key: LemonSqueezy API key
-    - store_id: LemonSqueezy store ID
-    - webhook_secret: LemonSqueezy webhook signing secret
-  - resend_api_key: Resend API key for email delivery (overrides system default)
-  - payment_provider: Default payment provider ("stripe" or "lemonsqueezy", or null to clear)
-    Note: Setting payment_provider requires that provider's config to already exist
+  - payment_config_id: ID of a service config to use as default for payments
+  - email_config_id: ID of a service config to use as default for email
 
-  All sensitive configuration (payment configs, Resend API key) is encrypted at rest.
-  All projects in this organization share the same payment and email configuration.
-  
-  To clear a config, set it to null:
-  { "stripe_config": null }
-  { "resend_api_key": null }
-  
-  To clear payment_provider, set it to null:
-  { "payment_provider": null }
-  
-  Email configuration:
-  - If resend_api_key is set, this org's projects can use custom email_from addresses
-  - If not set, system-level Resend API key is used with system default from address
-  - Projects can still use webhook mode regardless of Resend configuration
+  Service configs are created via the Organization API:
+  POST /orgs/{org_id}/service-configs
+
+  Config inheritance (3-level override for payments):
+  - Product payment_config_id > Project payment_config_id > Org payment_config_id
+
+  Config inheritance (2-level for email):
+  - Project email_config_id > Org email_config_id
+
+  To clear a default config (no default, require explicit config at project/product level):
+  { "payment_config_id": null }
+
+  Example payment workflow:
+  1. Create Stripe config: POST /orgs/{org_id}/service-configs
+     { "name": "Production Stripe", "provider": "stripe", "stripe_config": {...} }
+  2. Set as org default: PUT /operators/organizations/{org_id}
+     { "payment_config_id": "cfg_abc123" }
+  3. All projects/products now use this config unless they override it
+
+  Example email workflow:
+  1. Create Resend config: POST /orgs/{org_id}/service-configs
+     { "name": "Production Email", "provider": "resend", "resend_api_key": "re_xxx" }
+  2. Set as org default: PUT /operators/organizations/{org_id}
+     { "email_config_id": "cfg_xyz789" }
+  3. All projects now use this config unless they override it
+  4. Configure per-project email settings (email_from, email_enabled) via project update
 }

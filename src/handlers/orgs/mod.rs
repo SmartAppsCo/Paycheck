@@ -6,6 +6,7 @@ mod product_provider_link;
 mod products;
 mod project_members;
 mod projects;
+mod service_configs;
 
 pub use api_keys::*;
 pub use audit_logs::*;
@@ -15,6 +16,7 @@ pub use product_provider_link::*;
 pub use products::*;
 pub use project_members::*;
 pub use projects::*;
+pub use service_configs::*;
 
 use axum::{
     Router, middleware,
@@ -27,7 +29,7 @@ use crate::middleware::{org_member_auth, org_member_project_auth};
 use crate::rate_limit;
 
 pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<AppState> {
-    // Org-level routes (members management, payment config, audit logs, api keys)
+    // Org-level routes (members management, service configs, audit logs, api keys)
     let org_routes = Router::new()
         .route("/orgs/{org_id}/members", post(create_org_member))
         .route("/orgs/{org_id}/members", get(list_org_members))
@@ -56,10 +58,19 @@ pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<App
         )
         .route("/orgs/{org_id}/projects", post(create_project))
         .route("/orgs/{org_id}/projects", get(list_projects))
-        // Payment provider config (at org level, masked for customers to verify their settings)
-        .route("/orgs/{org_id}/payment-provider", get(get_payment_config))
+        // Service configs (named configs pool at org level)
+        .route(
+            "/orgs/{org_id}/service-configs",
+            post(create_service_config).get(list_service_configs),
+        )
+        .route(
+            "/orgs/{org_id}/service-configs/{config_id}",
+            get(get_service_config).put(update_service_config).delete(delete_service_config),
+        )
         // Audit logs (org-scoped, any org member can view their org's logs)
         .route("/orgs/{org_id}/audit-logs", get(query_org_audit_logs))
+        // Payment provider config (masked view, admin only)
+        .route("/orgs/{org_id}/payment-provider", get(get_payment_config))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             org_member_auth,

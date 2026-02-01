@@ -485,6 +485,8 @@ async fn test_redeem_device_limit_exceeded_returns_error() {
             device_limit: Some(1), // Only 1 device allowed
             device_inactive_days: None,
             features: vec![],
+            payment_config_id: None,
+            email_config_id: None,
         };
         let product =
             queries::create_product(&mut conn, &project.id, &input).expect("Failed to create product");
@@ -1061,8 +1063,10 @@ mod device_limit_enforcement {
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
                 activation_limit: Some(10),
                 device_limit: Some(2),
-        device_inactive_days: None,
+                device_inactive_days: None,
                 features: vec![],
+                payment_config_id: None,
+                email_config_id: None,
             };
             let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
@@ -1131,8 +1135,10 @@ mod device_limit_enforcement {
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
                 activation_limit: Some(10),
                 device_limit: Some(1),
-        device_inactive_days: None,
+                device_inactive_days: None,
                 features: vec![],
+                payment_config_id: None,
+                email_config_id: None,
             };
             let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
@@ -1210,6 +1216,8 @@ mod device_limit_enforcement {
                 device_limit: None, // 0 means unlimited devices
                 device_inactive_days: None,
                 features: vec![],
+                payment_config_id: None,
+                email_config_id: None,
             };
             let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
@@ -1281,8 +1289,10 @@ mod device_limit_enforcement {
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
                 activation_limit: Some(10),
                 device_limit: Some(1),
-        device_inactive_days: None,
+                device_inactive_days: None,
                 features: vec![],
+                payment_config_id: None,
+                email_config_id: None,
             };
             let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
@@ -1368,6 +1378,8 @@ mod activation_limit_enforcement {
                 device_limit: Some(10),    // Device limit is higher
                 device_inactive_days: None,
                 features: vec![],
+                payment_config_id: None,
+                email_config_id: None,
             };
             let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
@@ -1448,6 +1460,8 @@ mod activation_limit_enforcement {
                 device_limit: Some(10),    // Device limit is higher
                 device_inactive_days: None,
                 features: vec![],
+                payment_config_id: None,
+                email_config_id: None,
             };
             let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
@@ -1593,6 +1607,8 @@ mod activation_limit_enforcement {
                 device_limit: Some(1),       // Only 1 device allowed!
                 device_inactive_days: None,
                 features: vec![],
+                payment_config_id: None,
+                email_config_id: None,
             };
             let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
             let license = create_test_license(
@@ -1720,6 +1736,8 @@ mod activation_limit_enforcement {
                 device_limit: Some(100),   // High device limit
                 device_inactive_days: None,
                 features: vec![],
+                payment_config_id: None,
+                email_config_id: None,
             };
             let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
             let license = create_test_license(
@@ -1844,8 +1862,10 @@ mod activation_limit_enforcement {
                 updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
                 activation_limit: Some(100),
                 device_limit: Some(100),
-        device_inactive_days: None,
+                device_inactive_days: None,
                 features: vec![],
+                payment_config_id: None,
+                email_config_id: None,
             };
             let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
             let license = create_test_license(

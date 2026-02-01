@@ -44,16 +44,8 @@ fn operator_app_with_payment_configs() -> (Router, String) {
         setup_stripe_config(&conn, &org.id, &master_key);
         setup_lemonsqueezy_config(&conn, &org.id, &master_key);
 
-        // Set default payment provider
-        let update = UpdateOrganization {
-            name: None,
-            stripe_config: None,
-            ls_config: None,
-            resend_api_key: None,
-            payment_provider: Some(Some("stripe".to_string())),
-        };
-        queries::update_organization(&conn, &org.id, &update)
-            .expect("Failed to set payment provider");
+        // The org already has LS config set as default from setup_lemonsqueezy_config
+        // For this test, let's ensure the org is properly set up for payments
     }
 
     let audit_manager = SqliteConnectionManager::memory();
@@ -120,14 +112,20 @@ async fn test_operator_get_payment_config_full_unmasked() {
 
     assert_eq!(json["org_id"], org_id);
 
-    // Verify Stripe config is FULL (unmasked)
-    let stripe = &json["stripe_config"];
+    // With new named configs architecture, configs are returned as an array
+    let configs = json["configs"].as_array().expect("configs should be an array");
+    assert_eq!(configs.len(), 2, "should have both Stripe and LS configs");
+
+    // Find and verify Stripe config is FULL (unmasked)
+    let stripe_entry = configs.iter().find(|c| c["provider"] == "stripe").expect("should have Stripe config");
+    let stripe = &stripe_entry["stripe_config"];
     assert!(!stripe.is_null());
     assert_eq!(stripe["secret_key"], "sk_test_abc123xyz789");
     assert_eq!(stripe["webhook_secret"], "whsec_test123secret456");
 
-    // Verify LemonSqueezy config is FULL (unmasked)
-    let ls = &json["ls_config"];
+    // Find and verify LemonSqueezy config is FULL (unmasked)
+    let ls_entry = configs.iter().find(|c| c["provider"] == "lemonsqueezy").expect("should have LS config");
+    let ls = &ls_entry["ls_config"];
     assert!(!ls.is_null());
     assert_eq!(ls["api_key"], "ls_test_key_abcdefghij");
     assert_eq!(ls["webhook_secret"], "ls_whsec_test_secret");

@@ -17,3 +17,6 @@ mod from_row_panic;
 
 #[path = "db/api_key_atomicity.rs"]
 mod api_key_atomicity;
+
+#[path = "db/service_config_inheritance.rs"]
+mod service_config_inheritance;

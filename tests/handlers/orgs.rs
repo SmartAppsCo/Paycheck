@@ -838,8 +838,10 @@ mod license_tests {
                 updates_exp_days: None,
                 activation_limit: Some(5),
                 device_limit: Some(3),
-        device_inactive_days: None,
+                device_inactive_days: None,
                 features: vec![],
+                payment_config_id: None,
+                email_config_id: None,
             };
             let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
@@ -1806,25 +1808,25 @@ mod project_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         assert_eq!(json["org_id"], org_id, "response should include org ID");
-        // Stripe config should be masked
-        assert!(
-            json["stripe_config"].is_object(),
-            "stripe_config should be present as an object, got: {}",
-            json
-        );
-        let stripe = &json["stripe_config"];
+        // With new named configs architecture, configs are returned as an array
+        let configs = json["configs"].as_array().expect("configs should be an array");
+        assert_eq!(configs.len(), 2, "should have both Stripe and LS configs");
+
+        // Find and verify Stripe config is masked
+        let stripe_entry = configs.iter().find(|c| c["provider"] == "stripe").expect("should have Stripe config");
+        let stripe = &stripe_entry["stripe_config"];
+        assert!(stripe.is_object(), "stripe_config should be present as an object");
         let secret_key = stripe["secret_key"].as_str().unwrap();
         assert!(
             secret_key.contains("...") || secret_key.contains("*"),
             "stripe secret key should be masked for security, got: {}",
             secret_key
         );
-        // LemonSqueezy config should be masked
-        assert!(
-            json["ls_config"].is_object(),
-            "ls_config should be present as an object"
-        );
-        let ls = &json["ls_config"];
+
+        // Find and verify LemonSqueezy config is masked
+        let ls_entry = configs.iter().find(|c| c["provider"] == "lemonsqueezy").expect("should have LS config");
+        let ls = &ls_entry["ls_config"];
+        assert!(ls.is_object(), "ls_config should be present as an object");
         let api_key = ls["api_key"].as_str().unwrap();
         assert!(
             api_key.contains("...") || api_key.contains("*"),
@@ -1874,14 +1876,9 @@ mod project_tests {
         let json: Value = serde_json::from_slice(&body).unwrap();
 
         assert_eq!(json["org_id"], org_id, "response should include org ID");
-        assert!(
-            json["stripe_config"].is_null(),
-            "stripe_config should be null when not configured"
-        );
-        assert!(
-            json["ls_config"].is_null(),
-            "ls_config should be null when not configured"
-        );
+        // With new named configs architecture, configs is an empty array when none configured
+        let configs = json["configs"].as_array().expect("configs should be an array");
+        assert_eq!(configs.len(), 0, "configs should be empty when none configured");
     }
 
     #[tokio::test]

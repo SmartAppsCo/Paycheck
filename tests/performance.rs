@@ -303,6 +303,8 @@ async fn test_license_many_devices() {
         device_limit: None,           // None = unlimited
         device_inactive_days: None,
         features: vec!["unlimited_devices".to_string()],
+        payment_config_id: None,
+        email_config_id: None,
     };
     let product =
         queries::create_product(&mut conn, &project.id, &input).expect("Failed to create product");
@@ -494,6 +496,8 @@ async fn test_org_many_projects() {
             email_from: None,
             email_enabled: true,
             email_webhook_url: None,
+            payment_config_id: None,
+            email_config_id: None,
         };
         let (private_key, public_key) = jwt::generate_keypair();
         queries::create_project(

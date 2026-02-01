@@ -250,6 +250,8 @@ fn seed_dev_data(state: &AppState) {
         email_from: None,
         email_enabled: true,
         email_webhook_url: None,
+        payment_config_id: None,
+        email_config_id: None,
     };
     let project = queries::create_project(
         &conn,
@@ -299,6 +301,8 @@ fn seed_dev_data(state: &AppState) {
         ],
         price_cents: Some(4999),
         currency: Some("usd".to_string()),
+        payment_config_id: None,
+        email_config_id: None,
     };
     let product = queries::create_product(&conn, &project.id, &product_input)
         .expect("Failed to create dev product");
@@ -430,25 +434,26 @@ fn rotate_master_key(
         println!("  [OK] Project: {} ({})", project.name, project.id);
     }
 
-    // Rotate organization service configs (stripe, lemonsqueezy, resend)
-    let service_configs = queries::list_all_org_service_configs(&tx)
-        .map_err(|e| format!("Failed to list org service configs: {}", e))?;
+    // Rotate all service configs (org-level and project-level)
+    let service_configs = queries::list_all_service_configs(&tx)
+        .map_err(|e| format!("Failed to list service configs: {}", e))?;
 
     if !service_configs.is_empty() {
         println!();
         println!(
-            "Found {} organization service config(s) to rotate.",
+            "Found {} service config(s) to rotate.",
             service_configs.len()
         );
 
         for config in &service_configs {
-            // Decrypt with old key
+            // Decrypt with old key (org_id is used as context for encryption)
             let plaintext = old_key
                 .decrypt_private_key(&config.org_id, &config.config_encrypted)
                 .map_err(|e| {
                     format!(
-                        "Failed to decrypt {} config for org {}: {}",
+                        "Failed to decrypt {} config '{}' for org {}: {}",
                         config.provider.as_str(),
+                        config.name,
                         config.org_id,
                         e
                     )
@@ -459,29 +464,30 @@ fn rotate_master_key(
                 .encrypt_private_key(&config.org_id, &plaintext)
                 .map_err(|e| {
                     format!(
-                        "Failed to re-encrypt {} config for org {}: {}",
+                        "Failed to re-encrypt {} config '{}' for org {}: {}",
                         config.provider.as_str(),
+                        config.name,
                         config.org_id,
                         e
                     )
                 })?;
 
             // Update in database
-            queries::update_org_service_config_encrypted(&tx, &config.id, &new_enc).map_err(
-                |e| {
-                    format!(
-                        "Failed to update {} config for org {}: {}",
-                        config.provider.as_str(),
-                        config.org_id,
-                        e
-                    )
-                },
-            )?;
+            queries::update_service_config_encrypted(&tx, &config.id, &new_enc).map_err(|e| {
+                format!(
+                    "Failed to update {} config '{}' for org {}: {}",
+                    config.provider.as_str(),
+                    config.name,
+                    config.org_id,
+                    e
+                )
+            })?;
 
             println!(
-                "  [OK] {} ({}) for org: {}",
+                "  [OK] {} ({}) '{}' for org: {}",
                 config.provider.as_str(),
                 config.category.as_str(),
+                config.name,
                 config.org_id
             );
         }
@@ -520,10 +526,7 @@ fn rotate_master_key(
     println!("SUCCESS: All keys rotated to new master key.");
     println!("  {} project(s)", projects.len());
     if !service_configs.is_empty() {
-        println!(
-            "  {} organization service config(s)",
-            service_configs.len()
-        );
+        println!("  {} service config(s)", service_configs.len());
     }
     if email_key_rotated {
         println!("  1 email HMAC key");

@@ -15,17 +15,20 @@ auth:bearer {
 }
 
 docs {
-  Get payment provider configuration for the organization (masked for security).
+  Get the effective payment configuration for the organization (masked for security).
   Requires admin role.
 
-  Payment configuration is set at the organization level and shared across all projects.
+  Returns the org's default payment service config (if set).
+  Use /orgs/{org_id}/service-configs to list all available configs.
 
   Response includes:
-  - org_id: Organization ID
-  - stripe_config: Masked Stripe configuration (secrets hidden)
-  - ls_config: Masked LemonSqueezy configuration (secrets hidden)
-  - payment_provider: Default payment provider ("stripe" or "lemonsqueezy")
+  - config_id: The service config ID being used
+  - name: Config name (e.g., "Production Stripe")
+  - provider: "stripe" or "lemonsqueezy"
+  - config: Masked configuration (secrets hidden)
 
-  Sensitive fields (API keys, webhook secrets) are masked, showing only first 8 and last 4 characters.
-  Publishable keys and store IDs are shown in full (not sensitive).
+  Sensitive fields (API keys, webhook secrets) are masked.
+
+  Config inheritance (3-level):
+  - Product payment_config_id > Project payment_config_id > Org payment_config_id
 }

@@ -67,16 +67,11 @@ pub async fn initiate_buy(
         p.parse::<PaymentProvider>()
             .ok()
             .ok_or_else(|| AppError::BadRequest(msg::INVALID_PROVIDER.into()))?
-    } else if let Some(ref provider) = org.payment_provider {
-        // Use organization's payment provider
-        provider
-            .parse::<PaymentProvider>()
-            .ok()
-            .ok_or_else(|| AppError::BadRequest(msg::INVALID_ORG_PROVIDER.into()))?
     } else {
         // Auto-detect: use the only configured provider, or error if both/neither
-        let has_stripe = queries::org_has_service_config(&conn, &org.id, ServiceProvider::Stripe)?;
-        let has_ls = queries::org_has_service_config(&conn, &org.id, ServiceProvider::LemonSqueezy)?;
+        // Check hierarchically: product → project → org level
+        let has_stripe = queries::has_effective_payment_config(&conn, &product, &project, &org, ServiceProvider::Stripe)?;
+        let has_ls = queries::has_effective_payment_config(&conn, &product, &project, &org, ServiceProvider::LemonSqueezy)?;
         match (has_stripe, has_ls) {
             (true, false) => PaymentProvider::Stripe,
             (false, true) => PaymentProvider::LemonSqueezy,
@@ -117,12 +112,25 @@ pub async fn initiate_buy(
 
     // Build callback URL (the payment provider will redirect here after success)
     let callback_url = format!("{}/callback?session={}", state.base_url, session.id);
-    let cancel_url = format!("{}/cancel", state.base_url);
+    // Cancel URL: use project's redirect_url if set, otherwise Paycheck's default cancel page
+    // Append ?status=canceled so the app can distinguish cancel from direct visit
+    let cancel_url = project
+        .redirect_url
+        .as_ref()
+        .map(|url| {
+            if url.contains('?') {
+                format!("{}&status=canceled", url)
+            } else {
+                format!("{}?status=canceled", url)
+            }
+        })
+        .unwrap_or_else(|| format!("{}/cancel", state.base_url));
 
     // Create checkout with the appropriate provider using the linked_id
+    // Uses hierarchical config lookup: product → project → org level
     let checkout_url = match provider {
         PaymentProvider::Stripe => {
-            let config = queries::get_org_stripe_config(&conn, &org.id, &state.master_key)?
+            let (config, _source) = queries::get_effective_stripe_config(&conn, &product, &project, &org, &state.master_key)?
                 .ok_or_else(|| AppError::BadRequest(msg::STRIPE_NOT_CONFIGURED.into()))?;
 
             let client = StripeClient::new(&config);
@@ -139,7 +147,7 @@ pub async fn initiate_buy(
             url
         }
         PaymentProvider::LemonSqueezy => {
-            let config = queries::get_org_ls_config(&conn, &org.id, &state.master_key)?
+            let (config, _source) = queries::get_effective_ls_config(&conn, &product, &project, &org, &state.master_key)?
                 .ok_or_else(|| AppError::BadRequest(msg::LS_NOT_CONFIGURED.into()))?;
 
             let client = LemonSqueezyClient::new(&config);

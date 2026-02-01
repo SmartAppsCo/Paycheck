@@ -86,12 +86,6 @@ pub async fn request_activation_code(
         }));
     }
 
-    // Get organization for org-level Resend API key (do this once)
-    let org = queries::get_organization_by_id(&conn, &project.org_id)?;
-    let org_resend_key = queries::get_org_resend_api_key(&conn, &project.org_id, &state.master_key)
-        .ok()
-        .flatten();
-
     // Batch fetch all products for the licenses (avoids N+1 queries)
     let product_ids: Vec<&str> = active_licenses
         .iter()
@@ -102,6 +96,20 @@ pub async fn request_activation_code(
         .iter()
         .map(|p| (p.id.as_str(), p.name.as_str()))
         .collect();
+
+    // Get organization and effective email config (product → project → org level)
+    // Use first product for email config lookup (all products in same project typically share config)
+    let org = queries::get_organization_by_id(&conn, &project.org_id)?;
+    let first_product = products.first();
+    let org_resend_key = match (&org, first_product) {
+        (Some(org), Some(product)) => {
+            queries::get_effective_email_config(&conn, product, &project, org, &state.master_key)
+                .ok()
+                .flatten()
+                .map(|(key, _source)| key)
+        }
+        _ => None,
+    };
 
     // Create activation codes for all licenses
     let mut license_codes: Vec<LicenseCodeInfo> = Vec::with_capacity(active_licenses.len());

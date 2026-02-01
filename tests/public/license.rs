@@ -514,8 +514,10 @@ async fn test_license_shows_correct_limits() {
             updates_exp_days: Some(UPDATES_VALID_DAYS as i32),
             activation_limit: Some(10),
             device_limit: Some(5),
-        device_inactive_days: None,
+            device_inactive_days: None,
             features: vec![],
+            payment_config_id: None,
+            email_config_id: None,
         };
         let product =
             queries::create_product(&mut conn, &project.id, &input).expect("Failed to create product");

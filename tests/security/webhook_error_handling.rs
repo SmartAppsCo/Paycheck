@@ -8,8 +8,8 @@ mod common;
 
 use axum::{Router, body::Body, http::Request, routing::post};
 use common::*;
-use paycheck::db::queries;
 use paycheck::handlers::webhooks::{handle_lemonsqueezy_webhook, handle_stripe_webhook};
+use rusqlite::params;
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -31,8 +31,20 @@ fn setup_corrupted_stripe_config(conn: &rusqlite::Connection, org_id: &str) {
     corrupted_bytes.extend_from_slice(&[0u8; 12]); // Fake nonce (12 bytes)
     corrupted_bytes.extend_from_slice(b"corrupted_ciphertext_garbage_data"); // Invalid ciphertext
 
-    queries::upsert_org_service_config(conn, org_id, ServiceProvider::Stripe, &corrupted_bytes)
-        .expect("Failed to set corrupted Stripe config");
+    // Insert a corrupted service config directly
+    let config_id = format!("cfg_corrupted_stripe_{}", &org_id[..8]);
+    let now = chrono::Utc::now().timestamp();
+    conn.execute(
+        "INSERT INTO service_configs (id, org_id, name, category, provider, config_encrypted, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![&config_id, org_id, "Corrupted Stripe", "payment", "stripe", &corrupted_bytes, now, now],
+    ).expect("Failed to insert corrupted config");
+
+    // Set this as the org's payment config
+    conn.execute(
+        "UPDATE organizations SET payment_config_id = ?1 WHERE id = ?2",
+        params![&config_id, org_id],
+    ).expect("Failed to set org payment_config_id");
 }
 
 fn compute_stripe_signature(payload: &[u8], secret: &str, timestamp: &str) -> String {
@@ -222,13 +234,20 @@ fn setup_corrupted_lemonsqueezy_config(conn: &rusqlite::Connection, org_id: &str
     corrupted_bytes.extend_from_slice(&[0u8; 12]); // Fake nonce (12 bytes)
     corrupted_bytes.extend_from_slice(b"corrupted_ciphertext_garbage_data"); // Invalid ciphertext
 
-    queries::upsert_org_service_config(
-        conn,
-        org_id,
-        ServiceProvider::LemonSqueezy,
-        &corrupted_bytes,
-    )
-    .expect("Failed to set corrupted LemonSqueezy config");
+    // Insert a corrupted service config directly
+    let config_id = format!("cfg_corrupted_ls_{}", &org_id[..8]);
+    let now = chrono::Utc::now().timestamp();
+    conn.execute(
+        "INSERT INTO service_configs (id, org_id, name, category, provider, config_encrypted, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![&config_id, org_id, "Corrupted LemonSqueezy", "payment", "lemonsqueezy", &corrupted_bytes, now, now],
+    ).expect("Failed to insert corrupted config");
+
+    // Set this as the org's payment config
+    conn.execute(
+        "UPDATE organizations SET payment_config_id = ?1 WHERE id = ?2",
+        params![&config_id, org_id],
+    ).expect("Failed to set org payment_config_id");
 }
 
 fn compute_lemonsqueezy_signature(payload: &[u8], secret: &str) -> String {

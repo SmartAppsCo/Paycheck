@@ -681,6 +681,8 @@ fn test_checkout_creates_license_with_product_expirations() {
         device_limit: Some(3),
         device_inactive_days: None,
         features: vec![],
+        payment_config_id: None,
+        email_config_id: None,
     };
     let product = queries::create_product(&mut conn, &project.id, &input)
         .expect("product creation should succeed");
@@ -773,6 +775,8 @@ fn test_checkout_perpetual_license() {
         device_limit: Some(3),
         device_inactive_days: None,
         features: vec![],
+        payment_config_id: None,
+        email_config_id: None,
     };
     let product = queries::create_product(&mut conn, &project.id, &input)
         .expect("product creation should succeed");

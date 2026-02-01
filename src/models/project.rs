@@ -36,6 +36,10 @@ pub struct Project {
     /// Webhook URL to POST activation data to (instead of sending email)
     /// If set, Paycheck calls this URL and dev handles email delivery themselves
     pub email_webhook_url: Option<String>,
+    /// Payment config override (null = inherit from org)
+    pub payment_config_id: Option<String>,
+    /// Email config override (null = inherit from org)
+    pub email_config_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     /// Soft delete timestamp (None = active, Some = deleted at this time)
@@ -57,6 +61,12 @@ pub struct ProjectPublic {
     pub email_from: Option<String>,
     pub email_enabled: bool,
     pub email_webhook_url: Option<String>,
+    /// Payment config override (null = inherit from org)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payment_config_id: Option<String>,
+    /// Email config override (null = inherit from org)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_config_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     /// Soft delete timestamp (None = active, Some = deleted at this time)
@@ -79,6 +89,8 @@ impl From<Project> for ProjectPublic {
             email_from: p.email_from,
             email_enabled: p.email_enabled,
             email_webhook_url: p.email_webhook_url,
+            payment_config_id: p.payment_config_id,
+            email_config_id: p.email_config_id,
             created_at: p.created_at,
             updated_at: p.updated_at,
             deleted_at: p.deleted_at,
@@ -104,6 +116,12 @@ pub struct CreateProject {
     /// Webhook URL to POST activation data to (instead of sending email)
     #[serde(default)]
     pub email_webhook_url: Option<String>,
+    /// Payment config override (null = inherit from org)
+    #[serde(default)]
+    pub payment_config_id: Option<String>,
+    /// Email config override (null = inherit from org)
+    #[serde(default)]
+    pub email_config_id: Option<String>,
 }
 
 impl CreateProject {
@@ -189,6 +207,12 @@ pub struct UpdateProject {
     /// Webhook URL (use Some(None) to clear, None to leave unchanged)
     #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub email_webhook_url: Option<Option<String>>,
+    /// Payment config override (use Some(None) to clear, None to leave unchanged)
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub payment_config_id: Option<Option<String>>,
+    /// Email config override (use Some(None) to clear, None to leave unchanged)
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub email_config_id: Option<Option<String>>,
 }
 
 impl UpdateProject {
