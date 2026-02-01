@@ -158,8 +158,20 @@ interface PaycheckOptions {
 - `activateWithCode(code, deviceInfo?)` - Activate with activation code (accepts `PREFIX-XXXX-XXXX` or `XXXX-XXXX`)
 - `requestActivationCode(email)` - Request activation code sent to purchase email
 - `importToken(token)` - Import JWT directly (offline activation)
+- `formatActivationCode(code)` - Format user input for display (exported utility function)
 
 **Note:** `activateWithCode` validates the code format client-side before making an API request. This prevents unnecessary network calls for malformed codes. Throws `VALIDATION_ERROR` for invalid format.
+
+**Formatting codes for display:**
+```typescript
+import { formatActivationCode } from '@paycheck/sdk';
+
+formatActivationCode('myapp ab3d ef5g')  // "MYAPP-AB3D-EF5G"
+formatActivationCode('`AB3D-EF5G`')      // "AB3D-EF5G" (backticks stripped)
+
+// Format as user types
+<input onChange={(e) => setCode(formatActivationCode(e.target.value))} />
+```
 
 #### Validation (with Ed25519 signature verification)
 

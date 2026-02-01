@@ -218,6 +218,27 @@ code: string  # Accepts two formats:
 
 ---
 
+### `formatActivationCode(code: string) -> string`
+
+Formats user input to match the server's expected activation code format.
+
+**Behavior:**
+- Converts to uppercase
+- Replaces any non-alphanumeric characters with dashes
+- Trims leading/trailing separators
+- Does NOT validate - just formats (use for UI display as user types)
+
+**Example:**
+```
+formatActivationCode("myapp ab3d ef5g")  -> "MYAPP-AB3D-EF5G"
+formatActivationCode("`AB3D-EF5G`")      -> "AB3D-EF5G"
+formatActivationCode("ab3d...ef5g")      -> "AB3D-EF5G"
+```
+
+Use this to show users exactly what the server will see, or to format codes in real-time as users type.
+
+---
+
 ## Token Operations
 
 ### `getToken() -> string | null`

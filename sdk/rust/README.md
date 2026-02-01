@@ -133,6 +133,11 @@ let result = paycheck.import_token(&jwt);
 if result.valid {
     println!("Activated offline! Tier: {}", result.claims.unwrap().tier);
 }
+
+// Format user input for display (normalize to server format)
+use paycheck_sdk::format_activation_code;
+let formatted = format_activation_code("myapp ab3d ef5g"); // "MYAPP-AB3D-EF5G"
+let formatted = format_activation_code("`AB3D-EF5G`");     // "AB3D-EF5G"
 ```
 
 ### Validation (with Ed25519 signature verification)
