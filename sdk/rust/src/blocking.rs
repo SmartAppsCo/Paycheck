@@ -16,25 +16,58 @@ pub const DEFAULT_BASE_URL: &str = "https://api.paycheck.dev";
 /// Valid characters for activation code parts (base32-like, excludes confusing 0/O/1/I)
 const ACTIVATION_CODE_CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-/// Validate activation code format.
+/// Normalize activation code by stripping non-alphanumeric characters.
+///
+/// Converts to uppercase and replaces any sequence of non-alphanumeric
+/// characters with a single dash. This handles user input with accidental
+/// dots, underscores, extra spaces, backticks (from email copy-paste), or
+/// other characters.
+///
+/// Examples:
+/// - "`C9MA-JUFF`" → "C9MA-JUFF" (backticks stripped)
+/// - "MYAPP.AB3D.EF5G" → "MYAPP-AB3D-EF5G"
+/// - "  myapp  ab3d  ef5g  " → "MYAPP-AB3D-EF5G"
+fn normalize_activation_code(code: &str) -> String {
+    let upper = code.to_uppercase();
+    let mut result = String::with_capacity(upper.len());
+    let mut last_was_separator = true; // Start true to avoid leading dash
+
+    for c in upper.chars() {
+        if c.is_ascii_alphanumeric() {
+            result.push(c);
+            last_was_separator = false;
+        } else if !last_was_separator {
+            result.push('-');
+            last_was_separator = true;
+        }
+    }
+
+    // Remove trailing dash if present
+    if result.ends_with('-') {
+        result.pop();
+    }
+
+    result
+}
+
+/// Validate activation code format and return normalized code.
 ///
 /// Accepts two formats:
 /// - `PREFIX-XXXX-XXXX` (full code with prefix)
 /// - `XXXX-XXXX` (bare code, server will prepend project prefix)
 ///
-/// Returns Ok(()) if valid, Err with message if invalid.
-/// Accepts various separators (dashes, spaces) and trims whitespace.
-fn validate_activation_code(code: &str) -> Result<()> {
-    let trimmed = code.trim();
-    if trimmed.is_empty() {
+/// Non-alphanumeric characters are stripped before validation, so codes like
+/// "PREFIX...XXXX__XXXX" or "PREFIX XXXX XXXX" are normalized to "PREFIX-XXXX-XXXX".
+///
+/// Returns the normalized code if valid, Err with message if invalid.
+fn validate_activation_code(code: &str) -> Result<String> {
+    let normalized = normalize_activation_code(code);
+    if normalized.is_empty() {
         return Err(PaycheckError::validation("Activation code is empty"));
     }
 
-    // Split on whitespace or dashes
-    let parts: Vec<&str> = trimmed
-        .split(|c: char| c.is_whitespace() || c == '-')
-        .filter(|s| !s.is_empty())
-        .collect();
+    // Split on dashes (all non-alphanumeric chars are now dashes)
+    let parts: Vec<&str> = normalized.split('-').filter(|s| !s.is_empty()).collect();
 
     // Determine which parts contain the XXXX-XXXX code
     let code_parts: &[&str] = match parts.len() {
@@ -57,8 +90,7 @@ fn validate_activation_code(code: &str) -> Result<()> {
             )));
         }
 
-        let upper = part.to_uppercase();
-        for c in upper.bytes() {
+        for c in part.bytes() {
             if !ACTIVATION_CODE_CHARS.contains(&c) {
                 return Err(PaycheckError::validation(format!(
                     "Invalid character '{}' in activation code",
@@ -68,7 +100,7 @@ fn validate_activation_code(code: &str) -> Result<()> {
         }
     }
 
-    Ok(())
+    Ok(normalized)
 }
 
 /// Configuration options for the Paycheck client
@@ -604,15 +636,17 @@ impl Paycheck {
 
     /// Activate with a short-lived activation code.
     ///
-    /// The code must be in PREFIX-XXXX-XXXX format. The SDK validates the format
-    /// before making a network request to avoid unnecessary API calls.
+    /// The code must be in PREFIX-XXXX-XXXX format. The SDK validates and normalizes
+    /// the format before making a network request to avoid unnecessary API calls.
+    /// Non-alphanumeric characters are stripped, so codes with accidental dots,
+    /// underscores, or extra spaces are handled gracefully.
     pub fn activate_with_code(
         &self,
         code: &str,
         options: Option<DeviceInfo>,
     ) -> Result<ActivationResult> {
-        // Validate code format before making network request
-        validate_activation_code(code)?;
+        // Validate and normalize code format before making network request
+        let normalized_code = validate_activation_code(code)?;
 
         #[derive(Serialize)]
         struct RedeemRequest {
@@ -626,7 +660,7 @@ impl Paycheck {
 
         let body = RedeemRequest {
             public_key: self.public_key.clone(),
-            code: code.to_string(),
+            code: normalized_code,
             device_id: self.device_id.clone(),
             device_type: self.device_type.to_string(),
             device_name: options.and_then(|d| d.device_name),
@@ -906,6 +940,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_normalize_activation_code() {
+        // Basic normalization
+        assert_eq!(normalize_activation_code("myapp-ab3d-ef5g"), "MYAPP-AB3D-EF5G");
+
+        // Multiple separators collapsed to single dash
+        assert_eq!(normalize_activation_code("MYAPP--AB3D--EF5G"), "MYAPP-AB3D-EF5G");
+        assert_eq!(normalize_activation_code("MYAPP  AB3D  EF5G"), "MYAPP-AB3D-EF5G");
+
+        // Non-alphanumeric characters replaced with dashes
+        assert_eq!(normalize_activation_code("MYAPP.AB3D.EF5G"), "MYAPP-AB3D-EF5G");
+        assert_eq!(normalize_activation_code("MYAPP_AB3D_EF5G"), "MYAPP-AB3D-EF5G");
+        assert_eq!(normalize_activation_code("MYAPP...AB3D___EF5G"), "MYAPP-AB3D-EF5G");
+
+        // Leading/trailing separators removed
+        assert_eq!(normalize_activation_code("  MYAPP-AB3D-EF5G  "), "MYAPP-AB3D-EF5G");
+        assert_eq!(normalize_activation_code("---MYAPP-AB3D-EF5G---"), "MYAPP-AB3D-EF5G");
+
+        // Mixed separators
+        assert_eq!(normalize_activation_code("MYAPP - AB3D - EF5G"), "MYAPP-AB3D-EF5G");
+
+        // Backticks from email copy-paste (common issue)
+        assert_eq!(normalize_activation_code("`C9MA-JUFF`"), "C9MA-JUFF");
+        assert_eq!(normalize_activation_code("`MYAPP-C9MA-JUFF`"), "MYAPP-C9MA-JUFF");
+    }
+
+    #[test]
     fn test_validate_activation_code_full() {
         // Full code format: PREFIX-XXXX-XXXX
         assert!(validate_activation_code("MYAPP-AB3D-EF5G").is_ok());
@@ -925,6 +985,11 @@ mod tests {
         // All valid characters in code parts
         assert!(validate_activation_code("TEST-ABCD-2345").is_ok());
         assert!(validate_activation_code("TEST-HJKM-6789").is_ok());
+
+        // Non-alphanumeric separators (dots, underscores, etc.)
+        assert!(validate_activation_code("MYAPP.AB3D.EF5G").is_ok());
+        assert!(validate_activation_code("MYAPP_AB3D_EF5G").is_ok());
+        assert!(validate_activation_code("MYAPP...AB3D___EF5G").is_ok());
     }
 
     #[test]
@@ -940,6 +1005,27 @@ mod tests {
 
         // Lowercase
         assert!(validate_activation_code("ab3d-ef5g").is_ok());
+
+        // Non-alphanumeric separators
+        assert!(validate_activation_code("AB3D.EF5G").is_ok());
+        assert!(validate_activation_code("AB3D_EF5G").is_ok());
+    }
+
+    #[test]
+    fn test_validate_activation_code_returns_normalized() {
+        // Verify the normalized code is returned
+        assert_eq!(
+            validate_activation_code("myapp-ab3d-ef5g").unwrap(),
+            "MYAPP-AB3D-EF5G"
+        );
+        assert_eq!(
+            validate_activation_code("MYAPP.AB3D.EF5G").unwrap(),
+            "MYAPP-AB3D-EF5G"
+        );
+        assert_eq!(
+            validate_activation_code("  ab3d  ef5g  ").unwrap(),
+            "AB3D-EF5G"
+        );
     }
 
     #[test]

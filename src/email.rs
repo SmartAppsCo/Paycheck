@@ -288,7 +288,7 @@ impl EmailService {
 <div style="margin-bottom: 24px;">
 <p style="margin-bottom: 8px;"><strong>{}</strong> <span style="color: #666; font-size: 14px;">(purchased {})</span></p>
 <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; text-align: center;">
-<code style="font-size: 24px; font-weight: bold; letter-spacing: 2px; color: #333;">{}</code>
+<span style="font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; font-size: 24px; font-weight: bold; letter-spacing: 2px; color: #333;">{}</span>
 </div>
 </div>
 <p style="color: #666;">This activation code expires in {} minutes. You can request a new one anytime.</p>
@@ -686,7 +686,7 @@ impl EmailService {
                 r#"<div style="margin-bottom: 24px;">
 <p style="margin-bottom: 8px;"><strong>{}</strong> <span style="color: #666; font-size: 14px;">(purchased {})</span></p>
 <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; text-align: center;">
-<code style="font-size: 24px; font-weight: bold; letter-spacing: 2px; color: #333;">{}</code>
+<span style="font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; font-size: 24px; font-weight: bold; letter-spacing: 2px; color: #333;">{}</span>
 </div>
 </div>"#,
                 license.product_name, date, code_html

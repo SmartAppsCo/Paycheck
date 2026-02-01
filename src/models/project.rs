@@ -129,13 +129,27 @@ impl CreateProject {
         if self.name.trim().is_empty() {
             return Err(AppError::BadRequest(msg::NAME_EMPTY.into()));
         }
-        if self.license_key_prefix.trim().is_empty() {
-            return Err(AppError::BadRequest(
-                "license_key_prefix cannot be empty".into(),
-            ));
-        }
+        validate_prefix(&self.license_key_prefix)?;
         Ok(())
     }
+}
+
+/// Validate that a license key prefix contains only alphanumeric characters.
+/// This ensures activation codes can be safely normalized (non-alphanumeric chars
+/// are treated as separators by the SDK).
+fn validate_prefix(prefix: &str) -> Result<()> {
+    let trimmed = prefix.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::BadRequest(
+            "license_key_prefix cannot be empty".into(),
+        ));
+    }
+    if !trimmed.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(AppError::BadRequest(
+            "license_key_prefix must contain only letters and numbers".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn default_prefix() -> String {
@@ -222,12 +236,8 @@ impl UpdateProject {
         {
             return Err(AppError::BadRequest(msg::NAME_EMPTY.into()));
         }
-        if let Some(ref prefix) = self.license_key_prefix
-            && prefix.trim().is_empty()
-        {
-            return Err(AppError::BadRequest(
-                "license_key_prefix cannot be empty".into(),
-            ));
+        if let Some(ref prefix) = self.license_key_prefix {
+            validate_prefix(prefix)?;
         }
         Ok(())
     }
@@ -244,4 +254,42 @@ where
     D: serde::Deserializer<'de>,
 {
     Ok(Some(Option::deserialize(deserializer)?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_prefix_alphanumeric() {
+        // Valid prefixes
+        assert!(validate_prefix("MYAPP").is_ok());
+        assert!(validate_prefix("MyApp123").is_ok());
+        assert!(validate_prefix("PC").is_ok());
+        assert!(validate_prefix("A1B2C3").is_ok());
+    }
+
+    #[test]
+    fn test_validate_prefix_with_whitespace_trim() {
+        // Whitespace should be trimmed
+        assert!(validate_prefix("  MYAPP  ").is_ok());
+        assert!(validate_prefix("\tPC\n").is_ok());
+    }
+
+    #[test]
+    fn test_validate_prefix_empty() {
+        assert!(validate_prefix("").is_err());
+        assert!(validate_prefix("   ").is_err());
+    }
+
+    #[test]
+    fn test_validate_prefix_non_alphanumeric_rejected() {
+        // These should all fail - non-alphanumeric chars could break SDK normalization
+        assert!(validate_prefix("MY-APP").is_err()); // dash
+        assert!(validate_prefix("MY_APP").is_err()); // underscore
+        assert!(validate_prefix("MY.APP").is_err()); // dot
+        assert!(validate_prefix("MY APP").is_err()); // space (after trim, this is "MY APP")
+        assert!(validate_prefix("APP!").is_err()); // special char
+        assert!(validate_prefix("`MYAPP`").is_err()); // backticks
+    }
 }

@@ -107,24 +107,50 @@ const DEFAULT_BASE_URL = 'https://api.paycheck.dev';
 const ACTIVATION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 /**
- * Validate activation code format.
+ * Normalize activation code by stripping non-alphanumeric characters.
+ *
+ * Converts to uppercase and replaces any sequence of non-alphanumeric
+ * characters with a single dash. This handles user input with accidental
+ * dots, underscores, extra spaces, backticks (from email copy-paste), or
+ * other characters.
+ *
+ * Examples:
+ * - "`C9MA-JUFF`" → "C9MA-JUFF" (backticks stripped)
+ * - "MYAPP.AB3D.EF5G" → "MYAPP-AB3D-EF5G"
+ * - "  myapp  ab3d  ef5g  " → "MYAPP-AB3D-EF5G"
+ *
+ * @param code - Raw activation code input
+ * @returns Normalized code in uppercase with dashes as separators
+ */
+function normalizeActivationCode(code: string): string {
+  return code
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, ''); // trim leading/trailing dashes
+}
+
+/**
+ * Validate activation code format and return normalized code.
  *
  * Accepts two formats:
  * - `PREFIX-XXXX-XXXX` (full code with prefix)
  * - `XXXX-XXXX` (bare code, server will prepend project prefix)
  *
- * @throws PaycheckError if format is invalid
+ * Non-alphanumeric characters are stripped before validation, so codes like
+ * "PREFIX...XXXX__XXXX" or "PREFIX XXXX XXXX" are normalized to "PREFIX-XXXX-XXXX".
+ *
+ * @param code - Raw activation code input
+ * @returns Normalized activation code
+ * @throws PaycheckError if format is invalid after normalization
  */
-function validateActivationCode(code: string): void {
-  const trimmed = code.trim();
-  if (!trimmed) {
+function validateActivationCode(code: string): string {
+  const normalized = normalizeActivationCode(code);
+  if (!normalized) {
     throw new PaycheckError('VALIDATION_ERROR', 'Activation code is empty');
   }
 
-  // Split on whitespace or dashes
-  const parts = trimmed
-    .split(/[\s-]+/)
-    .filter((s) => s.length > 0);
+  // Split on dashes (all non-alphanumeric chars are now dashes)
+  const parts = normalized.split('-').filter((s) => s.length > 0);
 
   // Determine which parts contain the XXXX-XXXX code
   let codeParts: string[];
@@ -151,8 +177,7 @@ function validateActivationCode(code: string): void {
       );
     }
 
-    const upper = part.toUpperCase();
-    for (const c of upper) {
+    for (const c of part) {
       if (!ACTIVATION_CODE_CHARS.includes(c)) {
         throw new PaycheckError(
           'VALIDATION_ERROR',
@@ -161,6 +186,8 @@ function validateActivationCode(code: string): void {
       }
     }
   }
+
+  return normalized;
 }
 
 /**
@@ -634,8 +661,8 @@ export class Paycheck {
     code: string,
     options?: DeviceInfo
   ): Promise<ActivationResult> {
-    // Validate format before hitting the API
-    validateActivationCode(code);
+    // Validate format and normalize before hitting the API
+    const normalizedCode = validateActivationCode(code);
 
     interface RedeemResponse {
       token: string;
@@ -650,7 +677,7 @@ export class Paycheck {
     const response = await this.apiRequest<RedeemResponse>('POST', '/redeem', {
       body: {
         public_key: this.publicKey,
-        code,
+        code: normalizedCode,
         device_id: this.deviceId,
         device_type: this.deviceType,
         ...(options?.deviceName && { device_name: options.deviceName }),
