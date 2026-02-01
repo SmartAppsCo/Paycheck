@@ -1,9 +1,18 @@
+use std::time::Duration;
+
 use axum::{extract::State, response::Redirect};
 use serde::Deserialize;
+use tokio::time::sleep;
 
 use crate::db::{AppState, queries};
 use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::Query;
+
+/// How long to wait for webhook to complete before returning pending status.
+/// Total wait: 5 × 100ms = 500ms. Enough to catch typical webhook delays (100-300ms)
+/// without blocking connections too long during webhook delivery issues.
+const WEBHOOK_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const WEBHOOK_POLL_ATTEMPTS: u32 = 5;
 
 #[derive(Debug, Deserialize)]
 pub struct CallbackQuery {
@@ -45,9 +54,21 @@ pub async fn payment_callback(
         .as_ref()
         .unwrap_or(&state.success_page_url);
 
-    // Check if session was completed by webhook
+    // Wait for webhook to complete (handles race where redirect beats webhook)
+    let mut session = session;
     if !session.completed {
-        // Payment might still be processing - redirect to success page with pending flag
+        for _ in 0..WEBHOOK_POLL_ATTEMPTS {
+            sleep(WEBHOOK_POLL_INTERVAL).await;
+            session = queries::get_payment_session(&conn, &query.session)?
+                .or_not_found(msg::SESSION_NOT_FOUND)?;
+            if session.completed {
+                break;
+            }
+        }
+    }
+
+    // If still not completed after polling, redirect with pending status
+    if !session.completed {
         let redirect_url = append_query_params(
             base_redirect,
             &[("session", &query.session), ("status", "pending")],

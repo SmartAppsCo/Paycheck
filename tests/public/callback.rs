@@ -168,6 +168,93 @@ async fn test_callback_completed_session_redirects_with_activation_code() {
     );
 }
 
+/// Test that the callback endpoint polls and waits for webhook completion.
+/// This simulates the race condition where the browser redirect beats the webhook.
+#[tokio::test]
+async fn test_callback_polls_for_delayed_webhook_completion() {
+    let state = create_test_app_state();
+    let master_key = test_master_key();
+    let db_pool = state.db.clone();
+
+    let session_id: String;
+    let license_id: String;
+
+    {
+        let conn = state.db.get().unwrap();
+        let org = create_test_org(&conn, "Test Org");
+        let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+        // Create license first
+        let license = create_test_license(
+            &conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(LICENSE_VALID_DAYS)),
+        );
+        license_id = license.id.clone();
+
+        // Create a payment session that's NOT completed initially
+        let session = create_test_payment_session(&conn, &product.id, None);
+        session_id = session.id.clone();
+    }
+
+    // Spawn a task that will complete the session after 150ms.
+    // This simulates a webhook arriving slightly after the browser redirect.
+    // The callback endpoint should poll and catch this within its 500ms window.
+    let session_id_clone = session_id.clone();
+    let license_id_clone = license_id.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        let conn = db_pool.get().unwrap();
+        complete_payment_session(&conn, &session_id_clone, &license_id_clone);
+    });
+
+    let app = public_app(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/callback?session={}", session_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Should redirect with success (not pending) because polling waited for completion
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::TEMPORARY_REDIRECT,
+        "callback should return redirect after polling catches webhook completion"
+    );
+
+    let location = response
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
+
+    // Should have code and success status, NOT pending
+    assert!(
+        location.contains("code="),
+        "redirect should include activation code after polling completes, got: {}",
+        location
+    );
+    assert!(
+        location.contains("status=success"),
+        "redirect should include status=success after polling completes, got: {}",
+        location
+    );
+    assert!(
+        !location.contains("status=pending"),
+        "should NOT have status=pending when webhook completes within polling window, got: {}",
+        location
+    );
+}
+
 #[tokio::test]
 async fn test_callback_project_redirect_url() {
     let state = create_test_app_state();
