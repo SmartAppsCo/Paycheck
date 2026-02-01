@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [0.6.0] - 2026-02-01
+
+### Added
+
+- **Expanded license update API**: `PUT /orgs/.../licenses/{id}` now supports updating `customer_id`, `expires_at`, and `updates_expires_at`
+  - Nullable fields can be explicitly set to null via `Option<Option<T>>` pattern
+- **Optional activation code prefix**: Server accepts both `PREFIX-XXXX-XXXX` and bare `XXXX-XXXX` formats
+  - Bare codes get project prefix prepended before hashing (no collision risk)
+  - SDKs validate both formats before making network requests
+  - Allows apps to display prefix as a visual hint without requiring user input
+
+### Changed
+
+- **Breaking (Rust SDK)**: Refactored to sync-first for desktop app compatibility
+  - Replaced async `reqwest` + `tokio` with sync `ureq` (no async runtime required)
+  - Removed `MemoryStorage` — desktop apps should use persistent file storage
+  - Constructor now takes explicit `storage_dir` path instead of app name
+  - Auto-creates storage directory if it doesn't exist
+  - Split API: `new()` for defaults, `with_options()` for custom configuration
+  - Simplified TLS feature flags: `rustls-tls` (default) or `native-tls`
+- **Breaking**: License update endpoint changed from `PATCH` to `PUT` for consistency
+- Audit action renamed: `UpdateLicenseEmail` → `UpdateLicense`
+
+
 ## [0.5.0] - 2026-02-01
 
 ### Added
