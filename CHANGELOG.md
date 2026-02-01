@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [0.6.1] - 2026-02-01
+
+### Changed
+
+- **SDKs normalize activation codes**: Non-alphanumeric characters (backticks, dots, underscores, etc.) are stripped before validation
+  - Handles messy copy-paste from emails gracefully (e.g., `` `C9MA-JUFF` `` → `C9MA-JUFF`)
+  - Multiple separators collapsed into single dashes
+- **Project prefix validation**: `license_key_prefix` must contain only alphanumeric characters
+  - Ensures SDK normalization works correctly (non-alphanumeric chars are treated as separators)
+
+### Fixed
+
+- Email template uses `<span>` instead of `<code>` to prevent some email clients from adding backticks when copying activation codes
+
+
 ## [0.6.0] - 2026-02-01
 
 ### Added
