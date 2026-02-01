@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [0.5.0] - 2026-02-01
+
+### Added
+
+- **Named service configs**: Reusable config pool at the org level with user-friendly names
+  - New CRUD endpoints: `GET/POST /orgs/{org_id}/service-configs`, `GET/PUT/DELETE /orgs/{org_id}/service-configs/{id}`
+  - Configs have `name`, `category` (payment/email), and `provider` (stripe/lemonsqueezy/resend)
+  - Configs can be shared across projects and products via FK references
+- **Three-level config inheritance**: Product → Project → Org for both payment and email configs
+  - `payment_config_id` and `email_config_id` fields on organizations, projects, and products
+  - Lookup functions check product first, then project, then org
+  - `ConfigSource` enum indicates where the effective config came from
+- **Cancel URL support**: Payment checkout cancel redirects to project's `redirect_url` with `?status=canceled` query parameter
+- Database migration 002 for existing databases (adds new columns, migrates existing configs)
+
+### Changed
+
+- **Breaking**: Service configs now use named configs instead of scope-based configs
+  - Old `ServiceScope` enum removed; configs are now org-owned with FK references
+  - `stripe_config`/`ls_config`/`resend_api_key` fields in API replaced with `payment_config_id`/`email_config_id`
+- **Breaking**: `get_effective_email_config()` now requires a `product` parameter for 3-level lookup
+- **Breaking**: Organization model no longer stores payment credentials directly
+  - Use `payment_config_id` and `email_config_id` to reference service configs
+- Provider link documentation clarified to distinguish from service configs (provider links map products to payment provider price IDs)
+
+
 ## [0.4.0] - 2026-01-20
 
 ### Added
