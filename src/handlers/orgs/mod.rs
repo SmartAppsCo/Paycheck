@@ -60,6 +60,11 @@ pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<App
         )
         .route("/orgs/{org_id}/projects", post(create_project))
         .route("/orgs/{org_id}/projects", get(list_projects))
+        // Project restore (in org_routes because deleted projects fail project_auth middleware)
+        .route(
+            "/orgs/{org_id}/projects/{project_id}/restore",
+            post(restore_project),
+        )
         // Service configs (named configs pool at org level)
         .route(
             "/orgs/{org_id}/service-configs",
@@ -91,10 +96,6 @@ pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<App
         .route(
             "/orgs/{org_id}/projects/{project_id}",
             delete(delete_project),
-        )
-        .route(
-            "/orgs/{org_id}/projects/{project_id}/restore",
-            post(restore_project),
         )
         // Project members
         .route(

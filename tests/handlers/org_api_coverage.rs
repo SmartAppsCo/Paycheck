@@ -350,11 +350,76 @@ mod license_filter_tests {
 mod restore_tests {
     use super::*;
 
-    // NOTE: test_restore_project_restores_hierarchy is NOT included here because
-    // the org_member_project_auth middleware validates project existence before
-    // the handler runs, which fails for deleted projects. The project restore
-    // functionality is tested directly in tests/db/soft_delete.rs instead.
-    // See src/middleware/org_auth.rs:596 for the validation that causes this.
+    /// Test restoring a soft-deleted project.
+    ///
+    /// Use case: Admin accidentally deletes a production project while trying
+    /// to clean up test projects. They need to restore it along with all its
+    /// products and licenses before customers notice.
+    #[tokio::test]
+    async fn test_restore_project_restores_hierarchy() {
+        let (app, state) = org_app();
+        let master_key = test_master_key();
+
+        let org_id: String;
+        let project_id: String;
+        let api_key: String;
+
+        {
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&conn, "Test Org");
+            let (_user, _member, key) =
+                create_test_org_member(&mut conn, &org.id, "admin@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&conn, &org.id, "Production App", &master_key);
+            let _product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+            // Soft-delete the project (simulating accidental deletion)
+            queries::soft_delete_project(&conn, &project.id).unwrap();
+
+            org_id = org.id;
+            project_id = project.id;
+            api_key = key;
+        }
+
+        // Verify project is deleted
+        {
+            let conn = state.db.get().unwrap();
+            let project = queries::get_project_by_id(&conn, &project_id).unwrap();
+            assert!(
+                project.is_none(),
+                "Project should not be visible after soft delete"
+            );
+        }
+
+        // Restore the project
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/orgs/{}/projects/{}/restore",
+                        org_id, project_id
+                    ))
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(json!({"force": false}).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 200, "Restore should return 200 OK");
+
+        // Verify project is restored
+        {
+            let conn = state.db.get().unwrap();
+            let project = queries::get_project_by_id(&conn, &project_id).unwrap();
+            assert!(project.is_some(), "Project should be visible after restore");
+            assert!(
+                project.unwrap().deleted_at.is_none(),
+                "Project deleted_at should be cleared"
+            );
+        }
+    }
 
     /// Test restoring a soft-deleted license.
     ///
