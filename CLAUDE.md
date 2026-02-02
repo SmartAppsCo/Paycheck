@@ -64,6 +64,7 @@ Users (identity - source of truth for email/name)
 Organizations (customers - indie devs, companies)
 ├── Org Members (owner, admin, member roles)
 ├── Payment Config (Stripe/LemonSqueezy keys - shared across all projects)
+├── Transactions (revenue tracking - amounts, currency, discounts, tax)
 └── Projects (each software product)
     ├── Project Members (admin, view - for "member" role org members)
     ├── Products (pricing tiers: free, pro, enterprise)
@@ -115,7 +116,7 @@ src/
 │   ├── schema.rs     # SQLite schema
 │   ├── queries.rs    # CRUD operations
 │   └── from_row.rs   # SQLite row parsing helpers
-├── models/           # Data models (user, operator, org, project, product, license, device, api_key)
+├── models/           # Data models (user, operator, org, project, product, license, device, api_key, transaction)
 ├── jwt/
 │   ├── claims.rs     # LicenseClaims struct
 │   └── signing.rs    # Ed25519 key generation & JWT ops
@@ -202,6 +203,12 @@ src/
 | POST | `/orgs/{org_id}/projects/{id}/licenses/{license_id}/revoke` | Revoke license |
 | POST | `/orgs/{org_id}/projects/{id}/licenses/{license_id}/send-code` | Generate activation code |
 | DELETE | `/orgs/{org_id}/projects/{id}/licenses/{license_id}/devices/{device_id}` | Remote deactivation |
+| GET | `/orgs/{org_id}/transactions` | List org transactions (with filters) |
+| GET | `/orgs/{org_id}/transactions/stats` | Aggregate revenue stats for org |
+| GET | `/orgs/{org_id}/projects/{id}/transactions` | List project transactions |
+| GET | `/orgs/{org_id}/projects/{id}/transactions/stats` | Aggregate revenue stats for project |
+| GET | `/orgs/{org_id}/projects/{id}/transactions/{txn_id}` | Get transaction details |
+| GET | `/orgs/{org_id}/projects/{id}/licenses/{license_id}/transactions` | List license transactions |
 
 #### Org Member API Keys
 
@@ -529,6 +536,33 @@ POST /orgs/{org_id}/projects
 2. System looks up license by email hash, creates activation code (30 min TTL)
 3. Code delivered via configured method (Resend email, webhook, or admin API)
 4. User activates: `POST /redeem` with code, device_id, device_type in JSON body
+
+## Transaction Tracking
+
+Transactions are recorded separately from licenses for revenue analytics. Created automatically from Stripe/LemonSqueezy webhooks.
+
+**Transaction fields:**
+- `amount_total` / `amount_subtotal` / `amount_tax` / `amount_discount` (in cents)
+- `currency` (ISO 4217 code)
+- `transaction_type`: `purchase`, `renewal`, `refund`
+- `payment_provider`: `stripe` or `lemonsqueezy`
+- `payment_provider_id` / `payment_provider_order_id`
+- `discount_code` (fetched from Stripe API after webhook)
+- `country` (customer billing country)
+- `test_mode` (boolean for test transactions)
+
+**Query filters:**
+- `product_id` - Filter by specific product
+- `transaction_type` - Filter by type (purchase/renewal/refund)
+- `payment_provider` - Filter by provider
+- `start_date` / `end_date` - Unix timestamps for date range
+- `test_mode` - Filter test vs live transactions
+- `limit` / `offset` - Pagination (max 100 per page)
+
+**Stats endpoint returns:**
+- `total_transactions`, `total_revenue`, `total_refunds`, `net_revenue`
+- `average_transaction_value`
+- `transactions_by_type` breakdown
 
 ## Bruno API Collection
 
