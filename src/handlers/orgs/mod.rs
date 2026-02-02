@@ -7,6 +7,7 @@ mod products;
 mod project_members;
 mod projects;
 mod service_configs;
+mod transactions;
 
 pub use api_keys::*;
 pub use audit_logs::*;
@@ -17,6 +18,7 @@ pub use products::*;
 pub use project_members::*;
 pub use projects::*;
 pub use service_configs::*;
+pub use transactions::*;
 
 use axum::{
     Router, middleware,
@@ -71,6 +73,12 @@ pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<App
         .route("/orgs/{org_id}/audit-logs", get(query_org_audit_logs))
         // Payment provider config (masked view, admin only)
         .route("/orgs/{org_id}/payment-provider", get(get_payment_config))
+        // Transactions (org-level aggregate view)
+        .route("/orgs/{org_id}/transactions", get(list_org_transactions))
+        .route(
+            "/orgs/{org_id}/transactions/stats",
+            get(get_org_transaction_stats),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             org_member_auth,
@@ -188,6 +196,24 @@ pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<App
         .route(
             "/orgs/{org_id}/projects/{project_id}/licenses/{license_id}/devices/{device_id}",
             delete(deactivate_device_admin),
+        )
+        // Transactions for a license
+        .route(
+            "/orgs/{org_id}/projects/{project_id}/licenses/{license_id}/transactions",
+            get(list_license_transactions),
+        )
+        // Transactions (project-level)
+        .route(
+            "/orgs/{org_id}/projects/{project_id}/transactions",
+            get(list_project_transactions),
+        )
+        .route(
+            "/orgs/{org_id}/projects/{project_id}/transactions/stats",
+            get(get_project_transaction_stats),
+        )
+        .route(
+            "/orgs/{org_id}/projects/{project_id}/transactions/{transaction_id}",
+            get(get_transaction),
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),

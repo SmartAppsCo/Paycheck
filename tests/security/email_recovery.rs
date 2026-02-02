@@ -49,10 +49,6 @@ mod email_hash_lookup {
                 customer_id: Some("test-customer".to_string()),
                 expires_at: Some(future_timestamp(ONE_YEAR)),
                 updates_expires_at: Some(future_timestamp(ONE_YEAR)),
-                payment_provider: None,
-                payment_provider_customer_id: None,
-                payment_provider_subscription_id: None,
-                payment_provider_order_id: None,
             };
             let _license =
                 queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
@@ -120,10 +116,6 @@ mod email_hash_lookup {
                 customer_id: Some("test-customer".to_string()),
                 expires_at: Some(future_timestamp(ONE_YEAR)),
                 updates_expires_at: Some(future_timestamp(ONE_YEAR)),
-                payment_provider: None,
-                payment_provider_customer_id: None,
-                payment_provider_subscription_id: None,
-                payment_provider_order_id: None,
             };
             let _license =
                 queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
@@ -200,10 +192,6 @@ mod email_hash_lookup {
                     customer_id: Some("test-customer".to_string()),
                     expires_at: Some(future_timestamp(ONE_YEAR)),
                     updates_expires_at: Some(future_timestamp(ONE_YEAR)),
-                    payment_provider: None,
-                    payment_provider_customer_id: None,
-                    payment_provider_subscription_id: None,
-                    payment_provider_order_id: None,
                 };
                 let _license =
                     queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
@@ -266,10 +254,6 @@ mod email_hash_lookup {
                 customer_id: Some("test-customer".to_string()),
                 expires_at: Some(future_timestamp(ONE_YEAR)),
                 updates_expires_at: Some(future_timestamp(ONE_YEAR)),
-                payment_provider: None,
-                payment_provider_customer_id: None,
-                payment_provider_subscription_id: None,
-                payment_provider_order_id: None,
             };
             let license = queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
             license_id = license.id.clone();
@@ -733,10 +717,6 @@ mod recovery_edge_cases {
                 customer_id: Some("test-customer".to_string()),
                 expires_at: Some(future_timestamp(ONE_YEAR)),
                 updates_expires_at: Some(future_timestamp(ONE_YEAR)),
-                payment_provider: None,
-                payment_provider_customer_id: None,
-                payment_provider_subscription_id: None,
-                payment_provider_order_id: None,
             };
             let license = queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
 
@@ -810,10 +790,6 @@ mod recovery_edge_cases {
                 customer_id: Some("test-customer".to_string()),
                 expires_at: Some(future_timestamp(ONE_YEAR)),
                 updates_expires_at: Some(future_timestamp(ONE_YEAR)),
-                payment_provider: None,
-                payment_provider_customer_id: None,
-                payment_provider_subscription_id: None,
-                payment_provider_order_id: None,
             };
             let license = queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
 
@@ -886,10 +862,6 @@ mod recovery_edge_cases {
                 customer_id: Some("test-customer".to_string()),
                 expires_at: Some(past_timestamp(ONE_DAY)), // Expired 1 day ago
                 updates_expires_at: Some(past_timestamp(ONE_DAY)),
-                payment_provider: None,
-                payment_provider_customer_id: None,
-                payment_provider_subscription_id: None,
-                payment_provider_order_id: None,
             };
             let _license =
                 queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
@@ -1032,10 +1004,6 @@ mod recovery_edge_cases {
                 customer_id: Some("test-customer".to_string()),
                 expires_at: Some(future_timestamp(ONE_YEAR)),
                 updates_expires_at: Some(future_timestamp(ONE_YEAR)),
-                payment_provider: None,
-                payment_provider_customer_id: None,
-                payment_provider_subscription_id: None,
-                payment_provider_order_id: None,
             };
             let _license =
                 queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();

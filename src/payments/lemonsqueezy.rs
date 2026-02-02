@@ -230,6 +230,24 @@ pub struct LemonSqueezyOrderAttributes {
     pub customer_id: Option<i64>,
     pub user_email: Option<String>,
     pub first_order_item: Option<LemonSqueezyOrderItem>,
+    /// Currency code (e.g., "USD", "EUR")
+    pub currency: Option<String>,
+    /// Subtotal before discounts and tax (in cents)
+    pub subtotal: Option<i64>,
+    /// Total discount amount (in cents)
+    pub discount_total: Option<i64>,
+    /// Tax amount (in cents)
+    pub tax: Option<i64>,
+    /// Final total amount (in cents)
+    pub total: Option<i64>,
+    /// Whether tax is included in subtotal
+    pub tax_inclusive: Option<bool>,
+    /// Test mode indicator
+    pub test_mode: Option<bool>,
+    /// Discount code used (if any)
+    pub discount_code: Option<String>,
+    /// Customer country code (e.g., "US", "GB")
+    pub user_country: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -80,7 +80,11 @@ pub const PRODUCT_COLS: &str = "id, project_id, name, tier, license_exp_days, up
 pub const PROVIDER_LINK_COLS: &str = "id, product_id, provider, linked_id, created_at, updated_at";
 
 /// Columns for licenses table (no encryption - email_hash instead of key)
-pub const LICENSE_COLS: &str = "id, email_hash, project_id, product_id, customer_id, activation_count, revoked, created_at, expires_at, updates_expires_at, payment_provider, payment_provider_customer_id, payment_provider_subscription_id, payment_provider_order_id, deleted_at, deleted_cascade_depth";
+/// Payment provider info moved to transactions table
+pub const LICENSE_COLS: &str = "id, email_hash, project_id, product_id, customer_id, activation_count, revoked, created_at, expires_at, updates_expires_at, deleted_at, deleted_cascade_depth";
+
+/// Columns for transactions table (payment events)
+pub const TRANSACTION_COLS: &str = "id, license_id, project_id, product_id, org_id, payment_provider, provider_customer_id, provider_subscription_id, provider_order_id, currency, subtotal_cents, discount_cents, net_cents, tax_cents, total_cents, discount_code, tax_inclusive, customer_country, transaction_type, parent_transaction_id, is_subscription, test_mode, created_at";
 
 pub const DEVICE_COLS: &str =
     "id, license_id, device_id, device_type, name, jti, activated_at, last_seen_at";
@@ -308,12 +312,47 @@ impl FromRow for License {
             created_at: row.get(7)?,
             expires_at: row.get(8)?,
             updates_expires_at: row.get(9)?,
-            payment_provider: row.get(10)?,
-            payment_provider_customer_id: row.get(11)?,
-            payment_provider_subscription_id: row.get(12)?,
-            payment_provider_order_id: row.get(13)?,
-            deleted_at: row.get(14)?,
-            deleted_cascade_depth: row.get(15)?,
+            deleted_at: row.get(10)?,
+            deleted_cascade_depth: row.get(11)?,
+        })
+    }
+}
+
+impl FromRow for Transaction {
+    fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        let transaction_type_str: String = row.get(18)?;
+        let transaction_type = TransactionType::from_str(&transaction_type_str).ok_or_else(|| {
+            rusqlite::Error::InvalidColumnType(
+                18,
+                "transaction_type".to_string(),
+                rusqlite::types::Type::Text,
+            )
+        })?;
+
+        Ok(Transaction {
+            id: row.get(0)?,
+            license_id: row.get(1)?,
+            project_id: row.get(2)?,
+            product_id: row.get(3)?,
+            org_id: row.get(4)?,
+            payment_provider: row.get(5)?,
+            provider_customer_id: row.get(6)?,
+            provider_subscription_id: row.get(7)?,
+            provider_order_id: row.get(8)?,
+            currency: row.get(9)?,
+            subtotal_cents: row.get(10)?,
+            discount_cents: row.get(11)?,
+            net_cents: row.get(12)?,
+            tax_cents: row.get(13)?,
+            total_cents: row.get(14)?,
+            discount_code: row.get(15)?,
+            tax_inclusive: row.get::<_, Option<i32>>(16)?.map(|v| v != 0),
+            customer_country: row.get(17)?,
+            transaction_type,
+            parent_transaction_id: row.get(19)?,
+            is_subscription: row.get::<_, i32>(20)? != 0,
+            test_mode: row.get::<_, i32>(21)? != 0,
+            created_at: row.get(22)?,
         })
     }
 }

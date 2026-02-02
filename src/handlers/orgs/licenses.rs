@@ -230,10 +230,6 @@ pub async fn create_license(
                 customer_id: body.customer_id.clone(),
                 expires_at: exps.license_exp,
                 updates_expires_at: exps.updates_exp,
-                payment_provider: None,
-                payment_provider_customer_id: None,
-                payment_provider_subscription_id: None,
-                payment_provider_order_id: None,
             },
         )?;
 

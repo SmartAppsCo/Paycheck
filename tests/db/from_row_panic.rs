@@ -136,10 +136,6 @@ fn setup_test_db_no_check_constraints() -> Connection {
             created_at INTEGER NOT NULL,
             expires_at INTEGER,
             updates_expires_at INTEGER,
-            payment_provider TEXT,
-            payment_provider_customer_id TEXT,
-            payment_provider_subscription_id TEXT,
-            payment_provider_order_id TEXT,
             deleted_at INTEGER,
             deleted_cascade_depth INTEGER
         );

@@ -1,5 +1,5 @@
 use chrono::Utc;
-use rusqlite::{Connection, OptionalExtension, params, types::Value};
+use rusqlite::{Connection, OptionalExtension, ToSql, params, types::Value};
 use uuid::Uuid;
 
 use crate::crypto::{MasterKey, hash_secret};
@@ -7,10 +7,10 @@ use crate::error::{AppError, Result};
 use crate::models::*;
 
 use super::from_row::{
-    ACTIVATION_CODE_COLS, API_KEY_COLS, API_KEY_SCOPE_COLS, DEVICE_COLS, LICENSE_COLS,
+    ACTIVATION_CODE_COLS, API_KEY_COLS, API_KEY_SCOPE_COLS, DEVICE_COLS, FromRow, LICENSE_COLS,
     ORG_MEMBER_COLS, ORG_MEMBER_WITH_USER_COLS, ORGANIZATION_COLS, PAYMENT_SESSION_COLS,
     PRODUCT_COLS, PROJECT_COLS, PROJECT_MEMBER_COLS, PROVIDER_LINK_COLS, SERVICE_CONFIG_COLS,
-    USER_COLS, query_all, query_one,
+    TRANSACTION_COLS, USER_COLS, query_all, query_one,
 };
 
 fn now() -> i64 {
@@ -2960,6 +2960,7 @@ pub fn generate_activation_code(prefix: &str) -> String {
 }
 
 /// Create a new license (no user-facing key - email hash is the identity)
+/// Payment provider info is stored separately in the transactions table.
 pub fn create_license(
     conn: &Connection,
     project_id: &str,
@@ -2967,13 +2968,11 @@ pub fn create_license(
     input: &CreateLicense,
 ) -> Result<License> {
     // Validate that at least one identifier is present for license recovery
-    let has_identifier = input.email_hash.is_some()
-        || input.customer_id.is_some()
-        || input.payment_provider_order_id.is_some();
+    let has_identifier = input.email_hash.is_some() || input.customer_id.is_some();
 
     if !has_identifier {
         return Err(AppError::BadRequest(
-            "License must have at least one identifier: email, customer_id, or payment_provider_order_id".into(),
+            "License must have at least one identifier: email or customer_id".into(),
         ));
     }
 
@@ -2981,9 +2980,9 @@ pub fn create_license(
     let now = now();
 
     conn.execute(
-        "INSERT INTO licenses (id, email_hash, project_id, product_id, customer_id, activation_count, revoked, created_at, expires_at, updates_expires_at, payment_provider, payment_provider_customer_id, payment_provider_subscription_id, payment_provider_order_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-        params![&id, &input.email_hash, project_id, product_id, &input.customer_id, now, input.expires_at, input.updates_expires_at, &input.payment_provider, &input.payment_provider_customer_id, &input.payment_provider_subscription_id, &input.payment_provider_order_id],
+        "INSERT INTO licenses (id, email_hash, project_id, product_id, customer_id, activation_count, revoked, created_at, expires_at, updates_expires_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?7, ?8)",
+        params![&id, &input.email_hash, project_id, product_id, &input.customer_id, now, input.expires_at, input.updates_expires_at],
     )?;
 
     Ok(License {
@@ -2997,10 +2996,6 @@ pub fn create_license(
         created_at: now,
         expires_at: input.expires_at,
         updates_expires_at: input.updates_expires_at,
-        payment_provider: input.payment_provider.clone(),
-        payment_provider_customer_id: input.payment_provider_customer_id.clone(),
-        payment_provider_subscription_id: input.payment_provider_subscription_id.clone(),
-        payment_provider_order_id: input.payment_provider_order_id.clone(),
         deleted_at: None,
         deleted_cascade_depth: None,
     })
@@ -3091,14 +3086,10 @@ pub fn get_all_licenses_by_email_hash_for_admin_paginated(
                     created_at: row.get(7)?,
                     expires_at: row.get(8)?,
                     updates_expires_at: row.get(9)?,
-                    payment_provider: row.get(10)?,
-                    payment_provider_customer_id: row.get(11)?,
-                    payment_provider_subscription_id: row.get(12)?,
-                    payment_provider_order_id: row.get(13)?,
-                    deleted_at: row.get(14)?,
-                    deleted_cascade_depth: row.get(15)?,
+                    deleted_at: row.get(10)?,
+                    deleted_cascade_depth: row.get(11)?,
                 },
-                product_name: row.get(16)?,
+                product_name: row.get(12)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -3143,14 +3134,10 @@ pub fn list_licenses_for_project_paginated(
                     created_at: row.get(7)?,
                     expires_at: row.get(8)?,
                     updates_expires_at: row.get(9)?,
-                    payment_provider: row.get(10)?,
-                    payment_provider_customer_id: row.get(11)?,
-                    payment_provider_subscription_id: row.get(12)?,
-                    payment_provider_order_id: row.get(13)?,
-                    deleted_at: row.get(14)?,
-                    deleted_cascade_depth: row.get(15)?,
+                    deleted_at: row.get(10)?,
+                    deleted_cascade_depth: row.get(11)?,
                 },
-                product_name: row.get(16)?,
+                product_name: row.get(12)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -3185,14 +3172,10 @@ pub fn list_licenses_for_project(
                     created_at: row.get(7)?,
                     expires_at: row.get(8)?,
                     updates_expires_at: row.get(9)?,
-                    payment_provider: row.get(10)?,
-                    payment_provider_customer_id: row.get(11)?,
-                    payment_provider_subscription_id: row.get(12)?,
-                    payment_provider_order_id: row.get(13)?,
-                    deleted_at: row.get(14)?,
-                    deleted_cascade_depth: row.get(15)?,
+                    deleted_at: row.get(10)?,
+                    deleted_cascade_depth: row.get(11)?,
                 },
-                product_name: row.get(16)?,
+                product_name: row.get(12)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -3272,19 +3255,22 @@ pub fn is_jti_revoked(conn: &Connection, jti: &str) -> Result<bool> {
 }
 
 /// Look up licenses by payment provider order ID (for admin support via receipt).
+/// Queries through the transactions table to find the associated license.
 /// Includes expired and revoked licenses so support can see full history.
 /// Note: Excludes soft-deleted licenses.
 pub fn get_licenses_by_payment_order_id_paginated(
     conn: &Connection,
     project_id: &str,
-    payment_provider_order_id: &str,
+    provider_order_id: &str,
     limit: i64,
     offset: i64,
 ) -> Result<(Vec<LicenseWithProduct>, i64)> {
-    // Get total count
+    // Get total count via transactions table
     let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM licenses WHERE project_id = ?1 AND payment_provider_order_id = ?2 AND deleted_at IS NULL",
-        params![project_id, payment_provider_order_id],
+        "SELECT COUNT(DISTINCT l.id) FROM licenses l
+         JOIN transactions t ON l.id = t.license_id
+         WHERE l.project_id = ?1 AND t.provider_order_id = ?2 AND l.deleted_at IS NULL",
+        params![project_id, provider_order_id],
         |row| row.get(0),
     )?;
 
@@ -3292,7 +3278,9 @@ pub fn get_licenses_by_payment_order_id_paginated(
         "SELECT l.{}, p.name
          FROM licenses l
          JOIN products p ON l.product_id = p.id
-         WHERE l.project_id = ?1 AND l.payment_provider_order_id = ?2 AND l.deleted_at IS NULL
+         JOIN transactions t ON l.id = t.license_id
+         WHERE l.project_id = ?1 AND t.provider_order_id = ?2 AND l.deleted_at IS NULL
+         GROUP BY l.id
          ORDER BY l.created_at DESC
          LIMIT ?3 OFFSET ?4",
         LICENSE_COLS.replace(", ", ", l.")
@@ -3300,7 +3288,7 @@ pub fn get_licenses_by_payment_order_id_paginated(
 
     let rows = stmt
         .query_map(
-            params![project_id, payment_provider_order_id, limit, offset],
+            params![project_id, provider_order_id, limit, offset],
             |row| {
                 Ok(LicenseWithProduct {
                     license: License {
@@ -3314,14 +3302,10 @@ pub fn get_licenses_by_payment_order_id_paginated(
                         created_at: row.get(7)?,
                         expires_at: row.get(8)?,
                         updates_expires_at: row.get(9)?,
-                        payment_provider: row.get(10)?,
-                        payment_provider_customer_id: row.get(11)?,
-                        payment_provider_subscription_id: row.get(12)?,
-                        payment_provider_order_id: row.get(13)?,
-                        deleted_at: row.get(14)?,
-                        deleted_cascade_depth: row.get(15)?,
+                        deleted_at: row.get(10)?,
+                        deleted_cascade_depth: row.get(11)?,
                     },
-                    product_name: row.get(16)?,
+                    product_name: row.get(12)?,
                 })
             },
         )?
@@ -3370,14 +3354,10 @@ pub fn get_licenses_by_customer_id_paginated(
                     created_at: row.get(7)?,
                     expires_at: row.get(8)?,
                     updates_expires_at: row.get(9)?,
-                    payment_provider: row.get(10)?,
-                    payment_provider_customer_id: row.get(11)?,
-                    payment_provider_subscription_id: row.get(12)?,
-                    payment_provider_order_id: row.get(13)?,
-                    deleted_at: row.get(14)?,
-                    deleted_cascade_depth: row.get(15)?,
+                    deleted_at: row.get(10)?,
+                    deleted_cascade_depth: row.get(11)?,
                 },
-                product_name: row.get(16)?,
+                product_name: row.get(12)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -3385,7 +3365,8 @@ pub fn get_licenses_by_customer_id_paginated(
     Ok((rows, total))
 }
 
-/// Find a license by payment provider and subscription ID (for subscription renewals)
+/// Find a license by payment provider and subscription ID (for subscription renewals).
+/// Queries through the transactions table since payment info is stored there.
 pub fn get_license_by_subscription(
     conn: &Connection,
     provider: &str,
@@ -3394,8 +3375,11 @@ pub fn get_license_by_subscription(
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM licenses WHERE payment_provider = ?1 AND payment_provider_subscription_id = ?2 AND deleted_at IS NULL",
-            LICENSE_COLS
+            "SELECT l.{} FROM licenses l
+             JOIN transactions t ON l.id = t.license_id
+             WHERE t.payment_provider = ?1 AND t.provider_subscription_id = ?2 AND l.deleted_at IS NULL
+             ORDER BY t.created_at DESC LIMIT 1",
+            LICENSE_COLS.replace(", ", ", l.")
         ),
         &[&provider, &subscription_id],
     )
@@ -3972,4 +3956,317 @@ pub fn set_system_config(conn: &Connection, key: &str, value: &[u8]) -> Result<(
         rusqlite::params![key, value, now, now],
     )?;
     Ok(())
+}
+
+// ============ Transactions ============
+
+/// Create a new transaction record (payment event).
+pub fn create_transaction(conn: &Connection, input: &CreateTransaction) -> Result<Transaction> {
+    let id = gen_id();
+    let now = now();
+
+    conn.execute(
+        "INSERT INTO transactions (
+            id, license_id, project_id, product_id, org_id,
+            payment_provider, provider_customer_id, provider_subscription_id, provider_order_id,
+            currency, subtotal_cents, discount_cents, net_cents, tax_cents, total_cents,
+            discount_code, tax_inclusive, customer_country,
+            transaction_type, parent_transaction_id, is_subscription,
+            test_mode, created_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5,
+            ?6, ?7, ?8, ?9,
+            ?10, ?11, ?12, ?13, ?14, ?15,
+            ?16, ?17, ?18,
+            ?19, ?20, ?21,
+            ?22, ?23
+        )",
+        params![
+            &id,
+            &input.license_id,
+            &input.project_id,
+            &input.product_id,
+            &input.org_id,
+            &input.payment_provider,
+            &input.provider_customer_id,
+            &input.provider_subscription_id,
+            &input.provider_order_id,
+            &input.currency,
+            input.subtotal_cents,
+            input.discount_cents,
+            input.net_cents,
+            input.tax_cents,
+            input.total_cents,
+            &input.discount_code,
+            input.tax_inclusive.map(|b| if b { 1 } else { 0 }),
+            &input.customer_country,
+            input.transaction_type.as_str(),
+            &input.parent_transaction_id,
+            if input.is_subscription { 1 } else { 0 },
+            if input.test_mode { 1 } else { 0 },
+            now,
+        ],
+    )?;
+
+    Ok(Transaction {
+        id,
+        license_id: input.license_id.clone(),
+        project_id: input.project_id.clone(),
+        product_id: input.product_id.clone(),
+        org_id: input.org_id.clone(),
+        payment_provider: input.payment_provider.clone(),
+        provider_customer_id: input.provider_customer_id.clone(),
+        provider_subscription_id: input.provider_subscription_id.clone(),
+        provider_order_id: input.provider_order_id.clone(),
+        currency: input.currency.clone(),
+        subtotal_cents: input.subtotal_cents,
+        discount_cents: input.discount_cents,
+        net_cents: input.net_cents,
+        tax_cents: input.tax_cents,
+        total_cents: input.total_cents,
+        discount_code: input.discount_code.clone(),
+        tax_inclusive: input.tax_inclusive,
+        customer_country: input.customer_country.clone(),
+        transaction_type: input.transaction_type,
+        parent_transaction_id: input.parent_transaction_id.clone(),
+        is_subscription: input.is_subscription,
+        test_mode: input.test_mode,
+        created_at: now,
+    })
+}
+
+/// Get a transaction by ID.
+pub fn get_transaction(conn: &Connection, id: &str) -> Result<Option<Transaction>> {
+    query_one(
+        conn,
+        &format!("SELECT {} FROM transactions WHERE id = ?1", TRANSACTION_COLS),
+        &[&id],
+    )
+}
+
+/// Update a transaction's discount_code by provider_order_id.
+/// Used by the enricher to add discount codes fetched from payment provider APIs.
+pub fn update_transaction_discount_code(
+    conn: &Connection,
+    provider_order_id: &str,
+    discount_code: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE transactions SET discount_code = ?1 WHERE provider_order_id = ?2",
+        params![discount_code, provider_order_id],
+    )?;
+    Ok(())
+}
+
+/// Get all transactions for a license, ordered by creation time.
+pub fn get_transactions_by_license(conn: &Connection, license_id: &str) -> Result<Vec<Transaction>> {
+    query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM transactions WHERE license_id = ?1 ORDER BY created_at ASC",
+            TRANSACTION_COLS
+        ),
+        &[&license_id],
+    )
+}
+
+/// Find a transaction by provider order ID (for idempotency checks).
+pub fn get_transaction_by_provider_order(
+    conn: &Connection,
+    payment_provider: &str,
+    provider_order_id: &str,
+) -> Result<Option<Transaction>> {
+    query_one(
+        conn,
+        &format!(
+            "SELECT {} FROM transactions WHERE payment_provider = ?1 AND provider_order_id = ?2",
+            TRANSACTION_COLS
+        ),
+        &[&payment_provider, &provider_order_id],
+    )
+}
+
+/// Get transactions for a project with pagination.
+pub fn get_transactions_by_project_paginated(
+    conn: &Connection,
+    project_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<Transaction>, i64)> {
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM transactions WHERE project_id = ?1",
+        params![project_id],
+        |row| row.get(0),
+    )?;
+
+    let rows = query_all(
+        conn,
+        &format!(
+            "SELECT {} FROM transactions WHERE project_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            TRANSACTION_COLS
+        ),
+        &[&project_id, &limit, &offset],
+    )?;
+
+    Ok((rows, total))
+}
+
+/// Get transactions for an org with pagination and optional filters.
+pub fn get_transactions_by_org_paginated(
+    conn: &Connection,
+    org_id: &str,
+    filters: &TransactionFilters,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<Transaction>, i64)> {
+    let mut conditions = vec!["org_id = ?1".to_string()];
+    let mut params: Vec<Box<dyn ToSql>> = vec![Box::new(org_id.to_string())];
+    let mut param_idx = 2;
+
+    if let Some(ref project_id) = filters.project_id {
+        conditions.push(format!("project_id = ?{}", param_idx));
+        params.push(Box::new(project_id.clone()));
+        param_idx += 1;
+    }
+
+    if let Some(ref product_id) = filters.product_id {
+        conditions.push(format!("product_id = ?{}", param_idx));
+        params.push(Box::new(product_id.clone()));
+        param_idx += 1;
+    }
+
+    if let Some(ref license_id) = filters.license_id {
+        conditions.push(format!("license_id = ?{}", param_idx));
+        params.push(Box::new(license_id.clone()));
+        param_idx += 1;
+    }
+
+    if let Some(ref tx_type) = filters.transaction_type {
+        conditions.push(format!("transaction_type = ?{}", param_idx));
+        params.push(Box::new(tx_type.as_str().to_string()));
+        param_idx += 1;
+    }
+
+    if let Some(ref provider) = filters.payment_provider {
+        conditions.push(format!("payment_provider = ?{}", param_idx));
+        params.push(Box::new(provider.clone()));
+        param_idx += 1;
+    }
+
+    if let Some(start) = filters.start_date {
+        conditions.push(format!("created_at >= ?{}", param_idx));
+        params.push(Box::new(start));
+        param_idx += 1;
+    }
+
+    if let Some(end) = filters.end_date {
+        conditions.push(format!("created_at <= ?{}", param_idx));
+        params.push(Box::new(end));
+        param_idx += 1;
+    }
+
+    if let Some(test_mode) = filters.test_mode {
+        conditions.push(format!("test_mode = ?{}", param_idx));
+        params.push(Box::new(if test_mode { 1i32 } else { 0i32 }));
+        param_idx += 1;
+    }
+
+    let where_clause = conditions.join(" AND ");
+
+    // Get count
+    let count_sql = format!("SELECT COUNT(*) FROM transactions WHERE {}", where_clause);
+    let params_refs: Vec<&dyn ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let total: i64 = conn.query_row(&count_sql, params_refs.as_slice(), |row| row.get(0))?;
+
+    // Add pagination params
+    params.push(Box::new(limit));
+    params.push(Box::new(offset));
+
+    let query_sql = format!(
+        "SELECT {} FROM transactions WHERE {} ORDER BY created_at DESC LIMIT ?{} OFFSET ?{}",
+        TRANSACTION_COLS, where_clause, param_idx, param_idx + 1
+    );
+
+    let params_refs: Vec<&dyn ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let mut stmt = conn.prepare(&query_sql)?;
+    let rows = stmt
+        .query_map(params_refs.as_slice(), Transaction::from_row)?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok((rows, total))
+}
+
+/// Get aggregate transaction statistics for an org within a date range.
+pub fn get_transaction_stats(
+    conn: &Connection,
+    org_id: &str,
+    project_id: Option<&str>,
+    product_id: Option<&str>,
+    start_date: Option<i64>,
+    end_date: Option<i64>,
+    test_mode: Option<bool>,
+) -> Result<TransactionStats> {
+    let mut conditions = vec!["org_id = ?1".to_string()];
+    let mut params: Vec<Box<dyn ToSql>> = vec![Box::new(org_id.to_string())];
+    let mut param_idx = 2;
+
+    if let Some(pid) = project_id {
+        conditions.push(format!("project_id = ?{}", param_idx));
+        params.push(Box::new(pid.to_string()));
+        param_idx += 1;
+    }
+
+    if let Some(prod_id) = product_id {
+        conditions.push(format!("product_id = ?{}", param_idx));
+        params.push(Box::new(prod_id.to_string()));
+        param_idx += 1;
+    }
+
+    if let Some(start) = start_date {
+        conditions.push(format!("created_at >= ?{}", param_idx));
+        params.push(Box::new(start));
+        param_idx += 1;
+    }
+
+    if let Some(end) = end_date {
+        conditions.push(format!("created_at <= ?{}", param_idx));
+        params.push(Box::new(end));
+        param_idx += 1;
+    }
+
+    if let Some(test) = test_mode {
+        conditions.push(format!("test_mode = ?{}", param_idx));
+        params.push(Box::new(if test { 1i32 } else { 0i32 }));
+    }
+
+    let where_clause = conditions.join(" AND ");
+    let params_refs: Vec<&dyn ToSql> = params.iter().map(|p| p.as_ref()).collect();
+
+    let sql = format!(
+        "SELECT
+            COALESCE(SUM(CASE WHEN transaction_type IN ('purchase', 'renewal') THEN net_cents ELSE 0 END), 0) as gross_revenue,
+            COALESCE(SUM(CASE WHEN transaction_type = 'refund' THEN ABS(net_cents) ELSE 0 END), 0) as refunded,
+            COALESCE(SUM(net_cents), 0) as net_revenue,
+            COALESCE(SUM(CASE WHEN transaction_type IN ('purchase', 'renewal') THEN discount_cents ELSE 0 END), 0) as total_discount,
+            COALESCE(SUM(CASE WHEN transaction_type IN ('purchase', 'renewal') THEN tax_cents ELSE 0 END), 0) as total_tax,
+            COUNT(CASE WHEN transaction_type = 'purchase' THEN 1 END) as purchase_count,
+            COUNT(CASE WHEN transaction_type = 'renewal' THEN 1 END) as renewal_count,
+            COUNT(CASE WHEN transaction_type = 'refund' THEN 1 END) as refund_count
+        FROM transactions WHERE {}",
+        where_clause
+    );
+
+    conn.query_row(&sql, params_refs.as_slice(), |row| {
+        Ok(TransactionStats {
+            gross_revenue_cents: row.get(0)?,
+            refunded_cents: row.get(1)?,
+            net_revenue_cents: row.get(2)?,
+            total_discount_cents: row.get(3)?,
+            total_tax_cents: row.get(4)?,
+            purchase_count: row.get(5)?,
+            renewal_count: row.get(6)?,
+            refund_count: row.get(7)?,
+        })
+    })
+    .map_err(Into::into)
 }

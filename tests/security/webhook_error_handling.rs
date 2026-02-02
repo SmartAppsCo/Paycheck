@@ -111,11 +111,13 @@ async fn test_stripe_webhook_corrupted_config_should_not_return_500() {
                 "payment_status": "paid",
                 "customer": "cus_test",
                 "subscription": "sub_test_123",
+                "customer_details": {
+                    "email": "test@example.com"
+                },
                 "metadata": {
                     "paycheck_session_id": session_id,
                     "project_id": project_id
-                },
-                "customer_email": "test@example.com"
+                }
             }
         }
     });
@@ -188,11 +190,13 @@ async fn test_stripe_webhook_valid_config_works() {
                 "payment_status": "paid",
                 "customer": "cus_test",
                 "subscription": "sub_test_123",
+                "customer_details": {
+                    "email": "test@example.com"
+                },
                 "metadata": {
                     "paycheck_session_id": session_id,
                     "project_id": project_id
-                },
-                "customer_email": "test@example.com"
+                }
             }
         }
     });

@@ -11,6 +11,7 @@ mod product_provider_link;
 mod project;
 mod project_member;
 mod service_config;
+mod transaction;
 mod user;
 
 pub use api_key::*;
@@ -26,4 +27,5 @@ pub use product_provider_link::*;
 pub use project::*;
 pub use project_member::*;
 pub use service_config::*;
+pub use transaction::*;
 pub use user::*;

@@ -13,8 +13,8 @@ use crate::crypto::{EmailHasher, MasterKey};
 use crate::db::{AppState, queries};
 use crate::error::AppError;
 use crate::models::{
-    ActorType, AuditAction, AuditLogNames, CreateLicense, License, Organization, PaymentSession,
-    Product, Project,
+    ActorType, AuditAction, AuditLogNames, CreateLicense, CreateTransaction, License,
+    Organization, PaymentSession, Product, Project, TransactionType,
 };
 use crate::util::{AuditLogBuilder, LicenseExpirations};
 
@@ -70,6 +70,32 @@ pub struct CheckoutData {
     pub subscription_id: Option<String>,
     /// Provider's order/checkout session ID (Stripe: cs_xxx, LemonSqueezy: order ID)
     pub order_id: Option<String>,
+    /// Transaction data extracted from the payment provider
+    pub transaction: Option<CheckoutTransactionData>,
+}
+
+/// Transaction data extracted from payment provider checkout events.
+/// All amounts are in cents.
+#[derive(Debug, Default)]
+pub struct CheckoutTransactionData {
+    /// Currency code (lowercase, e.g., "usd", "eur")
+    pub currency: String,
+    /// Amount before discounts and tax
+    pub subtotal_cents: i64,
+    /// Discount amount applied
+    pub discount_cents: i64,
+    /// Tax amount
+    pub tax_cents: i64,
+    /// Final total charged
+    pub total_cents: i64,
+    /// Whether tax is included in subtotal
+    pub tax_inclusive: Option<bool>,
+    /// Discount/coupon code used
+    pub discount_code: Option<String>,
+    /// Customer's country code (e.g., "US", "GB")
+    pub customer_country: Option<String>,
+    /// Whether this is a test mode transaction
+    pub test_mode: bool,
 }
 
 /// Data extracted from a subscription renewal event.
@@ -131,6 +157,19 @@ pub trait WebhookProvider: Send + Sync {
 
     /// Parse the webhook payload into a provider-agnostic event.
     fn parse_event(&self, body: &Bytes) -> Result<WebhookEvent, WebhookResult>;
+
+    /// Spawn a background task to enrich transaction data after commit.
+    /// Default implementation does nothing. Override to fetch additional data
+    /// from the payment provider API (e.g., discount codes from Stripe).
+    fn spawn_enricher(
+        &self,
+        _state: AppState,
+        _project_id: String,
+        _org_id: String,
+        _provider_order_id: String,
+    ) {
+        // Default: no-op
+    }
 }
 
 /// Process a checkout completion event - creates license only.
@@ -178,6 +217,7 @@ pub fn process_checkout(
     let exps = LicenseExpirations::from_product(product, now);
 
     // Create license (no user-facing key - email hash is the identity)
+    // Payment provider info is stored in the transactions table
     let license = match queries::create_license(
         conn,
         &project.id,
@@ -187,10 +227,6 @@ pub fn process_checkout(
             customer_id: payment_session.customer_id.clone(),
             expires_at: exps.license_exp,
             updates_expires_at: exps.updates_exp,
-            payment_provider: Some(provider.to_string()),
-            payment_provider_customer_id: data.customer_id.clone(),
-            payment_provider_subscription_id: data.subscription_id.clone(),
-            payment_provider_order_id: data.order_id.clone(),
         },
     ) {
         Ok(l) => l,
@@ -202,6 +238,46 @@ pub fn process_checkout(
             );
         }
     };
+
+    // Create transaction record with payment details
+    if let Some(tx_data) = &data.transaction {
+        // Calculate net_cents (subtotal - discount)
+        let net_cents = tx_data.subtotal_cents - tx_data.discount_cents;
+
+        let transaction = CreateTransaction {
+            license_id: Some(license.id.clone()),
+            project_id: project.id.clone(),
+            product_id: Some(payment_session.product_id.clone()),
+            org_id: project.org_id.clone(),
+            payment_provider: provider.to_string(),
+            provider_customer_id: data.customer_id.clone(),
+            provider_subscription_id: data.subscription_id.clone(),
+            provider_order_id: data.order_id.clone().unwrap_or_default(),
+            currency: tx_data.currency.clone(),
+            subtotal_cents: tx_data.subtotal_cents,
+            discount_cents: tx_data.discount_cents,
+            net_cents,
+            tax_cents: tx_data.tax_cents,
+            total_cents: tx_data.total_cents,
+            discount_code: tx_data.discount_code.clone(),
+            tax_inclusive: tx_data.tax_inclusive,
+            customer_country: tx_data.customer_country.clone(),
+            transaction_type: TransactionType::Purchase,
+            parent_transaction_id: None,
+            is_subscription: data.subscription_id.is_some(),
+            test_mode: tx_data.test_mode,
+        };
+
+        if let Err(e) = queries::create_transaction(conn, &transaction) {
+            tracing::error!("Failed to create transaction: {}", e);
+            // Non-fatal - license was already created
+        }
+    } else {
+        tracing::warn!(
+            "No transaction data in checkout for session {} - payment details not recorded",
+            data.session_id
+        );
+    }
 
     // Link license to payment session for efficient callback lookup
     if let Err(e) = queries::set_payment_session_license(conn, &data.session_id, &license.id) {
@@ -438,6 +514,17 @@ async fn handle_checkout<P: WebhookProvider>(
             {
                 tracing::warn!("Failed to write checkout audit log: {}", e);
             }
+        }
+
+        // Spawn enricher to fetch additional data from payment provider API
+        // (e.g., discount codes that aren't in the webhook payload)
+        if let Some(order_id) = data.order_id {
+            provider.spawn_enricher(
+                state.clone(),
+                project.id.clone(),
+                org.id.clone(),
+                order_id,
+            );
         }
     }
 

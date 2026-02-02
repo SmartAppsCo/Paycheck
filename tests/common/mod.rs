@@ -197,10 +197,6 @@ pub fn create_test_license(
         customer_id: Some("test-customer".to_string()),
         expires_at,
         updates_expires_at: expires_at,
-        payment_provider: None,
-        payment_provider_customer_id: None,
-        payment_provider_subscription_id: None,
-        payment_provider_order_id: None,
     };
     queries::create_license(conn, project_id, product_id, &input)
         .expect("Failed to create test license")
@@ -356,10 +352,12 @@ pub fn setup_both_payment_configs(conn: &Connection, org_id: &str, master_key: &
 }
 
 /// Create a test license with subscription info (for renewal/cancellation tests)
+/// Creates both a license and a transaction record linking them.
 pub fn create_test_license_with_subscription(
     conn: &Connection,
     project_id: &str,
     product_id: &str,
+    org_id: &str,
     expires_at: Option<i64>,
     provider: &str,
     subscription_id: &str,
@@ -369,13 +367,38 @@ pub fn create_test_license_with_subscription(
         customer_id: Some("test-customer".to_string()),
         expires_at,
         updates_expires_at: expires_at,
-        payment_provider: Some(provider.to_string()),
-        payment_provider_customer_id: Some("cust_test".to_string()),
-        payment_provider_subscription_id: Some(subscription_id.to_string()),
-        payment_provider_order_id: Some("order_test".to_string()),
     };
-    queries::create_license(conn, project_id, product_id, &input)
-        .expect("Failed to create test license with subscription")
+    let license = queries::create_license(conn, project_id, product_id, &input)
+        .expect("Failed to create test license with subscription");
+
+    // Create associated transaction with subscription info
+    let tx_input = CreateTransaction {
+        license_id: Some(license.id.clone()),
+        project_id: project_id.to_string(),
+        product_id: Some(product_id.to_string()),
+        org_id: org_id.to_string(),
+        payment_provider: provider.to_string(),
+        provider_customer_id: Some("cust_test".to_string()),
+        provider_subscription_id: Some(subscription_id.to_string()),
+        provider_order_id: "order_test".to_string(),
+        currency: "usd".to_string(),
+        subtotal_cents: 999,
+        discount_cents: 0,
+        net_cents: 999,
+        tax_cents: 0,
+        total_cents: 999,
+        discount_code: None,
+        tax_inclusive: None,
+        customer_country: None,
+        transaction_type: TransactionType::Purchase,
+        parent_transaction_id: None,
+        is_subscription: true,
+        test_mode: true,
+    };
+    queries::create_transaction(conn, &tx_input)
+        .expect("Failed to create test transaction");
+
+    license
 }
 
 /// Create a test activation code for a license

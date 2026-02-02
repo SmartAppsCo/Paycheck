@@ -184,6 +184,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         -- Licenses (no user-facing keys - email hash is the identity)
         -- email_hash: SHA-256 hash of purchase email (no PII stored)
         -- project_id: denormalized for efficient lookups
+        -- Payment provider info moved to transactions table
         CREATE TABLE IF NOT EXISTS licenses (
             id TEXT PRIMARY KEY,
             email_hash TEXT,
@@ -195,22 +196,62 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             created_at INTEGER NOT NULL,
             expires_at INTEGER,
             updates_expires_at INTEGER,
-            payment_provider TEXT,
-            payment_provider_customer_id TEXT,
-            payment_provider_subscription_id TEXT,
-            payment_provider_order_id TEXT,
             deleted_at INTEGER,
             deleted_cascade_depth INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_licenses_product ON licenses(product_id);
         CREATE INDEX IF NOT EXISTS idx_licenses_project ON licenses(project_id);
         CREATE INDEX IF NOT EXISTS idx_licenses_project_email ON licenses(project_id, email_hash);
-        CREATE INDEX IF NOT EXISTS idx_licenses_project_order ON licenses(project_id, payment_provider_order_id);
         CREATE INDEX IF NOT EXISTS idx_licenses_project_customer ON licenses(project_id, customer_id);
-        CREATE INDEX IF NOT EXISTS idx_licenses_provider_customer ON licenses(payment_provider, payment_provider_customer_id);
-        CREATE INDEX IF NOT EXISTS idx_licenses_provider_subscription ON licenses(payment_provider, payment_provider_subscription_id);
-        CREATE INDEX IF NOT EXISTS idx_licenses_provider_order ON licenses(payment_provider, payment_provider_order_id);
         CREATE INDEX IF NOT EXISTS idx_licenses_active ON licenses(id) WHERE deleted_at IS NULL;
+
+        -- Transactions (payment events - purchases, renewals, refunds)
+        -- All payment provider info lives here, decoupled from licenses
+        -- Amounts are in cents, currency stored per-transaction
+        CREATE TABLE IF NOT EXISTS transactions (
+            id TEXT PRIMARY KEY,
+            license_id TEXT REFERENCES licenses(id) ON DELETE SET NULL,
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            product_id TEXT REFERENCES products(id) ON DELETE SET NULL,
+            org_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+
+            -- Provider info
+            payment_provider TEXT NOT NULL,
+            provider_customer_id TEXT,
+            provider_subscription_id TEXT,
+            provider_order_id TEXT NOT NULL,
+
+            -- Amounts (cents)
+            currency TEXT NOT NULL,
+            subtotal_cents INTEGER NOT NULL,
+            discount_cents INTEGER NOT NULL DEFAULT 0,
+            net_cents INTEGER NOT NULL,
+            tax_cents INTEGER NOT NULL DEFAULT 0,
+            total_cents INTEGER NOT NULL,
+
+            -- Discount code (if any)
+            discount_code TEXT,
+            -- Whether tax is included in subtotal
+            tax_inclusive INTEGER,
+            -- Customer country (for geo analytics, no PII)
+            customer_country TEXT,
+
+            -- Classification
+            transaction_type TEXT NOT NULL CHECK (transaction_type IN ('purchase', 'renewal', 'refund')),
+            parent_transaction_id TEXT REFERENCES transactions(id),
+            is_subscription INTEGER NOT NULL DEFAULT 0,
+
+            test_mode INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_transactions_license ON transactions(license_id);
+        CREATE INDEX IF NOT EXISTS idx_transactions_org_date ON transactions(org_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_transactions_project_date ON transactions(project_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_transactions_product_date ON transactions(product_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_transactions_provider_order ON transactions(payment_provider, provider_order_id);
+        CREATE INDEX IF NOT EXISTS idx_transactions_provider_sub ON transactions(payment_provider, provider_subscription_id);
+        CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(transaction_type);
+        CREATE INDEX IF NOT EXISTS idx_transactions_parent ON transactions(parent_transaction_id);
 
         -- Activation codes (short-lived codes in PREFIX-XXXX-XXXX format, 40 bits entropy)
         CREATE TABLE IF NOT EXISTS activation_codes (

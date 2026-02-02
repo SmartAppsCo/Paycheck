@@ -14,9 +14,91 @@ use crate::payments::{
 };
 
 use super::common::{
-    CancellationData, CheckoutData, RenewalData, WebhookEvent, WebhookProvider, WebhookResult,
-    handle_webhook,
+    CancellationData, CheckoutData, CheckoutTransactionData, RenewalData, WebhookEvent,
+    WebhookProvider, WebhookResult, handle_webhook,
 };
+
+/// Enrich a Stripe transaction with data that requires API calls.
+/// This runs as a background task after the webhook handler returns.
+async fn enrich_stripe_transaction(
+    state: &AppState,
+    project_id: &str,
+    org_id: &str,
+    checkout_session_id: &str,
+) {
+    // Get DB connection
+    let conn = match state.db.get() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("Stripe enricher: failed to get DB connection: {}", e);
+            return;
+        }
+    };
+
+    // Load project and org for config lookup
+    let project = match queries::get_project_by_id(&conn, project_id) {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            tracing::warn!("Stripe enricher: project not found: {}", project_id);
+            return;
+        }
+        Err(e) => {
+            tracing::warn!("Stripe enricher: failed to load project: {}", e);
+            return;
+        }
+    };
+
+    let org = match queries::get_organization_by_id(&conn, org_id) {
+        Ok(Some(o)) => o,
+        Ok(None) => {
+            tracing::warn!("Stripe enricher: org not found: {}", org_id);
+            return;
+        }
+        Err(e) => {
+            tracing::warn!("Stripe enricher: failed to load org: {}", e);
+            return;
+        }
+    };
+
+    // Get Stripe config
+    let stripe_config = match queries::get_stripe_config_for_webhook(&conn, &project, &org, &state.master_key) {
+        Ok(Some((config, _))) => config,
+        Ok(None) => {
+            tracing::warn!("Stripe enricher: no Stripe config found");
+            return;
+        }
+        Err(e) => {
+            tracing::warn!("Stripe enricher: failed to get Stripe config: {}", e);
+            return;
+        }
+    };
+
+    // Fetch discount code from Stripe API
+    let client = StripeClient::new(&stripe_config);
+    let discount_code = match client.get_checkout_session_discounts(checkout_session_id).await {
+        Ok(Some(code)) => code,
+        Ok(None) => {
+            // No discount code - nothing to enrich
+            return;
+        }
+        Err(e) => {
+            tracing::warn!("Stripe enricher: failed to fetch discounts: {}", e);
+            return;
+        }
+    };
+
+    // Update the transaction with the discount code
+    if let Err(e) = queries::update_transaction_discount_code(&conn, checkout_session_id, &discount_code) {
+        tracing::warn!("Stripe enricher: failed to update transaction: {}", e);
+        return;
+    }
+
+    tracing::info!(
+        "Stripe enricher: updated transaction {} with discount code {}",
+        checkout_session_id,
+        discount_code
+    );
+}
 
 /// Stripe webhook provider implementation.
 pub struct StripeWebhookProvider;
@@ -83,6 +165,18 @@ impl WebhookProvider for StripeWebhookProvider {
             _ => Ok(WebhookEvent::Ignored),
         }
     }
+
+    fn spawn_enricher(
+        &self,
+        state: AppState,
+        project_id: String,
+        org_id: String,
+        provider_order_id: String,
+    ) {
+        tokio::spawn(async move {
+            enrich_stripe_transaction(&state, &project_id, &org_id, &provider_order_id).await;
+        });
+    }
 }
 
 fn parse_checkout_completed(event: &StripeWebhookEvent) -> Result<WebhookEvent, WebhookResult> {
@@ -106,8 +200,45 @@ fn parse_checkout_completed(event: &StripeWebhookEvent) -> Result<WebhookEvent, 
         .project_id
         .ok_or((StatusCode::OK, "No project ID"))?;
 
-    // Get email from customer_details (entered during checkout)
-    let customer_email = session.customer_details.and_then(|d| d.email);
+    // Get email and address from customer_details (entered during checkout)
+    let (customer_email, customer_country) = session
+        .customer_details
+        .as_ref()
+        .map(|d| {
+            let country = d.address.as_ref().and_then(|a| a.country.clone());
+            (d.email.clone(), country)
+        })
+        .unwrap_or((None, None));
+
+    // Extract transaction data if available
+    let transaction = match (session.currency, session.amount_total) {
+        (Some(currency), Some(total)) => {
+            let subtotal = session.amount_subtotal.unwrap_or(total);
+            let (discount, tax) = session
+                .total_details
+                .as_ref()
+                .map(|d| {
+                    (
+                        d.amount_discount.unwrap_or(0),
+                        d.amount_tax.unwrap_or(0),
+                    )
+                })
+                .unwrap_or((0, 0));
+
+            Some(CheckoutTransactionData {
+                currency: currency.to_lowercase(),
+                subtotal_cents: subtotal,
+                discount_cents: discount,
+                tax_cents: tax,
+                total_cents: total,
+                tax_inclusive: None, // Stripe doesn't provide this directly
+                discount_code: None, // Would need to fetch from Stripe API
+                customer_country,
+                test_mode: session.livemode.map(|l| !l).unwrap_or(false),
+            })
+        }
+        _ => None,
+    };
 
     Ok(WebhookEvent::CheckoutCompleted(CheckoutData {
         session_id,
@@ -116,6 +247,7 @@ fn parse_checkout_completed(event: &StripeWebhookEvent) -> Result<WebhookEvent, 
         customer_email,
         subscription_id: session.subscription,
         order_id: Some(session.id),
+        transaction,
     }))
 }
 

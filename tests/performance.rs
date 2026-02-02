@@ -48,10 +48,6 @@ async fn test_license_list_large_dataset() {
             customer_id: Some(format!("customer-{}", i)),
             expires_at: Some(future_timestamp(ONE_YEAR)),
             updates_expires_at: Some(future_timestamp(ONE_YEAR)),
-            payment_provider: None,
-            payment_provider_customer_id: None,
-            payment_provider_subscription_id: None,
-            payment_provider_order_id: None,
         };
         queries::create_license(&mut conn, &project.id, &product.id, &input)
             .expect("Failed to create license");

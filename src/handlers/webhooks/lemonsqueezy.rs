@@ -15,8 +15,8 @@ use crate::payments::{
 };
 
 use super::common::{
-    CancellationData, CheckoutData, RenewalData, WebhookEvent, WebhookProvider, WebhookResult,
-    handle_webhook,
+    CancellationData, CheckoutData, CheckoutTransactionData, RenewalData, WebhookEvent,
+    WebhookProvider, WebhookResult, handle_webhook,
 };
 
 /// LemonSqueezy webhook provider implementation.
@@ -125,6 +125,28 @@ fn parse_order_created(event: &LemonSqueezyWebhookEvent) -> Result<WebhookEvent,
         .and_then(|item| item.subscription_id)
         .map(|id| id.to_string());
 
+    // Extract transaction data if available
+    let transaction = match (order.currency.as_ref(), order.total) {
+        (Some(currency), Some(total)) => {
+            let subtotal = order.subtotal.unwrap_or(total);
+            let discount = order.discount_total.unwrap_or(0);
+            let tax = order.tax.unwrap_or(0);
+
+            Some(CheckoutTransactionData {
+                currency: currency.to_lowercase(),
+                subtotal_cents: subtotal,
+                discount_cents: discount,
+                tax_cents: tax,
+                total_cents: total,
+                tax_inclusive: order.tax_inclusive,
+                discount_code: order.discount_code.clone(),
+                customer_country: order.user_country.clone(),
+                test_mode: order.test_mode.unwrap_or(false),
+            })
+        }
+        _ => None,
+    };
+
     Ok(WebhookEvent::CheckoutCompleted(CheckoutData {
         session_id,
         project_id,
@@ -132,6 +154,7 @@ fn parse_order_created(event: &LemonSqueezyWebhookEvent) -> Result<WebhookEvent,
         customer_email: order.user_email,
         subscription_id,
         order_id: Some(event.data.id.clone()),
+        transaction,
     }))
 }
 

@@ -83,6 +83,60 @@ impl StripeClient {
         Ok((session.id, session.url))
     }
 
+    /// Fetch a checkout session with expanded discount data.
+    /// Used by the enricher to get discount codes that aren't in the webhook payload.
+    pub async fn get_checkout_session_discounts(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<String>> {
+        let url = format!(
+            "https://api.stripe.com/v1/checkout/sessions/{}?expand[]=discounts.promotion_code",
+            session_id
+        );
+
+        let response = self
+            .client
+            .get(&url)
+            .basic_auth(&self.secret_key, None::<&str>)
+            .send()
+            .await
+            .map_err(|e| AppError::Internal(format!("Stripe API error: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            tracing::warn!("Failed to fetch Stripe session {}: {} - {}", session_id, status, error_text);
+            return Ok(None);
+        }
+
+        #[derive(Deserialize)]
+        struct DiscountResponse {
+            discounts: Option<Vec<DiscountItem>>,
+        }
+        #[derive(Deserialize)]
+        struct DiscountItem {
+            promotion_code: Option<PromotionCode>,
+        }
+        #[derive(Deserialize)]
+        struct PromotionCode {
+            code: Option<String>,
+        }
+
+        let session: DiscountResponse = response
+            .json()
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to parse Stripe response: {}", e)))?;
+
+        // Extract the first discount code if present
+        let code = session
+            .discounts
+            .and_then(|d| d.into_iter().next())
+            .and_then(|d| d.promotion_code)
+            .and_then(|p| p.code);
+
+        Ok(code)
+    }
+
     /// Maximum age of a webhook timestamp before it's rejected (in seconds).
     /// Stripe recommends 300 seconds (5 minutes).
     const WEBHOOK_TIMESTAMP_TOLERANCE_SECS: i64 = 300;
@@ -186,12 +240,37 @@ pub struct StripeCheckoutSession {
     pub customer_details: Option<StripeCustomerDetails>,
     pub subscription: Option<String>, // Present for subscription mode
     pub metadata: StripeMetadata,
+    /// Currency code (e.g., "usd", "eur")
+    pub currency: Option<String>,
+    /// Amount before discounts and tax (in cents)
+    pub amount_subtotal: Option<i64>,
+    /// Final amount charged (in cents)
+    pub amount_total: Option<i64>,
+    /// Breakdown of tax and discounts
+    pub total_details: Option<StripeTotalDetails>,
+    /// Test mode indicator
+    pub livemode: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct StripeCustomerDetails {
     pub email: Option<String>,
     pub name: Option<String>,
+    pub address: Option<StripeAddress>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StripeAddress {
+    pub country: Option<String>,
+}
+
+/// Breakdown of discounts and taxes in a checkout session
+#[derive(Debug, Deserialize)]
+pub struct StripeTotalDetails {
+    /// Total discount amount (in cents)
+    pub amount_discount: Option<i64>,
+    /// Total tax amount (in cents)
+    pub amount_tax: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]

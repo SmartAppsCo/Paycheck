@@ -56,10 +56,6 @@ fn test_create_license_without_identifier_fails() {
         customer_id: None,
         expires_at: None,
         updates_expires_at: None,
-        payment_provider: None,
-        payment_provider_customer_id: None,
-        payment_provider_subscription_id: None,
-        payment_provider_order_id: None,
     };
 
     let result = queries::create_license(&mut conn, &project.id, &product.id, &input);
@@ -77,40 +73,6 @@ fn test_create_license_without_identifier_fails() {
 }
 
 #[test]
-fn test_create_license_with_only_order_id_succeeds() {
-    let mut conn = setup_test_db();
-    let master_key = test_master_key();
-    let org = create_test_org(&mut conn, "Test Org");
-    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
-    let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
-
-    // Create a license with only payment_provider_order_id (simulates webhook without email)
-    let input = CreateLicense {
-        email_hash: None,
-        customer_id: None,
-        expires_at: None,
-        updates_expires_at: None,
-        payment_provider: Some("stripe".to_string()),
-        payment_provider_customer_id: None,
-        payment_provider_subscription_id: None,
-        payment_provider_order_id: Some("cs_test_123".to_string()),
-    };
-
-    let license = queries::create_license(&mut conn, &project.id, &product.id, &input)
-        .expect("Should succeed with order_id as identifier");
-
-    assert!(
-        license.email_hash.is_none(),
-        "license should have no email hash when created with only order_id"
-    );
-    assert_eq!(
-        license.payment_provider_order_id,
-        Some("cs_test_123".to_string()),
-        "license should store the payment provider order ID"
-    );
-}
-
-#[test]
 fn test_create_license_with_customer_id() {
     let mut conn = setup_test_db();
     let master_key = test_master_key();
@@ -123,10 +85,6 @@ fn test_create_license_with_customer_id() {
         customer_id: Some("cust_12345".to_string()),
         expires_at: None,
         updates_expires_at: None,
-        payment_provider: None,
-        payment_provider_customer_id: None,
-        payment_provider_subscription_id: None,
-        payment_provider_order_id: None,
     };
 
     let license = queries::create_license(&mut conn, &project.id, &product.id, &input)
@@ -140,42 +98,67 @@ fn test_create_license_with_customer_id() {
 }
 
 #[test]
-fn test_create_license_with_payment_provider() {
+fn test_create_transaction_with_license() {
     let mut conn = setup_test_db();
     let master_key = test_master_key();
     let org = create_test_org(&mut conn, "Test Org");
     let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
     let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
 
-    let input = CreateLicense {
+    // Create license first
+    let license_input = CreateLicense {
         email_hash: Some(test_email_hasher().hash("customer@example.com")),
         customer_id: None,
         expires_at: Some(future_timestamp(ONE_MONTH)),
         updates_expires_at: Some(future_timestamp(ONE_YEAR)),
-        payment_provider: Some("stripe".to_string()),
-        payment_provider_customer_id: Some("cus_xxx".to_string()),
-        payment_provider_subscription_id: Some("sub_yyy".to_string()),
-        payment_provider_order_id: Some("cs_test_xxx".to_string()),
     };
-
-    let license = queries::create_license(&mut conn, &project.id, &product.id, &input)
+    let license = queries::create_license(&mut conn, &project.id, &product.id, &license_input)
         .expect("Failed to create license");
 
-    assert_eq!(
-        license.payment_provider,
-        Some("stripe".to_string()),
-        "license should store the payment provider"
-    );
-    assert_eq!(
-        license.payment_provider_customer_id,
-        Some("cus_xxx".to_string()),
-        "license should store the payment provider customer ID"
-    );
-    assert_eq!(
-        license.payment_provider_subscription_id,
-        Some("sub_yyy".to_string()),
-        "license should store the payment provider subscription ID"
-    );
+    // Create transaction linked to license
+    let tx_input = CreateTransaction {
+        license_id: Some(license.id.clone()),
+        project_id: project.id.clone(),
+        product_id: Some(product.id.clone()),
+        org_id: org.id.clone(),
+        payment_provider: "stripe".to_string(),
+        provider_customer_id: Some("cus_xxx".to_string()),
+        provider_subscription_id: Some("sub_yyy".to_string()),
+        provider_order_id: "cs_test_xxx".to_string(),
+        currency: "usd".to_string(),
+        subtotal_cents: 1999,
+        discount_cents: 0,
+        net_cents: 1999,
+        tax_cents: 200,
+        total_cents: 2199,
+        discount_code: None,
+        tax_inclusive: Some(false),
+        customer_country: Some("US".to_string()),
+        transaction_type: TransactionType::Purchase,
+        parent_transaction_id: None,
+        is_subscription: true,
+        test_mode: false,
+    };
+    let tx = queries::create_transaction(&mut conn, &tx_input)
+        .expect("Failed to create transaction");
+
+    assert_eq!(tx.payment_provider, "stripe");
+    assert_eq!(tx.provider_subscription_id, Some("sub_yyy".to_string()));
+    assert_eq!(tx.license_id, Some(license.id.clone()));
+    assert_eq!(tx.subtotal_cents, 1999);
+    assert_eq!(tx.total_cents, 2199);
+
+    // Verify we can look up transaction by provider order
+    let found = queries::get_transaction_by_provider_order(&mut conn, "stripe", "cs_test_xxx")
+        .expect("Failed to query transaction")
+        .expect("Transaction should exist");
+    assert_eq!(found.id, tx.id);
+
+    // Verify we can get transactions by license
+    let txs = queries::get_transactions_by_license(&mut conn, &license.id)
+        .expect("Failed to get transactions by license");
+    assert_eq!(txs.len(), 1);
+    assert_eq!(txs[0].id, tx.id);
 }
 
 // ============ License Lookup Tests ============
@@ -224,10 +207,6 @@ fn test_get_license_by_email_hash() {
         customer_id: None,
         expires_at: None,
         updates_expires_at: None,
-        payment_provider: None,
-        payment_provider_customer_id: None,
-        payment_provider_subscription_id: None,
-        payment_provider_order_id: None,
     };
 
     let created = queries::create_license(&mut conn, &project.id, &product.id, &input)
@@ -251,19 +230,41 @@ fn test_get_license_by_subscription() {
     let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
     let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
 
-    let input = CreateLicense {
+    // Create license
+    let license_input = CreateLicense {
         email_hash: Some(test_email_hasher().hash("subscriber@example.com")),
         customer_id: None,
         expires_at: None,
         updates_expires_at: None,
-        payment_provider: Some("stripe".to_string()),
-        payment_provider_customer_id: Some("cus_xxx".to_string()),
-        payment_provider_subscription_id: Some("sub_unique_id".to_string()),
-        payment_provider_order_id: None,
     };
-
-    let created = queries::create_license(&mut conn, &project.id, &product.id, &input)
+    let created = queries::create_license(&mut conn, &project.id, &product.id, &license_input)
         .expect("Failed to create license");
+
+    // Create transaction with subscription info
+    let tx_input = CreateTransaction {
+        license_id: Some(created.id.clone()),
+        project_id: project.id.clone(),
+        product_id: Some(product.id.clone()),
+        org_id: org.id.clone(),
+        payment_provider: "stripe".to_string(),
+        provider_customer_id: Some("cus_xxx".to_string()),
+        provider_subscription_id: Some("sub_unique_id".to_string()),
+        provider_order_id: "order_123".to_string(),
+        currency: "usd".to_string(),
+        subtotal_cents: 999,
+        discount_cents: 0,
+        net_cents: 999,
+        tax_cents: 0,
+        total_cents: 999,
+        discount_code: None,
+        tax_inclusive: None,
+        customer_country: None,
+        transaction_type: TransactionType::Purchase,
+        parent_transaction_id: None,
+        is_subscription: true,
+        test_mode: false,
+    };
+    queries::create_transaction(&mut conn, &tx_input).expect("Failed to create transaction");
 
     let fetched = queries::get_license_by_subscription(&mut conn, "stripe", "sub_unique_id")
         .expect("Query failed")
@@ -283,19 +284,41 @@ fn test_get_license_by_subscription_wrong_provider() {
     let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
     let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
 
-    let input = CreateLicense {
+    // Create license
+    let license_input = CreateLicense {
         email_hash: Some(test_email_hasher().hash("subscriber@example.com")),
         customer_id: None,
         expires_at: None,
         updates_expires_at: None,
-        payment_provider: Some("stripe".to_string()),
-        payment_provider_customer_id: None,
-        payment_provider_subscription_id: Some("sub_id".to_string()),
-        payment_provider_order_id: None,
     };
-
-    queries::create_license(&mut conn, &project.id, &product.id, &input)
+    let license = queries::create_license(&mut conn, &project.id, &product.id, &license_input)
         .expect("Failed to create license");
+
+    // Create transaction with Stripe subscription
+    let tx_input = CreateTransaction {
+        license_id: Some(license.id.clone()),
+        project_id: project.id.clone(),
+        product_id: Some(product.id.clone()),
+        org_id: org.id.clone(),
+        payment_provider: "stripe".to_string(),
+        provider_customer_id: None,
+        provider_subscription_id: Some("sub_id".to_string()),
+        provider_order_id: "order_456".to_string(),
+        currency: "usd".to_string(),
+        subtotal_cents: 999,
+        discount_cents: 0,
+        net_cents: 999,
+        tax_cents: 0,
+        total_cents: 999,
+        discount_code: None,
+        tax_inclusive: None,
+        customer_country: None,
+        transaction_type: TransactionType::Purchase,
+        parent_transaction_id: None,
+        is_subscription: true,
+        test_mode: false,
+    };
+    queries::create_transaction(&mut conn, &tx_input).expect("Failed to create transaction");
 
     // Same subscription ID but different provider should return None
     let result = queries::get_license_by_subscription(&mut conn, "lemonsqueezy", "sub_id")

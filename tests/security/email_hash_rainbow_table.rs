@@ -188,10 +188,6 @@ fn test_secure_hash_database_lookup() {
         customer_id: None,
         expires_at: Some(future_timestamp(ONE_YEAR)),
         updates_expires_at: Some(future_timestamp(ONE_YEAR)),
-        payment_provider: None,
-        payment_provider_customer_id: None,
-        payment_provider_subscription_id: None,
-        payment_provider_order_id: Some("order-123".to_string()),
     };
     let license = queries::create_license(&mut conn, &project.id, &product.id, &input).unwrap();
 

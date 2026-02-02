@@ -197,6 +197,7 @@ pub mod msg {
     pub const SESSION_NOT_FOUND: &str = "Session not found";
     pub const PAYMENT_CONFIG_NOT_FOUND: &str = "Payment config not found";
     pub const PROVIDER_LINK_NOT_FOUND: &str = "Provider link not found";
+    pub const TRANSACTION_NOT_FOUND: &str = "Transaction not found";
 
     // Membership checks
     pub const NOT_ORG_MEMBER: &str = "User is not a member of this org";
