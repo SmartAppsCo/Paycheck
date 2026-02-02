@@ -20,3 +20,6 @@ mod devices;
 
 #[path = "public/refresh.rs"]
 mod refresh;
+
+#[path = "public/feedback_metering.rs"]
+mod feedback_metering;

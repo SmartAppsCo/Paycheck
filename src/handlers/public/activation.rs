@@ -15,7 +15,7 @@ use crate::email::{
 };
 use crate::error::Result;
 use crate::extractors::Json;
-use crate::metering::{send_metering_event, EmailMeteringEvent};
+use crate::metering::{spawn_email_metering, EmailMeteringEvent};
 use crate::models::{ActorType, AuditAction, AuditLogNames};
 use crate::util::AuditLogBuilder;
 
@@ -201,26 +201,25 @@ pub async fn request_activation_code(
             );
 
             // Fire-and-forget metering event
-            if let Some(ref metering_url) = state.metering_webhook_url {
-                let delivery_method = match result {
-                    EmailSendResult::Sent if org_resend_key.is_some() => "org_key",
-                    EmailSendResult::Sent => "system_key",
-                    EmailSendResult::WebhookCalled => "webhook",
-                    EmailSendResult::Disabled | EmailSendResult::NoApiKey => {
-                        // Don't meter if no email was actually sent
-                        ""
-                    }
+            let delivery_method = match result {
+                EmailSendResult::Sent if org_resend_key.is_some() => Some("org_key"),
+                EmailSendResult::Sent => Some("system_key"),
+                EmailSendResult::WebhookCalled => Some("webhook"),
+                EmailSendResult::Disabled | EmailSendResult::NoApiKey => None,
+            };
+
+            if let Some(delivery_method) = delivery_method {
+                // Use first license ID as idempotency key (or generate UUID for multi-license)
+                let idempotency_key = if active_licenses.len() == 1 {
+                    active_licenses[0].id.clone()
+                } else {
+                    uuid::Uuid::new_v4().to_string()
                 };
 
-                if !delivery_method.is_empty() {
-                    // Use first license ID as idempotency key (or generate UUID for multi-license)
-                    let idempotency_key = if active_licenses.len() == 1 {
-                        active_licenses[0].id.clone()
-                    } else {
-                        uuid::Uuid::new_v4().to_string()
-                    };
-
-                    let event = EmailMeteringEvent {
+                spawn_email_metering(
+                    state.http_client.clone(),
+                    state.metering_webhook_url.clone(),
+                    EmailMeteringEvent {
                         event: "activation_sent".to_string(),
                         org_id: project.org_id.clone(),
                         project_id: project.id.clone(),
@@ -229,14 +228,8 @@ pub async fn request_activation_code(
                         delivery_method: delivery_method.to_string(),
                         timestamp: chrono::Utc::now().timestamp(),
                         idempotency_key,
-                    };
-
-                    let client = state.http_client.clone();
-                    let url = metering_url.clone();
-                    tokio::spawn(async move {
-                        send_metering_event(&client, &url, &event).await;
-                    });
-                }
+                    },
+                );
             }
         }
         Err(e) => {

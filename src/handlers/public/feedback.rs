@@ -19,7 +19,7 @@ use crate::feedback::{
     Priority, StackFrame,
 };
 use crate::jwt;
-use crate::metering::{send_metering_event, EmailMeteringEvent};
+use crate::metering::{spawn_email_metering, EmailMeteringEvent};
 
 /// Request body for POST /feedback
 #[derive(Debug, Deserialize)]
@@ -139,7 +139,7 @@ pub async fn submit_feedback(
         .ok_or_else(|| AppError::Internal(msg::PROJECT_NOT_FOUND.into()))?;
 
     let config = DeliveryConfig {
-        webhook_url: project.feedback_webhook_url,
+        webhook_url: project.feedback_webhook_url.clone(),
         email: project.feedback_email,
     };
 
@@ -148,6 +148,13 @@ pub async fn submit_feedback(
             "Feedback not configured for this project".into(),
         ));
     }
+
+    // Get org's email config if available (for billing fairness)
+    let org = queries::get_organization_by_id(&conn, &project.org_id)?;
+    let org_resend_key = org
+        .as_ref()
+        .and_then(|o| queries::get_org_email_config(&conn, o, &state.master_key).ok())
+        .flatten();
 
     // Build feedback data
     let data = FeedbackData {
@@ -160,7 +167,7 @@ pub async fn submit_feedback(
         metadata: req.metadata,
     };
 
-    // Deliver feedback (uses system-level Resend key for email fallback)
+    // Deliver feedback (uses org's Resend key if available, otherwise system key)
     let result = state
         .delivery_service
         .deliver_feedback(
@@ -169,18 +176,21 @@ pub async fn submit_feedback(
             &project_name,
             jwt_context,
             data,
-            None, // Use system-level Resend key
+            org_resend_key.as_deref(),
         )
         .await?;
 
     // Fire-and-forget metering event
-    if let Some(ref metering_url) = state.metering_webhook_url {
-        let delivery_method = match result {
-            DeliveryResult::EmailSent => "system_key", // Always system key (org_resend_key is None)
-            DeliveryResult::WebhookDelivered => "webhook",
-        };
+    let delivery_method = match result {
+        DeliveryResult::EmailSent if org_resend_key.is_some() => "org_key",
+        DeliveryResult::EmailSent => "system_key",
+        DeliveryResult::WebhookDelivered => "webhook",
+    };
 
-        let event = EmailMeteringEvent {
+    spawn_email_metering(
+        state.http_client.clone(),
+        state.metering_webhook_url.clone(),
+        EmailMeteringEvent {
             event: "feedback_sent".to_string(),
             org_id: project.org_id.clone(),
             project_id: project_id.clone(),
@@ -189,14 +199,8 @@ pub async fn submit_feedback(
             delivery_method: delivery_method.to_string(),
             timestamp: chrono::Utc::now().timestamp(),
             idempotency_key: uuid::Uuid::new_v4().to_string(),
-        };
-
-        let client = state.http_client.clone();
-        let url = metering_url.clone();
-        tokio::spawn(async move {
-            send_metering_event(&client, &url, &event).await;
-        });
-    }
+        },
+    );
 
     Ok(Json(SubmitResponse { success: true }))
 }
@@ -219,7 +223,7 @@ pub async fn report_crash(
         .ok_or_else(|| AppError::Internal(msg::PROJECT_NOT_FOUND.into()))?;
 
     let config = DeliveryConfig {
-        webhook_url: project.crash_webhook_url,
+        webhook_url: project.crash_webhook_url.clone(),
         email: project.crash_email,
     };
 
@@ -228,6 +232,13 @@ pub async fn report_crash(
             "Crash reporting not configured for this project".into(),
         ));
     }
+
+    // Get org's email config if available (for billing fairness)
+    let org = queries::get_organization_by_id(&conn, &project.org_id)?;
+    let org_resend_key = org
+        .as_ref()
+        .and_then(|o| queries::get_org_email_config(&conn, o, &state.master_key).ok())
+        .flatten();
 
     // Build crash data
     let data = CrashData {
@@ -242,7 +253,7 @@ pub async fn report_crash(
         breadcrumbs: req.breadcrumbs,
     };
 
-    // Deliver crash report (uses system-level Resend key for email fallback)
+    // Deliver crash report (uses org's Resend key if available, otherwise system key)
     let result = state
         .delivery_service
         .deliver_crash(
@@ -251,18 +262,21 @@ pub async fn report_crash(
             &project_name,
             jwt_context,
             data,
-            None, // Use system-level Resend key
+            org_resend_key.as_deref(),
         )
         .await?;
 
     // Fire-and-forget metering event
-    if let Some(ref metering_url) = state.metering_webhook_url {
-        let delivery_method = match result {
-            DeliveryResult::EmailSent => "system_key", // Always system key (org_resend_key is None)
-            DeliveryResult::WebhookDelivered => "webhook",
-        };
+    let delivery_method = match result {
+        DeliveryResult::EmailSent if org_resend_key.is_some() => "org_key",
+        DeliveryResult::EmailSent => "system_key",
+        DeliveryResult::WebhookDelivered => "webhook",
+    };
 
-        let event = EmailMeteringEvent {
+    spawn_email_metering(
+        state.http_client.clone(),
+        state.metering_webhook_url.clone(),
+        EmailMeteringEvent {
             event: "crash_sent".to_string(),
             org_id: project.org_id.clone(),
             project_id: project_id.clone(),
@@ -271,14 +285,8 @@ pub async fn report_crash(
             delivery_method: delivery_method.to_string(),
             timestamp: chrono::Utc::now().timestamp(),
             idempotency_key: uuid::Uuid::new_v4().to_string(),
-        };
-
-        let client = state.http_client.clone();
-        let url = metering_url.clone();
-        tokio::spawn(async move {
-            send_metering_event(&client, &url, &event).await;
-        });
-    }
+        },
+    );
 
     Ok(Json(SubmitResponse { success: true }))
 }

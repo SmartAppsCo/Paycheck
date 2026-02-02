@@ -12,7 +12,7 @@ use rusqlite::Connection;
 use crate::crypto::{EmailHasher, MasterKey};
 use crate::db::{AppState, queries};
 use crate::error::AppError;
-use crate::metering::{send_metering_event, SalesMeteringEvent};
+use crate::metering::{spawn_sales_metering, SalesMeteringEvent};
 use crate::models::{
     ActorType, AuditAction, AuditLogNames, CreateLicense, CreateTransaction, License,
     Organization, PaymentSession, Product, Project, TransactionType,
@@ -532,9 +532,11 @@ async fn handle_checkout<P: WebhookProvider>(
         }
 
         // Fire-and-forget sales metering event
-        if let Some(ref metering_url) = state.metering_webhook_url {
-            if let (Some(tx_data), Some(license_id)) = (&data.transaction, license_id) {
-                let event = SalesMeteringEvent {
+        if let (Some(tx_data), Some(license_id)) = (&data.transaction, license_id) {
+            spawn_sales_metering(
+                state.http_client.clone(),
+                state.metering_webhook_url.clone(),
+                SalesMeteringEvent {
                     event: "purchase".to_string(),
                     org_id: org.id.clone(),
                     project_id: project.id.clone(),
@@ -545,14 +547,8 @@ async fn handle_checkout<P: WebhookProvider>(
                     amount_cents: tx_data.total_cents,
                     currency: tx_data.currency.clone(),
                     timestamp: chrono::Utc::now().timestamp(),
-                };
-
-                let client = state.http_client.clone();
-                let url = metering_url.clone();
-                tokio::spawn(async move {
-                    send_metering_event(&client, &url, &event).await;
-                });
-            }
+                },
+            );
         }
     }
 

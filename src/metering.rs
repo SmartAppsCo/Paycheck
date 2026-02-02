@@ -66,11 +66,43 @@ pub struct SalesMeteringEvent {
     pub timestamp: i64,
 }
 
+/// Spawn a fire-and-forget email metering event.
+///
+/// If metering is not configured, this is a no-op.
+/// The event is sent in a background task and failures don't affect the caller.
+pub fn spawn_email_metering(
+    client: Client,
+    metering_url: Option<String>,
+    event: EmailMeteringEvent,
+) {
+    if let Some(url) = metering_url {
+        tokio::spawn(async move {
+            send_metering_event(&client, &url, &event).await;
+        });
+    }
+}
+
+/// Spawn a fire-and-forget sales metering event.
+///
+/// If metering is not configured, this is a no-op.
+/// The event is sent in a background task and failures don't affect the caller.
+pub fn spawn_sales_metering(
+    client: Client,
+    metering_url: Option<String>,
+    event: SalesMeteringEvent,
+) {
+    if let Some(url) = metering_url {
+        tokio::spawn(async move {
+            send_metering_event(&client, &url, &event).await;
+        });
+    }
+}
+
 /// Send a metering event to the configured webhook URL.
 ///
 /// Uses quick retries (100ms, 200ms delays) to avoid blocking user flow.
 /// This is fire-and-forget - failures are logged but don't affect the main operation.
-pub async fn send_metering_event<T: Serialize>(client: &Client, url: &str, event: &T) {
+async fn send_metering_event<T: Serialize>(client: &Client, url: &str, event: &T) {
     for (attempt, delay_ms) in std::iter::once(&0u64)
         .chain(METERING_RETRY_DELAYS.iter())
         .enumerate()

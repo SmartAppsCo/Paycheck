@@ -1618,6 +1618,24 @@ pub fn get_effective_email_config(
     Ok(None)
 }
 
+/// Get org's Resend API key if configured.
+/// Simpler version of get_effective_email_config for use when product context isn't available.
+pub fn get_org_email_config(
+    conn: &Connection,
+    org: &Organization,
+    master_key: &MasterKey,
+) -> Result<Option<String>> {
+    if let Some(ref config_id) = org.email_config_id {
+        if let Some(config) = get_service_config_by_id(conn, config_id)? {
+            if config.provider == ServiceProvider::Resend {
+                let api_key = config.decrypt_resend_api_key(master_key)?;
+                return Ok(Some(api_key));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Check if an effective payment config exists for a provider at any level
 /// (product → project → org). Does not decrypt - just checks existence.
 pub fn has_effective_payment_config(
