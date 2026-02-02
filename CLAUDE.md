@@ -527,15 +527,32 @@ POST /orgs/{org_id}/projects
 
 **Redirect behavior:**
 - After payment, callback redirects to `project.redirect_url?code=XXX&project_id=XXX&status=success`
-- If no redirect_url configured, uses the server's built-in success page
+- If no redirect_url is configured, use the server's built-in success page
 - One URL per project (project = environment, so no allowlist needed)
 
 ### New Device Activation (Post-Purchase)
 
 1. User requests code: `POST /activation/request-code` with email + public_key
 2. System looks up license by email hash, creates activation code (30 min TTL)
-3. Code delivered via configured method (Resend email, webhook, or admin API)
+3. Code delivered via a configured method (Resend email, webhook, or admin API)
 4. User activates: `POST /redeem` with code, device_id, device_type in JSON body
+
+## Usage Metering (Optional)
+
+When configured, Paycheck emits usage events to an external webhook for platform billing purposes. Optional for self-hosted deployments.
+
+**Configuration:**
+```bash
+export PAYCHECK_METERING_WEBHOOK_URL=http://metering:8080/events
+```
+
+**Events emitted:**
+- **Email events**: `activation_sent`, `feedback_sent`, `crash_sent` with `delivery_method` ("system_key", "org_key", "webhook")
+- **Sales events**: `purchase`, `renewal`, `refund` with transaction details
+
+**Billing logic:**
+- Only emails sent via `system_key` (Paycheck's Resend key) are billable
+- Sales events track transaction volume
 
 ## Transaction Tracking
 
