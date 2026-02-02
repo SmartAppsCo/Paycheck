@@ -88,14 +88,15 @@ impl MasterKey {
     /// Returns: MAGIC (4 bytes) || nonce (12 bytes) || ciphertext
     pub fn encrypt_private_key(&self, project_id: &str, private_key: &[u8]) -> Result<Vec<u8>> {
         use rand::RngCore;
+        use rand::rngs::OsRng;
 
         let dek = self.derive_dek(project_id);
         let cipher = Aes256Gcm::new_from_slice(&dek)
             .map_err(|e| AppError::Internal(format!("Failed to create cipher: {}", e)))?;
 
-        // Generate random nonce
+        // Generate random nonce using OS entropy
         let mut nonce_bytes = [0u8; NONCE_SIZE];
-        rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         // Encrypt

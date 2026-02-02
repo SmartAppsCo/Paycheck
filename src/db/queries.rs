@@ -222,24 +222,29 @@ pub fn delete_user(conn: &Connection, id: &str) -> Result<bool> {
 
 /// Soft delete a user and cascade to org_members.
 /// Returns true if the user was found and soft deleted.
-pub fn soft_delete_user(conn: &Connection, id: &str) -> Result<bool> {
+/// Uses a transaction to ensure atomicity of multi-table cascade.
+pub fn soft_delete_user(conn: &mut Connection, id: &str) -> Result<bool> {
     use super::soft_delete::{cascade_delete_direct, soft_delete_entity};
 
-    let result = soft_delete_entity(conn, "users", id)?;
+    let tx = conn.transaction()?;
+
+    let result = soft_delete_entity(&tx, "users", id)?;
     if !result.deleted {
+        tx.commit()?;
         return Ok(false);
     }
 
     // Cascade to org_members (depth 1)
     // Note: org_members cascade will further cascade to project_members
-    cascade_delete_direct(conn, "org_members", "user_id", id, result.deleted_at, 1)?;
+    cascade_delete_direct(&tx, "org_members", "user_id", id, result.deleted_at, 1)?;
     // Cascade to project_members (depth 2 - via org_members)
-    conn.execute(
+    tx.execute(
         "UPDATE project_members SET deleted_at = ?1, deleted_cascade_depth = 2
          WHERE org_member_id IN (SELECT id FROM org_members WHERE user_id = ?2) AND deleted_at IS NULL",
         params![result.deleted_at, id],
     )?;
 
+    tx.commit()?;
     Ok(true)
 }
 
@@ -258,7 +263,8 @@ pub fn get_deleted_user_by_id(conn: &Connection, id: &str) -> Result<Option<User
 /// Restore a soft-deleted user and optionally cascade to children.
 /// Returns Err if depth > 0 and force=false (was cascaded from parent).
 /// If force=true or depth=0, restores user and all cascaded children.
-pub fn restore_user(conn: &Connection, id: &str, force: bool) -> Result<bool> {
+/// Uses a transaction to ensure atomicity of multi-table restore.
+pub fn restore_user(conn: &mut Connection, id: &str, force: bool) -> Result<bool> {
     use super::soft_delete::{check_restore_allowed, restore_cascaded_direct, restore_entity};
 
     let Some(user) = get_deleted_user_by_id(conn, id)? else {
@@ -269,21 +275,27 @@ pub fn restore_user(conn: &Connection, id: &str, force: bool) -> Result<bool> {
 
     let deleted_at = user.deleted_at.unwrap();
 
+    let tx = conn.transaction()?;
+
     // Restore cascaded children (org_members)
-    restore_cascaded_direct(conn, "org_members", "user_id", id, deleted_at)?;
+    restore_cascaded_direct(&tx, "org_members", "user_id", id, deleted_at)?;
 
     // Restore the user
-    restore_entity(conn, "users", id)?;
+    restore_entity(&tx, "users", id)?;
 
+    tx.commit()?;
     Ok(true)
 }
 
 /// Get a user with their operator role and org memberships.
 pub fn get_user_with_roles(conn: &Connection, id: &str) -> Result<Option<UserWithRoles>> {
-    // Get the base user
+    // Get the base user (exclude soft-deleted)
     let user: Option<User> = query_one(
         conn,
-        &format!("SELECT {} FROM users WHERE id = ?1", USER_COLS),
+        &format!(
+            "SELECT {} FROM users WHERE id = ?1 AND deleted_at IS NULL",
+            USER_COLS
+        ),
         &[&id],
     )?;
 
@@ -291,13 +303,15 @@ pub fn get_user_with_roles(conn: &Connection, id: &str) -> Result<Option<UserWit
         return Ok(None);
     };
 
-    // Get org memberships with org names
+    // Get org memberships with org names (exclude soft-deleted members and orgs)
     let memberships: Vec<(String, String, String, OrgMemberRole)> = {
         let mut stmt = conn.prepare(
             "SELECT m.id, m.org_id, o.name, m.role
              FROM org_members m
              JOIN organizations o ON o.id = m.org_id
              WHERE m.user_id = ?1
+               AND m.deleted_at IS NULL
+               AND o.deleted_at IS NULL
              ORDER BY o.name",
         )?;
         stmt.query_map([&id], |row| {
@@ -1288,6 +1302,8 @@ pub fn create_service_config(
         config_encrypted: encrypted_config.to_vec(),
         created_at: now,
         updated_at: now,
+        deleted_at: None,
+        deleted_cascade_depth: None,
     })
 }
 
@@ -1296,7 +1312,7 @@ pub fn get_service_config_by_id(conn: &Connection, id: &str) -> Result<Option<Se
     query_one(
         conn,
         &format!(
-            "SELECT {} FROM service_configs WHERE id = ?1",
+            "SELECT {} FROM service_configs WHERE id = ?1 AND deleted_at IS NULL",
             SERVICE_CONFIG_COLS
         ),
         &[&id],
@@ -1308,7 +1324,7 @@ pub fn list_service_configs_for_org(conn: &Connection, org_id: &str) -> Result<V
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM service_configs WHERE org_id = ?1 ORDER BY name",
+            "SELECT {} FROM service_configs WHERE org_id = ?1 AND deleted_at IS NULL ORDER BY name",
             SERVICE_CONFIG_COLS
         ),
         &[&org_id],
@@ -1324,7 +1340,7 @@ pub fn list_service_configs_for_org_by_category(
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM service_configs WHERE org_id = ?1 AND category = ?2 ORDER BY name",
+            "SELECT {} FROM service_configs WHERE org_id = ?1 AND category = ?2 AND deleted_at IS NULL ORDER BY name",
             SERVICE_CONFIG_COLS
         ),
         params![org_id, category.as_str()],
@@ -1340,14 +1356,13 @@ pub fn list_service_configs_for_org_by_provider(
     query_all(
         conn,
         &format!(
-            "SELECT {} FROM service_configs WHERE org_id = ?1 AND provider = ?2 ORDER BY name",
+            "SELECT {} FROM service_configs WHERE org_id = ?1 AND provider = ?2 AND deleted_at IS NULL ORDER BY name",
             SERVICE_CONFIG_COLS
         ),
         params![org_id, provider.as_str()],
     )
 }
 
-/// Update a service config's name and/or encrypted config
 pub fn update_service_config(
     conn: &Connection,
     id: &str,
@@ -1366,9 +1381,11 @@ pub fn update_service_config(
     builder.execute_returning(conn, SERVICE_CONFIG_COLS)
 }
 
-/// Delete a service config (fails if still referenced)
-pub fn delete_service_config(conn: &Connection, id: &str) -> Result<bool> {
-    // Check if referenced by org, project, or product
+/// Soft delete a service config (fails if still referenced by active entities)
+pub fn soft_delete_service_config(conn: &Connection, id: &str) -> Result<bool> {
+    use super::soft_delete::soft_delete_entity;
+
+    // Check if referenced by org, project, or product (only active ones)
     let usage = get_service_config_usage(conn, id)?;
     if !usage.orgs.is_empty() || !usage.projects.is_empty() || !usage.products.is_empty() {
         return Err(AppError::BadRequest(
@@ -1376,8 +1393,22 @@ pub fn delete_service_config(conn: &Connection, id: &str) -> Result<bool> {
         ));
     }
 
-    let deleted = conn.execute("DELETE FROM service_configs WHERE id = ?1", params![id])?;
-    Ok(deleted > 0)
+    Ok(soft_delete_entity(conn, "service_configs", id)?.deleted)
+}
+
+/// Get a soft-deleted service config by ID (for restore operations and testing).
+pub fn get_deleted_service_config_by_id(
+    conn: &Connection,
+    id: &str,
+) -> Result<Option<ServiceConfig>> {
+    query_one(
+        conn,
+        &format!(
+            "SELECT {} FROM service_configs WHERE id = ?1 AND deleted_at IS NOT NULL",
+            SERVICE_CONFIG_COLS
+        ),
+        &[&id],
+    )
 }
 
 /// Get usage information for a service config (which orgs/projects/products reference it)
@@ -1681,25 +1712,30 @@ pub fn delete_organization(conn: &Connection, id: &str) -> Result<bool> {
 }
 
 /// Soft delete an organization and cascade to all children.
-/// Cascade: org_members (depth 1), projects (depth 1), products (depth 2), licenses (depth 3)
-pub fn soft_delete_organization(conn: &Connection, id: &str) -> Result<bool> {
+/// Cascade: org_members (depth 1), projects (depth 1), service_configs (depth 1), products (depth 2), licenses (depth 3)
+/// Uses a transaction to ensure atomicity of multi-table cascade.
+pub fn soft_delete_organization(conn: &mut Connection, id: &str) -> Result<bool> {
     use super::soft_delete::{
         PROJECTS_IN_ORG_DELETE_SUBQUERY, cascade_delete_direct, cascade_delete_via_subquery,
         soft_delete_entity,
     };
 
-    let result = soft_delete_entity(conn, "organizations", id)?;
+    let tx = conn.transaction()?;
+
+    let result = soft_delete_entity(&tx, "organizations", id)?;
     if !result.deleted {
+        tx.commit()?;
         return Ok(false);
     }
 
     // Direct children (depth 1)
-    cascade_delete_direct(conn, "org_members", "org_id", id, result.deleted_at, 1)?;
-    cascade_delete_direct(conn, "projects", "org_id", id, result.deleted_at, 1)?;
+    cascade_delete_direct(&tx, "org_members", "org_id", id, result.deleted_at, 1)?;
+    cascade_delete_direct(&tx, "projects", "org_id", id, result.deleted_at, 1)?;
+    cascade_delete_direct(&tx, "service_configs", "org_id", id, result.deleted_at, 1)?;
 
     // Transitive children via projects (depth 2, 3)
     cascade_delete_via_subquery(
-        conn,
+        &tx,
         "products",
         "project_id",
         PROJECTS_IN_ORG_DELETE_SUBQUERY,
@@ -1708,7 +1744,7 @@ pub fn soft_delete_organization(conn: &Connection, id: &str) -> Result<bool> {
         2,
     )?;
     cascade_delete_via_subquery(
-        conn,
+        &tx,
         "licenses",
         "project_id",
         PROJECTS_IN_ORG_DELETE_SUBQUERY,
@@ -1717,6 +1753,7 @@ pub fn soft_delete_organization(conn: &Connection, id: &str) -> Result<bool> {
         3,
     )?;
 
+    tx.commit()?;
     Ok(true)
 }
 
@@ -1734,7 +1771,8 @@ pub fn get_deleted_organization_by_id(conn: &Connection, id: &str) -> Result<Opt
 
 /// Restore a soft-deleted organization and all cascaded children.
 /// Organizations are always directly deleted (depth=0), so no cascade check needed.
-pub fn restore_organization(conn: &Connection, id: &str) -> Result<bool> {
+/// Uses a transaction to ensure atomicity of multi-table restore.
+pub fn restore_organization(conn: &mut Connection, id: &str) -> Result<bool> {
     use super::soft_delete::{
         PROJECTS_IN_ORG_RESTORE_SUBQUERY, restore_cascaded_direct, restore_cascaded_via_subquery,
         restore_entity,
@@ -1746,9 +1784,11 @@ pub fn restore_organization(conn: &Connection, id: &str) -> Result<bool> {
 
     let deleted_at = org.deleted_at.unwrap();
 
+    let tx = conn.transaction()?;
+
     // Restore in reverse order: deepest children first
     restore_cascaded_via_subquery(
-        conn,
+        &tx,
         "licenses",
         "project_id",
         PROJECTS_IN_ORG_RESTORE_SUBQUERY,
@@ -1756,19 +1796,20 @@ pub fn restore_organization(conn: &Connection, id: &str) -> Result<bool> {
         deleted_at,
     )?;
     restore_cascaded_via_subquery(
-        conn,
+        &tx,
         "products",
         "project_id",
         PROJECTS_IN_ORG_RESTORE_SUBQUERY,
         id,
         deleted_at,
     )?;
-    restore_cascaded_direct(conn, "projects", "org_id", id, deleted_at)?;
-    restore_cascaded_direct(conn, "org_members", "org_id", id, deleted_at)?;
+    restore_cascaded_direct(&tx, "projects", "org_id", id, deleted_at)?;
+    restore_cascaded_direct(&tx, "org_members", "org_id", id, deleted_at)?;
 
     // Restore the organization itself
-    restore_entity(conn, "organizations", id)?;
+    restore_entity(&tx, "organizations", id)?;
 
+    tx.commit()?;
     Ok(true)
 }
 
@@ -1989,17 +2030,21 @@ pub fn delete_org_member(conn: &Connection, id: &str) -> Result<bool> {
 }
 
 /// Soft delete an org member and cascade to project_members.
-pub fn soft_delete_org_member(conn: &Connection, id: &str) -> Result<bool> {
+/// Uses a transaction to ensure atomicity of multi-table cascade.
+pub fn soft_delete_org_member(conn: &mut Connection, id: &str) -> Result<bool> {
     use super::soft_delete::{cascade_delete_direct, soft_delete_entity};
 
-    let result = soft_delete_entity(conn, "org_members", id)?;
+    let tx = conn.transaction()?;
+
+    let result = soft_delete_entity(&tx, "org_members", id)?;
     if !result.deleted {
+        tx.commit()?;
         return Ok(false);
     }
 
     // Cascade to project_members (depth 1)
     cascade_delete_direct(
-        conn,
+        &tx,
         "project_members",
         "org_member_id",
         id,
@@ -2007,6 +2052,7 @@ pub fn soft_delete_org_member(conn: &Connection, id: &str) -> Result<bool> {
         1,
     )?;
 
+    tx.commit()?;
     Ok(true)
 }
 
@@ -2340,18 +2386,23 @@ pub fn delete_project(conn: &Connection, id: &str) -> Result<bool> {
 }
 
 /// Soft delete a project and cascade to products and licenses.
-pub fn soft_delete_project(conn: &Connection, id: &str) -> Result<bool> {
+/// Uses a transaction to ensure atomicity of multi-table cascade.
+pub fn soft_delete_project(conn: &mut Connection, id: &str) -> Result<bool> {
     use super::soft_delete::{cascade_delete_direct, soft_delete_entity};
 
-    let result = soft_delete_entity(conn, "projects", id)?;
+    let tx = conn.transaction()?;
+
+    let result = soft_delete_entity(&tx, "projects", id)?;
     if !result.deleted {
+        tx.commit()?;
         return Ok(false);
     }
 
     // Cascade to products (depth 1) and licenses (depth 2)
-    cascade_delete_direct(conn, "products", "project_id", id, result.deleted_at, 1)?;
-    cascade_delete_direct(conn, "licenses", "project_id", id, result.deleted_at, 2)?;
+    cascade_delete_direct(&tx, "products", "project_id", id, result.deleted_at, 1)?;
+    cascade_delete_direct(&tx, "licenses", "project_id", id, result.deleted_at, 2)?;
 
+    tx.commit()?;
     Ok(true)
 }
 
@@ -2369,7 +2420,8 @@ pub fn get_deleted_project_by_id(conn: &Connection, id: &str) -> Result<Option<P
 
 /// Restore a soft-deleted project and all cascaded children.
 /// Returns Err if depth > 0 and force=false (was cascaded from org delete).
-pub fn restore_project(conn: &Connection, id: &str, force: bool) -> Result<bool> {
+/// Uses a transaction to ensure atomicity of multi-table restore.
+pub fn restore_project(conn: &mut Connection, id: &str, force: bool) -> Result<bool> {
     use super::soft_delete::{check_restore_allowed, restore_cascaded_direct, restore_entity};
 
     let Some(project) = get_deleted_project_by_id(conn, id)? else {
@@ -2380,13 +2432,16 @@ pub fn restore_project(conn: &Connection, id: &str, force: bool) -> Result<bool>
 
     let deleted_at = project.deleted_at.unwrap();
 
+    let tx = conn.transaction()?;
+
     // Restore in reverse order: deepest children first
-    restore_cascaded_direct(conn, "licenses", "project_id", id, deleted_at)?;
-    restore_cascaded_direct(conn, "products", "project_id", id, deleted_at)?;
+    restore_cascaded_direct(&tx, "licenses", "project_id", id, deleted_at)?;
+    restore_cascaded_direct(&tx, "products", "project_id", id, deleted_at)?;
 
     // Restore the project itself
-    restore_entity(conn, "projects", id)?;
+    restore_entity(&tx, "projects", id)?;
 
+    tx.commit()?;
     Ok(true)
 }
 
@@ -2458,7 +2513,7 @@ pub fn get_project_member_by_id(
          FROM project_members pm
          JOIN org_members om ON pm.org_member_id = om.id
          JOIN users u ON om.user_id = u.id
-         WHERE pm.id = ?1 AND pm.deleted_at IS NULL",
+         WHERE pm.id = ?1 AND pm.deleted_at IS NULL AND om.deleted_at IS NULL AND u.deleted_at IS NULL",
         &[&id],
     )
 }
@@ -2476,7 +2531,7 @@ pub fn get_project_member_by_user_and_project(
          FROM project_members pm
          JOIN org_members om ON pm.org_member_id = om.id
          JOIN users u ON om.user_id = u.id
-         WHERE u.id = ?1 AND om.org_id = ?2 AND pm.project_id = ?3 AND om.deleted_at IS NULL AND pm.deleted_at IS NULL",
+         WHERE u.id = ?1 AND om.org_id = ?2 AND pm.project_id = ?3 AND pm.deleted_at IS NULL AND om.deleted_at IS NULL AND u.deleted_at IS NULL",
         params![user_id, org_id, project_id],
     )
 }
@@ -2491,7 +2546,7 @@ pub fn list_project_members(
          FROM project_members pm
          JOIN org_members om ON pm.org_member_id = om.id
          JOIN users u ON om.user_id = u.id
-         WHERE pm.project_id = ?1 AND pm.deleted_at IS NULL
+         WHERE pm.project_id = ?1 AND pm.deleted_at IS NULL AND om.deleted_at IS NULL AND u.deleted_at IS NULL
          ORDER BY pm.created_at DESC",
         &[&project_id],
     )
@@ -2505,7 +2560,11 @@ pub fn list_project_members_paginated(
     offset: i64,
 ) -> Result<(Vec<ProjectMemberWithDetails>, i64)> {
     let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM project_members WHERE project_id = ?1 AND deleted_at IS NULL",
+        "SELECT COUNT(*)
+         FROM project_members pm
+         JOIN org_members om ON pm.org_member_id = om.id
+         JOIN users u ON om.user_id = u.id
+         WHERE pm.project_id = ?1 AND pm.deleted_at IS NULL AND om.deleted_at IS NULL AND u.deleted_at IS NULL",
         params![project_id],
         |row| row.get(0),
     )?;
@@ -2516,7 +2575,7 @@ pub fn list_project_members_paginated(
          FROM project_members pm
          JOIN org_members om ON pm.org_member_id = om.id
          JOIN users u ON om.user_id = u.id
-         WHERE pm.project_id = ?1 AND pm.deleted_at IS NULL
+         WHERE pm.project_id = ?1 AND pm.deleted_at IS NULL AND om.deleted_at IS NULL AND u.deleted_at IS NULL
          ORDER BY pm.created_at DESC
          LIMIT ?2 OFFSET ?3",
         params![project_id, limit, offset],
@@ -2713,17 +2772,22 @@ pub fn delete_product(conn: &Connection, id: &str) -> Result<bool> {
 }
 
 /// Soft delete a product and cascade to licenses.
-pub fn soft_delete_product(conn: &Connection, id: &str) -> Result<bool> {
+/// Uses a transaction to ensure atomicity of multi-table cascade.
+pub fn soft_delete_product(conn: &mut Connection, id: &str) -> Result<bool> {
     use super::soft_delete::{cascade_delete_direct, soft_delete_entity};
 
-    let result = soft_delete_entity(conn, "products", id)?;
+    let tx = conn.transaction()?;
+
+    let result = soft_delete_entity(&tx, "products", id)?;
     if !result.deleted {
+        tx.commit()?;
         return Ok(false);
     }
 
     // Cascade to licenses (depth 1)
-    cascade_delete_direct(conn, "licenses", "product_id", id, result.deleted_at, 1)?;
+    cascade_delete_direct(&tx, "licenses", "product_id", id, result.deleted_at, 1)?;
 
+    tx.commit()?;
     Ok(true)
 }
 
@@ -2741,7 +2805,8 @@ pub fn get_deleted_product_by_id(conn: &Connection, id: &str) -> Result<Option<P
 
 /// Restore a soft-deleted product and all cascaded licenses.
 /// Returns Err if depth > 0 and force=false (was cascaded from project/org delete).
-pub fn restore_product(conn: &Connection, id: &str, force: bool) -> Result<bool> {
+/// Uses a transaction to ensure atomicity of multi-table restore.
+pub fn restore_product(conn: &mut Connection, id: &str, force: bool) -> Result<bool> {
     use super::soft_delete::{check_restore_allowed, restore_cascaded_direct, restore_entity};
 
     let Some(product) = get_deleted_product_by_id(conn, id)? else {
@@ -2752,12 +2817,15 @@ pub fn restore_product(conn: &Connection, id: &str, force: bool) -> Result<bool>
 
     let deleted_at = product.deleted_at.unwrap();
 
+    let tx = conn.transaction()?;
+
     // Restore licenses that were cascaded
-    restore_cascaded_direct(conn, "licenses", "product_id", id, deleted_at)?;
+    restore_cascaded_direct(&tx, "licenses", "product_id", id, deleted_at)?;
 
     // Restore the product itself
-    restore_entity(conn, "products", id)?;
+    restore_entity(&tx, "products", id)?;
 
+    tx.commit()?;
     Ok(true)
 }
 
@@ -2989,7 +3057,8 @@ pub fn list_products_with_links_paginated(
 /// (~4 billion codes, making brute force economically unviable).
 pub fn generate_activation_code(prefix: &str) -> String {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    use rand::rngs::OsRng;
+    let mut rng = OsRng;
     let chars: Vec<char> = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".chars().collect();
 
     let mut part = || -> String {

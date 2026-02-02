@@ -105,7 +105,10 @@ impl StripeClient {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            tracing::warn!("Failed to fetch Stripe session {}: {} - {}", session_id, status, error_text);
+            tracing::warn!(
+                "Stripe discount enrichment failed for session {}: {} - {} (discount code may be missing from transaction)",
+                session_id, status, error_text
+            );
             return Ok(None);
         }
 
@@ -233,6 +236,9 @@ pub struct StripeCheckoutSession {
     pub id: String,
     pub mode: Option<String>, // "payment" or "subscription"
     pub payment_status: String,
+    /// Payment intent ID (pi_xxx) - present for one-time payments.
+    /// Used as order_id for refund linkage (refunds reference payment_intent).
+    pub payment_intent: Option<String>,
     pub customer: Option<String>,
     /// Pre-filled email (if set when creating session)
     pub customer_email: Option<String>,
@@ -305,6 +311,18 @@ pub struct StripeInvoice {
     pub billing_reason: Option<String>, // "subscription_create", "subscription_cycle", etc.
     pub status: String,                 // "paid", "open", etc.
     pub lines: Option<StripeInvoiceLines>,
+    /// Currency code (lowercase, e.g., "usd")
+    pub currency: Option<String>,
+    /// Amount paid in cents
+    pub amount_paid: Option<i64>,
+    /// Subtotal before tax/discounts in cents
+    pub subtotal: Option<i64>,
+    /// Tax amount in cents
+    pub tax: Option<i64>,
+    /// Total amount in cents
+    pub total: Option<i64>,
+    /// Whether this is a test mode invoice
+    pub livemode: Option<bool>,
 }
 
 impl StripeInvoice {
@@ -324,4 +342,41 @@ pub struct StripeSubscription {
     pub id: String,
     pub customer: Option<String>,
     pub status: String, // "active", "canceled", etc.
+}
+
+// ============ charge.refunded ============
+
+#[derive(Debug, Deserialize)]
+pub struct StripeRefund {
+    pub id: String,
+    /// Amount refunded in cents
+    pub amount: i64,
+    /// Currency code (lowercase)
+    pub currency: String,
+    /// Status of the refund
+    pub status: String, // "succeeded", "pending", "failed", etc.
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StripeRefundList {
+    pub data: Vec<StripeRefund>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StripeCharge {
+    pub id: String,
+    /// Payment intent ID (used to look up checkout session)
+    pub payment_intent: Option<String>,
+    /// Amount in cents
+    pub amount: i64,
+    /// Amount refunded in cents
+    pub amount_refunded: i64,
+    /// Currency code (lowercase)
+    pub currency: String,
+    /// Whether fully refunded
+    pub refunded: bool,
+    /// Whether this is a test mode charge
+    pub livemode: bool,
+    /// List of refunds on this charge
+    pub refunds: Option<StripeRefundList>,
 }

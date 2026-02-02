@@ -60,7 +60,7 @@ pub const ORGANIZATION_COLS: &str =
     "id, name, payment_config_id, email_config_id, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
 pub const SERVICE_CONFIG_COLS: &str =
-    "id, org_id, name, category, provider, config_encrypted, created_at, updated_at";
+    "id, org_id, name, category, provider, config_encrypted, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
 pub const ORG_MEMBER_COLS: &str =
     "id, user_id, org_id, role, created_at, updated_at, deleted_at, deleted_cascade_depth";
@@ -141,6 +141,8 @@ impl FromRow for ServiceConfig {
             config_encrypted: row.get(5)?,
             created_at: row.get(6)?,
             updated_at: row.get(7)?,
+            deleted_at: row.get(8)?,
+            deleted_cascade_depth: row.get(9)?,
         })
     }
 }

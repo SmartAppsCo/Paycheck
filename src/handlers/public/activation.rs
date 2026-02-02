@@ -15,7 +15,7 @@ use crate::email::{
 };
 use crate::error::Result;
 use crate::extractors::Json;
-use crate::metering::{spawn_email_metering, EmailMeteringEvent};
+use crate::metering::{generate_email_idempotency_key, spawn_email_metering, EmailMeteringEvent};
 use crate::models::{ActorType, AuditAction, AuditLogNames};
 use crate::util::AuditLogBuilder;
 
@@ -209,13 +209,6 @@ pub async fn request_activation_code(
             };
 
             if let Some(delivery_method) = delivery_method {
-                // Use first license ID as idempotency key (or generate UUID for multi-license)
-                let idempotency_key = if active_licenses.len() == 1 {
-                    active_licenses[0].id.clone()
-                } else {
-                    uuid::Uuid::new_v4().to_string()
-                };
-
                 spawn_email_metering(
                     state.http_client.clone(),
                     state.metering_webhook_url.clone(),
@@ -227,7 +220,7 @@ pub async fn request_activation_code(
                         product_id: active_licenses.first().map(|l| l.product_id.clone()),
                         delivery_method: delivery_method.to_string(),
                         timestamp: chrono::Utc::now().timestamp(),
-                        idempotency_key,
+                        idempotency_key: generate_email_idempotency_key(),
                     },
                 );
             }

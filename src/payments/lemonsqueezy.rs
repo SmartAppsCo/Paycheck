@@ -264,6 +264,16 @@ pub struct LemonSqueezySubscriptionInvoiceAttributes {
     pub status: String, // "paid", etc.
     /// Billing period end (ISO 8601 datetime string)
     pub period_end: Option<String>,
+    /// Currency code (e.g., "USD", "EUR")
+    pub currency: Option<String>,
+    /// Subtotal before tax (in cents)
+    pub subtotal: Option<i64>,
+    /// Tax amount (in cents)
+    pub tax: Option<i64>,
+    /// Final total amount (in cents)
+    pub total: Option<i64>,
+    /// Test mode indicator
+    pub test_mode: Option<bool>,
 }
 
 impl LemonSqueezySubscriptionInvoiceAttributes {
@@ -283,4 +293,20 @@ impl LemonSqueezySubscriptionInvoiceAttributes {
 pub struct LemonSqueezySubscriptionAttributes {
     pub customer_id: i64,
     pub status: String, // "cancelled", "active", etc.
+}
+
+// ============ order_refunded ============
+
+#[derive(Debug, Deserialize)]
+pub struct LemonSqueezyRefundAttributes {
+    pub order_id: i64,
+    pub store_id: i64,
+    /// Amount refunded (in cents)
+    pub amount: i64,
+    /// Currency code (e.g., "USD")
+    pub currency: String,
+    /// Refund status
+    pub status: String, // "succeeded", "pending", etc.
+    /// Test mode indicator
+    pub test_mode: Option<bool>,
 }

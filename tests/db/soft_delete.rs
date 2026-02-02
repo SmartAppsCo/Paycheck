@@ -4,9 +4,10 @@
 mod common;
 
 use common::{
-    LICENSE_VALID_DAYS, ONE_MONTH, OperatorRole, OrgMemberRole, create_test_license,
-    create_test_operator, create_test_org, create_test_org_member, create_test_product,
-    create_test_project, future_timestamp, now, queries, setup_test_db, test_master_key,
+    CreateOrgMember, LICENSE_VALID_DAYS, ONE_MONTH, OperatorRole, OrgMemberRole, ProjectMemberRole,
+    create_test_license, create_test_operator, create_test_org, create_test_org_member,
+    create_test_product, create_test_project, create_test_project_member, future_timestamp, now,
+    queries, setup_test_db, test_master_key,
 };
 
 // ============ Soft Delete Mechanics ============
@@ -41,6 +42,73 @@ fn test_soft_delete_user_sets_deleted_at_and_depth() {
 
 // Note: test_soft_delete_user_cascades_to_operator removed - operators are now just
 // users with operator_role set, not a separate entity that cascades
+
+#[test]
+fn test_get_user_with_roles_excludes_soft_deleted_user() {
+    let mut conn = setup_test_db();
+    let org = create_test_org(&mut conn, "Test Org");
+    let (user, _member, _api_key) =
+        create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Owner);
+
+    // User with roles should be found before soft delete
+    let result = queries::get_user_with_roles(&conn, &user.id).expect("Query failed");
+    assert!(
+        result.is_some(),
+        "User with roles should be found before soft delete"
+    );
+
+    // Soft delete the user
+    queries::soft_delete_user(&mut conn, &user.id).expect("Soft delete failed");
+
+    // User with roles should NOT be found after soft delete
+    let result = queries::get_user_with_roles(&conn, &user.id).expect("Query failed");
+    assert!(
+        result.is_none(),
+        "get_user_with_roles should exclude soft-deleted users"
+    );
+}
+
+#[test]
+fn test_get_user_with_roles_excludes_soft_deleted_memberships() {
+    let mut conn = setup_test_db();
+    let org1 = create_test_org(&mut conn, "Org 1");
+    let org2 = create_test_org(&mut conn, "Org 2");
+
+    // Create user as member of org1
+    let (user, _member1, _api_key) =
+        create_test_org_member(&mut conn, &org1.id, "member@test.com", OrgMemberRole::Owner);
+
+    // Add user to org2 as well
+    queries::create_org_member(
+        &conn,
+        &org2.id,
+        &CreateOrgMember {
+            user_id: user.id.clone(),
+            role: OrgMemberRole::Admin,
+        },
+    )
+    .unwrap();
+
+    // User should have 2 memberships
+    let result = queries::get_user_with_roles(&conn, &user.id)
+        .expect("Query failed")
+        .expect("User should be found");
+    assert_eq!(result.memberships.len(), 2, "User should have 2 memberships");
+
+    // Soft delete org2
+    queries::soft_delete_organization(&mut conn, &org2.id).expect("Soft delete failed");
+
+    // User should now only show 1 membership (org1)
+    let result = queries::get_user_with_roles(&conn, &user.id)
+        .expect("Query failed")
+        .expect("User should still be found");
+    assert_eq!(
+        result.memberships.len(),
+        1,
+        "get_user_with_roles should exclude memberships in soft-deleted orgs"
+    );
+    assert_eq!(result.memberships[0].org_id, org1.id);
+}
 
 #[test]
 fn test_soft_delete_user_cascades_to_org_members() {
@@ -815,5 +883,109 @@ fn test_multiple_products_deleted_same_time_restore_correctly() {
             .expect("Query failed")
             .is_some(),
         "Product 3 should be restored with project"
+    );
+}
+
+// ============ Defense in Depth: JOIN Query Filtering ============
+
+/// Test that list_project_members filters out members whose org_member is soft-deleted.
+///
+/// This tests defense-in-depth: even if cascade logic fails or DB state becomes
+/// inconsistent, JOIN queries should still filter out soft-deleted parent records.
+///
+/// The bug: list_project_members checks pm.deleted_at IS NULL but not om.deleted_at,
+/// so it could return project members whose org_member was soft-deleted if the
+/// cascade to project_members failed.
+#[test]
+fn test_list_project_members_excludes_deleted_org_member() {
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+
+    // Setup: org -> project -> org_member -> project_member
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let (user, org_member, _api_key) =
+        create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Member);
+    let project_member =
+        create_test_project_member(&mut conn, &org_member.id, &project.id, ProjectMemberRole::View);
+
+    // Verify project member is visible initially
+    let members = queries::list_project_members(&conn, &project.id).expect("Query failed");
+    assert_eq!(members.len(), 1, "Should have 1 project member initially");
+    assert_eq!(members[0].id, project_member.id);
+
+    // Soft-delete the org_member (this should cascade to project_member)
+    queries::soft_delete_org_member(&mut conn, &org_member.id).expect("Soft delete failed");
+
+    // Normal case: cascade worked, project_member is also deleted
+    let members_after_cascade =
+        queries::list_project_members(&conn, &project.id).expect("Query failed");
+    assert_eq!(
+        members_after_cascade.len(),
+        0,
+        "Should have 0 project members after org_member soft delete (cascade worked)"
+    );
+
+    // Simulate inconsistent state: manually "restore" project_member without restoring org_member
+    // This simulates a cascade failure or manual DB manipulation
+    conn.execute(
+        "UPDATE project_members SET deleted_at = NULL, deleted_cascade_depth = NULL WHERE id = ?1",
+        rusqlite::params![project_member.id],
+    )
+    .expect("Manual restore failed");
+
+    // BUG TEST: list_project_members should still return 0 because org_member is deleted
+    // If this returns 1, the bug exists (query doesn't check om.deleted_at)
+    let members_inconsistent =
+        queries::list_project_members(&conn, &project.id).expect("Query failed");
+
+    assert_eq!(
+        members_inconsistent.len(),
+        0,
+        "BUG: list_project_members returned a project member whose org_member is soft-deleted. \
+         The query should check om.deleted_at IS NULL for defense-in-depth."
+    );
+}
+
+/// Test that list_project_members filters out members whose user is soft-deleted.
+///
+/// Similar to above, but tests the user -> org_member -> project_member chain.
+#[test]
+fn test_list_project_members_excludes_deleted_user() {
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+
+    // Setup: org -> project -> user -> org_member -> project_member
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let (user, org_member, _api_key) =
+        create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Member);
+    let project_member =
+        create_test_project_member(&mut conn, &org_member.id, &project.id, ProjectMemberRole::View);
+
+    // Soft-delete the user (cascades to org_member, which cascades to project_member)
+    queries::soft_delete_user(&mut conn, &user.id).expect("Soft delete failed");
+
+    // Simulate inconsistent state: manually "restore" both org_member and project_member
+    // but leave user deleted
+    conn.execute(
+        "UPDATE org_members SET deleted_at = NULL, deleted_cascade_depth = NULL WHERE id = ?1",
+        rusqlite::params![org_member.id],
+    )
+    .expect("Manual restore org_member failed");
+    conn.execute(
+        "UPDATE project_members SET deleted_at = NULL, deleted_cascade_depth = NULL WHERE id = ?1",
+        rusqlite::params![project_member.id],
+    )
+    .expect("Manual restore project_member failed");
+
+    // BUG TEST: list_project_members should return 0 because user is deleted
+    let members = queries::list_project_members(&conn, &project.id).expect("Query failed");
+
+    assert_eq!(
+        members.len(),
+        0,
+        "BUG: list_project_members returned a project member whose user is soft-deleted. \
+         The query should check u.deleted_at IS NULL for defense-in-depth."
     );
 }

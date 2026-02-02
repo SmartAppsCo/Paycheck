@@ -31,9 +31,10 @@ pub async fn create_project(
     // Look up org for audit log
     let org = queries::get_organization_by_id(&conn, &org_id)?.or_not_found(msg::ORG_NOT_FOUND)?;
 
-    // Validate email_from requires org to have an email config set
+    // Validate email_from requires an email config at org OR project level
     if input.email_from.is_some() {
-        if org.email_config_id.is_none() {
+        let has_email_config = org.email_config_id.is_some() || input.email_config_id.is_some();
+        if !has_email_config {
             return Err(AppError::BadRequest(
                 msg::EMAIL_FROM_REQUIRES_ORG_RESEND_KEY.into(),
             ));
@@ -137,10 +138,17 @@ pub async fn update_project(
     let existing = queries::get_project_by_id(&conn, &path.project_id)?
         .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
-    // Validate email_from requires org to have an email config set
+    // Validate email_from requires an email config at org OR project level
     // Some(Some(value)) = setting to a value, Some(None) = clearing, None = unchanged
     if matches!(input.email_from, Some(Some(_))) {
-        if org.email_config_id.is_none() {
+        // Determine if project will have email config after this update
+        let project_will_have_email_config = match &input.email_config_id {
+            Some(Some(_)) => true,              // Setting a config
+            Some(None) => false,                // Clearing config
+            None => existing.email_config_id.is_some(), // Keeping existing
+        };
+        let has_email_config = org.email_config_id.is_some() || project_will_have_email_config;
+        if !has_email_config {
             return Err(AppError::BadRequest(
                 msg::EMAIL_FROM_REQUIRES_ORG_RESEND_KEY.into(),
             ));
@@ -175,7 +183,7 @@ pub async fn delete_project(
 ) -> Result<Json<serde_json::Value>> {
     ctx.require_admin()?;
 
-    let conn = state.db.get()?;
+    let mut conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     // Look up org and project for audit log
@@ -184,7 +192,7 @@ pub async fn delete_project(
     let existing = queries::get_project_by_id(&conn, &path.project_id)?
         .or_not_found(msg::PROJECT_NOT_FOUND)?;
 
-    queries::soft_delete_project(&conn, &path.project_id)?;
+    queries::soft_delete_project(&mut conn, &path.project_id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))
@@ -279,7 +287,7 @@ pub async fn restore_project(
 ) -> Result<Json<ProjectPublic>> {
     ctx.require_admin()?;
 
-    let conn = state.db.get()?;
+    let mut conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     // Look up org for audit log
@@ -293,7 +301,7 @@ pub async fn restore_project(
         return Err(AppError::NotFound(msg::DELETED_PROJECT_NOT_FOUND.into()));
     }
 
-    queries::restore_project(&conn, &path.project_id, input.force)?;
+    queries::restore_project(&mut conn, &path.project_id, input.force)?;
 
     let project = queries::get_project_by_id(&conn, &path.project_id)?
         .ok_or_else(|| AppError::Internal(msg::PROJECT_NOT_FOUND_AFTER_RESTORE.into()))?;

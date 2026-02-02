@@ -151,7 +151,7 @@ pub async fn delete_user(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>> {
-    let conn = state.db.get()?;
+    let mut conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     // Don't allow deleting yourself
@@ -161,7 +161,7 @@ pub async fn delete_user(
 
     let existing = queries::get_user_by_id(&conn, &id)?.or_not_found(msg::USER_NOT_FOUND)?;
 
-    queries::soft_delete_user(&conn, &id)?;
+    queries::soft_delete_user(&mut conn, &id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.user.id))
@@ -189,7 +189,7 @@ pub async fn restore_user(
     Path(id): Path<String>,
     Json(input): Json<RestoreRequest>,
 ) -> Result<Json<User>> {
-    let conn = state.db.get()?;
+    let mut conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     // Get the deleted user
@@ -197,7 +197,7 @@ pub async fn restore_user(
         queries::get_deleted_user_by_id(&conn, &id)?.or_not_found(msg::DELETED_USER_NOT_FOUND)?;
 
     // Restore the user and cascade-deleted children
-    queries::restore_user(&conn, &id, input.force)?;
+    queries::restore_user(&mut conn, &id, input.force)?;
 
     // Get the restored user
     let user = queries::get_user_by_id(&conn, &id)?

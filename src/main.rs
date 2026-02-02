@@ -848,7 +848,11 @@ async fn main() {
         master_key: config.master_key.clone(),
         email_hasher,
         success_page_url: config.success_page_url.clone(),
-        activation_rate_limiter: Arc::new(ActivationRateLimiter::default()),
+        activation_rate_limiter: Arc::new(ActivationRateLimiter::with_max_entries(
+            3,    // max requests per email
+            3600, // window in seconds (1 hour)
+            config.rate_limit.activation_max_entries,
+        )),
         email_service: Arc::new(email_service),
         delivery_service: Arc::new(delivery_service),
         jwks_cache,

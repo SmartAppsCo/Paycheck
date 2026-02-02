@@ -375,7 +375,7 @@ mod restore_tests {
             let _product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
 
             // Soft-delete the project (simulating accidental deletion)
-            queries::soft_delete_project(&conn, &project.id).unwrap();
+            queries::soft_delete_project(&mut conn, &project.id).unwrap();
 
             org_id = org.id;
             project_id = project.id;
@@ -511,7 +511,7 @@ mod restore_tests {
             let product = create_test_product(&conn, &project.id, "Discontinued Tier", "legacy");
 
             // Soft-delete the product
-            queries::soft_delete_product(&conn, &product.id).unwrap();
+            queries::soft_delete_product(&mut conn, &product.id).unwrap();
 
             org_id = org.id;
             project_id = project.id;

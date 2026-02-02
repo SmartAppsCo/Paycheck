@@ -28,15 +28,20 @@ pub struct RateLimitConfig {
     /// Org ops tier: requests per minute (for /orgs/* authenticated endpoints)
     /// High limit to only stop extreme abuse (runaway scripts, DDoS attempts)
     pub org_ops_rpm: u32,
+    /// Maximum entries in the activation rate limiter (per-email tracking).
+    /// Caps memory usage from distributed attacks flooding unique email hashes.
+    pub activation_max_entries: usize,
 }
 
 impl Default for RateLimitConfig {
     fn default() -> Self {
+        use crate::rate_limit::DEFAULT_ACTIVATION_MAX_ENTRIES;
         Self {
             strict_rpm: 10,
             standard_rpm: 30,
             relaxed_rpm: 60,
             org_ops_rpm: 3000,
+            activation_max_entries: DEFAULT_ACTIVATION_MAX_ENTRIES,
         }
     }
 }
@@ -44,11 +49,13 @@ impl Default for RateLimitConfig {
 impl RateLimitConfig {
     /// Create a config with rate limiting disabled (for tests)
     pub fn disabled() -> Self {
+        use crate::rate_limit::DEFAULT_ACTIVATION_MAX_ENTRIES;
         Self {
             strict_rpm: 0,
             standard_rpm: 0,
             relaxed_rpm: 0,
             org_ops_rpm: 0,
+            activation_max_entries: DEFAULT_ACTIVATION_MAX_ENTRIES,
         }
     }
 }
@@ -261,6 +268,10 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(rate_limit_defaults.org_ops_rpm),
+            activation_max_entries: env::var("RATE_LIMIT_ACTIVATION_MAX_ENTRIES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(rate_limit_defaults.activation_max_entries),
         };
 
         // Console origins for admin API CORS

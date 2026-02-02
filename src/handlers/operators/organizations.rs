@@ -212,12 +212,12 @@ pub async fn delete_organization(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>> {
-    let conn = state.db.get()?;
+    let mut conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     let existing = queries::get_organization_by_id(&conn, &id)?.or_not_found(msg::ORG_NOT_FOUND)?;
 
-    queries::soft_delete_organization(&conn, &id)?;
+    queries::soft_delete_organization(&mut conn, &id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.user.id))
@@ -238,7 +238,7 @@ pub async fn restore_organization(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<OrganizationPublic>> {
-    let conn = state.db.get()?;
+    let mut conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     // Get the deleted organization (need to check it exists and was deleted)
@@ -246,7 +246,7 @@ pub async fn restore_organization(
         .or_not_found(msg::DELETED_ORG_NOT_FOUND)?;
 
     // Restore the organization and cascade-deleted children
-    queries::restore_organization(&conn, &id)?;
+    queries::restore_organization(&mut conn, &id)?;
 
     // Get the restored organization
     let organization = queries::get_organization_by_id(&conn, &id)?

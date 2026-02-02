@@ -876,6 +876,7 @@ mod consistent_error_format {
             standard_rpm: 1,
             relaxed_rpm: 1,
             org_ops_rpm: 1,
+            ..RateLimitConfig::default()
         };
 
         let app = handlers::orgs::router(state.clone(), rate_config).with_state(state.clone());

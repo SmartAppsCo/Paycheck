@@ -141,7 +141,7 @@ pub async fn delete_product(
         return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
-    let conn = state.db.get()?;
+    let mut conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     let existing = queries::get_product_by_id(&conn, &path.product_id)?
@@ -151,7 +151,7 @@ pub async fn delete_product(
         return Err(AppError::NotFound(msg::PRODUCT_NOT_FOUND.into()));
     }
 
-    queries::soft_delete_product(&conn, &path.product_id)?;
+    queries::soft_delete_product(&mut conn, &path.product_id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))
@@ -182,7 +182,7 @@ pub async fn restore_product(
         return Err(AppError::Forbidden(msg::INSUFFICIENT_PERMISSIONS.into()));
     }
 
-    let conn = state.db.get()?;
+    let mut conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     let existing = queries::get_deleted_product_by_id(&conn, &path.product_id)?
@@ -192,7 +192,7 @@ pub async fn restore_product(
         return Err(AppError::NotFound(msg::DELETED_PRODUCT_NOT_FOUND.into()));
     }
 
-    queries::restore_product(&conn, &path.product_id, input.force)?;
+    queries::restore_product(&mut conn, &path.product_id, input.force)?;
 
     let product = queries::get_product_with_links(&conn, &path.product_id)?
         .ok_or_else(|| AppError::Internal(msg::PRODUCT_NOT_FOUND_AFTER_RESTORE.into()))?;

@@ -120,6 +120,10 @@ pub struct ServiceConfig {
     pub config_encrypted: Vec<u8>,
     pub created_at: i64,
     pub updated_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<i64>,
+    #[serde(skip)]
+    pub deleted_cascade_depth: Option<i32>,
 }
 
 impl ServiceConfig {

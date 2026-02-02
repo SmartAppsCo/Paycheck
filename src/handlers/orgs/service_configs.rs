@@ -135,6 +135,8 @@ pub async fn create_service_config(
     Path(org_id): Path<String>,
     Json(input): Json<CreateServiceConfigRequest>,
 ) -> Result<Json<ServiceConfigPublic>> {
+    ctx.require_admin()?;
+
     // Validate name
     if input.name.trim().is_empty() {
         return Err(AppError::BadRequest(msg::NAME_EMPTY.into()));
@@ -238,6 +240,8 @@ pub async fn update_service_config(
     Path(path): Path<ServiceConfigPath>,
     Json(input): Json<UpdateServiceConfigRequest>,
 ) -> Result<Json<ServiceConfigPublic>> {
+    ctx.require_admin()?;
+
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
@@ -309,6 +313,8 @@ pub async fn delete_service_config(
     headers: HeaderMap,
     Path(path): Path<ServiceConfigPath>,
 ) -> Result<Json<serde_json::Value>> {
+    ctx.require_admin()?;
+
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
@@ -321,8 +327,8 @@ pub async fn delete_service_config(
         return Err(AppError::NotFound("Service config not found".into()));
     }
 
-    // Delete (will fail if still in use)
-    queries::delete_service_config(&conn, &path.config_id)?;
+    // Soft delete (will fail if still in use)
+    queries::soft_delete_service_config(&conn, &path.config_id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))

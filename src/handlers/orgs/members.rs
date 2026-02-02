@@ -145,7 +145,7 @@ pub async fn delete_org_member(
 ) -> Result<Json<serde_json::Value>> {
     ctx.require_owner()?;
 
-    let conn = state.db.get()?;
+    let mut conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     // Prevent self-deletion
@@ -157,7 +157,7 @@ pub async fn delete_org_member(
         queries::get_org_member_with_user_by_user_and_org(&conn, &path.user_id, &path.org_id)?
             .or_not_found(msg::NOT_ORG_MEMBER)?;
 
-    queries::soft_delete_org_member(&conn, &existing.id)?;
+    queries::soft_delete_org_member(&mut conn, &existing.id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))

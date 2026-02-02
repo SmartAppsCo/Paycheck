@@ -289,3 +289,76 @@ async fn test_api_key_scope_for_own_org_works() {
         "Creating API key with scope for user's own org should succeed"
     );
 }
+
+/// Regression test: Creating API key with project_id from a different org should fail.
+///
+/// When creating a scope with both org_id and project_id, we must validate that
+/// the project actually belongs to the specified org. This validation is implemented
+/// in queries::create_api_key() at the DB layer (defense-in-depth).
+///
+/// This test ensures cross-org project references are rejected.
+#[tokio::test]
+async fn test_api_key_scope_with_project_from_different_org_should_fail() {
+    let (app, state) = org_app();
+
+    let org_a_id: String;
+    let org_b_project_id: String;
+    let user_id: String;
+    let api_key: String;
+
+    {
+        let mut conn = state.db.get().unwrap();
+        let master_key = test_master_key();
+
+        // Create org A (user's org) with its own project
+        let org_a = create_test_org(&mut conn, "Org A - User's Org");
+        let _project_a = create_test_project(&mut conn, &org_a.id, "Project A", &master_key);
+
+        // Create org B (different org) with its own project
+        let org_b = create_test_org(&mut conn, "Org B - Other Org");
+        let project_b = create_test_project(&mut conn, &org_b.id, "Project B", &master_key);
+
+        // User is owner of org A only
+        let (user, _member, key) =
+            create_test_org_member(&mut conn, &org_a.id, "owner@test.com", OrgMemberRole::Owner);
+
+        org_a_id = org_a.id;
+        org_b_project_id = project_b.id;
+        user_id = user.id;
+        api_key = key;
+    }
+
+    // Try to create an API key with a scope that references org A but project B
+    // This passes the org_id check (org_a == path.org_id) but should fail
+    // because project_b does NOT belong to org_a
+    let payload = json!({
+        "name": "Cross-Org Project Scope Key",
+        "scopes": [{
+            "org_id": org_a_id,           // User's org - passes current validation
+            "project_id": org_b_project_id, // Project from different org - NOT validated!
+            "access": "admin"
+        }]
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/orgs/{}/members/{}/api-keys", org_a_id, user_id))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", api_key))
+                .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+
+    assert_eq!(
+        status,
+        axum::http::StatusCode::BAD_REQUEST,
+        "Creating API key scope with project_id from a different org should fail with 400, got {}",
+        status
+    );
+}

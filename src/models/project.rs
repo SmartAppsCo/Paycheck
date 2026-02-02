@@ -1,4 +1,7 @@
+use std::net::IpAddr;
+
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::error::{AppError, Result, msg};
 
@@ -166,6 +169,18 @@ impl CreateProject {
             return Err(AppError::BadRequest(msg::NAME_EMPTY.into()));
         }
         validate_prefix(&self.license_key_prefix)?;
+
+        // Validate webhook URLs for SSRF prevention
+        if let Some(ref url) = self.email_webhook_url {
+            validate_webhook_url(url, "email_webhook_url")?;
+        }
+        if let Some(ref url) = self.feedback_webhook_url {
+            validate_webhook_url(url, "feedback_webhook_url")?;
+        }
+        if let Some(ref url) = self.crash_webhook_url {
+            validate_webhook_url(url, "crash_webhook_url")?;
+        }
+
         Ok(())
     }
 }
@@ -186,6 +201,122 @@ fn validate_prefix(prefix: &str) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Validate a webhook URL for SSRF prevention.
+///
+/// Requirements:
+/// - Must be HTTPS (prevents accidental credential leakage over HTTP)
+/// - Must not target localhost/loopback addresses
+/// - Must not target private IP ranges (10.x, 172.16-31.x, 192.168.x)
+/// - Must not target link-local addresses (169.254.x - includes cloud metadata)
+fn validate_webhook_url(url_str: &str, field_name: &str) -> Result<()> {
+    let url = Url::parse(url_str).map_err(|_| {
+        AppError::BadRequest(format!("{} must be a valid URL", field_name))
+    })?;
+
+    // Require HTTPS
+    if url.scheme() != "https" {
+        return Err(AppError::BadRequest(format!(
+            "{} must use HTTPS",
+            field_name
+        )));
+    }
+
+    // Get the host using the typed Host enum (handles IPv4, IPv6, and domains correctly)
+    let host = url.host().ok_or_else(|| {
+        AppError::BadRequest(format!("{} must have a valid host", field_name))
+    })?;
+
+    match host {
+        url::Host::Ipv4(ipv4) => {
+            if is_dangerous_ip(&IpAddr::V4(ipv4)) {
+                return Err(AppError::BadRequest(format!(
+                    "{} cannot target internal or private IP addresses",
+                    field_name
+                )));
+            }
+        }
+        url::Host::Ipv6(ipv6) => {
+            if is_dangerous_ip(&IpAddr::V6(ipv6)) {
+                return Err(AppError::BadRequest(format!(
+                    "{} cannot target internal or private IP addresses",
+                    field_name
+                )));
+            }
+        }
+        url::Host::Domain(domain) => {
+            let domain_lower = domain.to_lowercase();
+
+            // Check for localhost hostnames
+            if domain_lower == "localhost" || domain_lower.ends_with(".localhost") {
+                return Err(AppError::BadRequest(format!(
+                    "{} cannot target localhost",
+                    field_name
+                )));
+            }
+
+            // Check for potential DNS rebinding with numeric-looking hostnames
+            // This catches things like "127.0.0.1.nip.io" or similar
+            if domain_lower.starts_with("127.")
+                || domain_lower.starts_with("10.")
+                || domain_lower.starts_with("192.168.")
+                || domain_lower.starts_with("169.254.")
+            {
+                return Err(AppError::BadRequest(format!(
+                    "{} cannot target internal or private IP addresses",
+                    field_name
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Check if an IP address is dangerous (internal/private/loopback/link-local).
+fn is_dangerous_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ipv4) => {
+            // Loopback: 127.0.0.0/8
+            if ipv4.is_loopback() {
+                return true;
+            }
+            // Private: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+            if ipv4.is_private() {
+                return true;
+            }
+            // Link-local: 169.254.0.0/16 (includes cloud metadata 169.254.169.254)
+            if ipv4.is_link_local() {
+                return true;
+            }
+            // Unspecified: 0.0.0.0
+            if ipv4.is_unspecified() {
+                return true;
+            }
+            // Broadcast: 255.255.255.255
+            if ipv4.is_broadcast() {
+                return true;
+            }
+            false
+        }
+        IpAddr::V6(ipv6) => {
+            // Loopback: ::1
+            if ipv6.is_loopback() {
+                return true;
+            }
+            // Unspecified: ::
+            if ipv6.is_unspecified() {
+                return true;
+            }
+            // IPv4-mapped addresses: check the embedded IPv4
+            // These are ::ffff:x.x.x.x format
+            if let Some(ipv4) = ipv6.to_ipv4_mapped() {
+                return is_dangerous_ip(&IpAddr::V4(ipv4));
+            }
+            false
+        }
+    }
 }
 
 fn default_prefix() -> String {
@@ -287,6 +418,19 @@ impl UpdateProject {
         if let Some(ref prefix) = self.license_key_prefix {
             validate_prefix(prefix)?;
         }
+
+        // Validate webhook URLs for SSRF prevention
+        // Some(Some(url)) = setting to a value, Some(None) = clearing, None = unchanged
+        if let Some(Some(ref url)) = self.email_webhook_url {
+            validate_webhook_url(url, "email_webhook_url")?;
+        }
+        if let Some(Some(ref url)) = self.feedback_webhook_url {
+            validate_webhook_url(url, "feedback_webhook_url")?;
+        }
+        if let Some(Some(ref url)) = self.crash_webhook_url {
+            validate_webhook_url(url, "crash_webhook_url")?;
+        }
+
         Ok(())
     }
 }

@@ -50,3 +50,9 @@ mod jwks_rsa_parsing;
 
 #[path = "security/email_validation.rs"]
 mod email_validation;
+
+#[path = "security/ssrf_prevention.rs"]
+mod ssrf_prevention;
+
+#[path = "security/service_config_permissions.rs"]
+mod service_config_permissions;

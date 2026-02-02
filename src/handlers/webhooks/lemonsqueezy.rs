@@ -10,12 +10,12 @@ use crate::crypto::MasterKey;
 use crate::db::{AppState, queries};
 use crate::models::{Organization, Project};
 use crate::payments::{
-    LemonSqueezyClient, LemonSqueezyOrderAttributes, LemonSqueezySubscriptionInvoiceAttributes,
-    LemonSqueezyWebhookEvent,
+    LemonSqueezyClient, LemonSqueezyOrderAttributes, LemonSqueezyRefundAttributes,
+    LemonSqueezySubscriptionInvoiceAttributes, LemonSqueezyWebhookEvent,
 };
 
 use super::common::{
-    CancellationData, CheckoutData, CheckoutTransactionData, RenewalData, WebhookEvent,
+    CancellationData, CheckoutData, CheckoutTransactionData, RefundData, RenewalData, WebhookEvent,
     WebhookProvider, WebhookResult, handle_webhook,
 };
 
@@ -86,6 +86,7 @@ impl WebhookProvider for LemonSqueezyWebhookProvider {
             "order_created" => parse_order_created(&event),
             "subscription_payment_success" => parse_subscription_payment(&event),
             "subscription_cancelled" => parse_subscription_cancelled(&event),
+            "order_refunded" => parse_order_refunded(&event),
             _ => Ok(WebhookEvent::Ignored),
         }
     }
@@ -167,6 +168,27 @@ fn parse_subscription_payment(
             (StatusCode::BAD_REQUEST, "Invalid subscription invoice")
         })?;
 
+    // Extract transaction data for revenue tracking
+    let transaction = match (invoice.currency.as_ref(), invoice.total) {
+        (Some(currency), Some(total)) => {
+            let subtotal = invoice.subtotal.unwrap_or(total);
+            let tax = invoice.tax.unwrap_or(0);
+
+            Some(CheckoutTransactionData {
+                currency: currency.to_lowercase(),
+                subtotal_cents: subtotal,
+                discount_cents: 0, // Renewals don't have discounts in LemonSqueezy
+                tax_cents: tax,
+                total_cents: total,
+                tax_inclusive: None,
+                discount_code: None,
+                customer_country: None,
+                test_mode: invoice.test_mode.unwrap_or(false),
+            })
+        }
+        _ => None,
+    };
+
     Ok(WebhookEvent::SubscriptionRenewed(RenewalData {
         subscription_id: invoice.subscription_id.to_string(),
         // LemonSqueezy subscription_payment_success is always a renewal
@@ -177,6 +199,31 @@ fn parse_subscription_payment(
         event_id: Some(event.data.id.clone()),
         // Use LemonSqueezy's billing period end for accurate expiration
         period_end: invoice.period_end_timestamp(),
+        transaction,
+    }))
+}
+
+fn parse_order_refunded(
+    event: &LemonSqueezyWebhookEvent,
+) -> Result<WebhookEvent, WebhookResult> {
+    let refund: LemonSqueezyRefundAttributes =
+        serde_json::from_value(event.data.attributes.clone()).map_err(|e| {
+            tracing::error!("Failed to parse refund attributes: {}", e);
+            (StatusCode::BAD_REQUEST, "Invalid refund attributes")
+        })?;
+
+    // Only process successful refunds
+    if refund.status != "succeeded" && refund.status != "refunded" {
+        return Ok(WebhookEvent::Ignored);
+    }
+
+    Ok(WebhookEvent::Refunded(RefundData {
+        license_id: None, // Will be looked up via order_id
+        refund_id: event.data.id.clone(),
+        order_id: refund.order_id.to_string(),
+        currency: refund.currency.to_lowercase(),
+        amount_cents: refund.amount,
+        test_mode: refund.test_mode.unwrap_or(false),
     }))
 }
 

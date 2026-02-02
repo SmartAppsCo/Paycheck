@@ -8,8 +8,10 @@
 //! - Emails: Activation, feedback, and crash emails (with delivery method for billing)
 //! - Sales: Purchases, renewals, refunds (all transactions)
 
+use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 
+use futures::FutureExt;
 use reqwest::Client;
 use serde::Serialize;
 
@@ -17,6 +19,19 @@ use serde::Serialize;
 /// Quick retries (100ms, 200ms) to avoid blocking user flow.
 /// Total worst case: 300ms.
 const METERING_RETRY_DELAYS: &[u64] = &[100, 200];
+
+/// Generate an idempotency key for email metering events.
+///
+/// Each email send should have a unique idempotency key. The key is used by the
+/// external billing service to deduplicate our retries (same event sent multiple
+/// times due to network issues), NOT to deduplicate across different email sends.
+///
+/// **Important:** Do NOT use license_id or other stable identifiers here.
+/// That would cause multiple legitimate email sends to be deduplicated into one
+/// billing event, resulting in under-billing.
+pub fn generate_email_idempotency_key() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
 
 /// Email metering event payload (owned version for async spawning).
 #[derive(Debug, Clone, Serialize)]
@@ -37,7 +52,7 @@ pub struct EmailMeteringEvent {
     pub delivery_method: String,
     /// Unix timestamp
     pub timestamp: i64,
-    /// Idempotency key (activation_code_id or generated UUID)
+    /// Idempotency key - must be unique per email send (use `generate_email_idempotency_key()`)
     pub idempotency_key: String,
 }
 
@@ -70,15 +85,34 @@ pub struct SalesMeteringEvent {
 ///
 /// If metering is not configured, this is a no-op.
 /// The event is sent in a background task and failures don't affect the caller.
+/// Panics in the spawned task are logged rather than silently swallowed.
 pub fn spawn_email_metering(
     client: Client,
     metering_url: Option<String>,
     event: EmailMeteringEvent,
 ) {
     if let Some(url) = metering_url {
-        tokio::spawn(async move {
-            send_metering_event(&client, &url, &event).await;
-        });
+        let event_type = event.event.clone();
+        tokio::spawn(
+            AssertUnwindSafe(async move {
+                send_metering_event(&client, &url, &event).await;
+            })
+            .catch_unwind()
+            .map(move |result| {
+                if let Err(panic) = result {
+                    let panic_msg = panic
+                        .downcast_ref::<&str>()
+                        .map(|s| s.to_string())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "unknown panic".to_string());
+                    tracing::error!(
+                        "Metering task panicked for event '{}': {}",
+                        event_type,
+                        panic_msg
+                    );
+                }
+            }),
+        );
     }
 }
 
@@ -86,15 +120,34 @@ pub fn spawn_email_metering(
 ///
 /// If metering is not configured, this is a no-op.
 /// The event is sent in a background task and failures don't affect the caller.
+/// Panics in the spawned task are logged rather than silently swallowed.
 pub fn spawn_sales_metering(
     client: Client,
     metering_url: Option<String>,
     event: SalesMeteringEvent,
 ) {
     if let Some(url) = metering_url {
-        tokio::spawn(async move {
-            send_metering_event(&client, &url, &event).await;
-        });
+        let event_type = event.event.clone();
+        tokio::spawn(
+            AssertUnwindSafe(async move {
+                send_metering_event(&client, &url, &event).await;
+            })
+            .catch_unwind()
+            .map(move |result| {
+                if let Err(panic) = result {
+                    let panic_msg = panic
+                        .downcast_ref::<&str>()
+                        .map(|s| s.to_string())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "unknown panic".to_string());
+                    tracing::error!(
+                        "Metering task panicked for event '{}': {}",
+                        event_type,
+                        panic_msg
+                    );
+                }
+            }),
+        );
     }
 }
 
@@ -186,6 +239,27 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert!(!json.contains("license_id"));
         assert!(!json.contains("product_id"));
+    }
+
+    /// Regression test: Each email send must have a unique idempotency key.
+    ///
+    /// This test ensures we don't accidentally change the implementation to use
+    /// license_id or other stable identifiers, which would cause under-billing
+    /// (multiple email sends deduplicated into one billing event).
+    #[test]
+    fn test_email_idempotency_key_is_unique_per_call() {
+        use std::collections::HashSet;
+
+        // Generate 100 keys and verify they're all unique
+        let keys: HashSet<String> = (0..100).map(|_| generate_email_idempotency_key()).collect();
+
+        assert_eq!(
+            keys.len(),
+            100,
+            "Each call to generate_email_idempotency_key() must produce a unique key. \
+             If this test fails, someone may have changed the implementation to use \
+             a stable identifier (like license_id), which would cause under-billing."
+        );
     }
 
     #[test]

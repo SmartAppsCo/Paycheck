@@ -19,7 +19,7 @@ use crate::feedback::{
     Priority, StackFrame,
 };
 use crate::jwt;
-use crate::metering::{spawn_email_metering, EmailMeteringEvent};
+use crate::metering::{generate_email_idempotency_key, spawn_email_metering, EmailMeteringEvent};
 
 /// Request body for POST /feedback
 #[derive(Debug, Deserialize)]
@@ -138,6 +138,21 @@ pub async fn submit_feedback(
     let project = queries::get_project_by_id(&conn, &project_id)?
         .ok_or_else(|| AppError::Internal(msg::PROJECT_NOT_FOUND.into()))?;
 
+    // Get effective email config with 3-level lookup: product → project → org
+    // This ensures project/product-level email configs are respected for feedback
+    // Must be done before DeliveryConfig creation which partially moves project fields
+    let org = queries::get_organization_by_id(&conn, &project.org_id)?;
+    let product = queries::get_product_by_id(&conn, &jwt_context.product_id)?;
+    let org_resend_key = match (&org, &product) {
+        (Some(org), Some(product)) => {
+            queries::get_effective_email_config(&conn, product, &project, org, &state.master_key)
+                .ok()
+                .flatten()
+                .map(|(key, _source)| key)
+        }
+        _ => None,
+    };
+
     let config = DeliveryConfig {
         webhook_url: project.feedback_webhook_url.clone(),
         email: project.feedback_email,
@@ -148,13 +163,6 @@ pub async fn submit_feedback(
             "Feedback not configured for this project".into(),
         ));
     }
-
-    // Get org's email config if available (for billing fairness)
-    let org = queries::get_organization_by_id(&conn, &project.org_id)?;
-    let org_resend_key = org
-        .as_ref()
-        .and_then(|o| queries::get_org_email_config(&conn, o, &state.master_key).ok())
-        .flatten();
 
     // Build feedback data
     let data = FeedbackData {
@@ -198,7 +206,7 @@ pub async fn submit_feedback(
             product_id: None,
             delivery_method: delivery_method.to_string(),
             timestamp: chrono::Utc::now().timestamp(),
-            idempotency_key: uuid::Uuid::new_v4().to_string(),
+            idempotency_key: generate_email_idempotency_key(),
         },
     );
 
@@ -222,6 +230,21 @@ pub async fn report_crash(
     let project = queries::get_project_by_id(&conn, &project_id)?
         .ok_or_else(|| AppError::Internal(msg::PROJECT_NOT_FOUND.into()))?;
 
+    // Get effective email config with 3-level lookup: product → project → org
+    // This ensures project/product-level email configs are respected for crash reports
+    // Must be done before DeliveryConfig creation which partially moves project fields
+    let org = queries::get_organization_by_id(&conn, &project.org_id)?;
+    let product = queries::get_product_by_id(&conn, &jwt_context.product_id)?;
+    let org_resend_key = match (&org, &product) {
+        (Some(org), Some(product)) => {
+            queries::get_effective_email_config(&conn, product, &project, org, &state.master_key)
+                .ok()
+                .flatten()
+                .map(|(key, _source)| key)
+        }
+        _ => None,
+    };
+
     let config = DeliveryConfig {
         webhook_url: project.crash_webhook_url.clone(),
         email: project.crash_email,
@@ -232,13 +255,6 @@ pub async fn report_crash(
             "Crash reporting not configured for this project".into(),
         ));
     }
-
-    // Get org's email config if available (for billing fairness)
-    let org = queries::get_organization_by_id(&conn, &project.org_id)?;
-    let org_resend_key = org
-        .as_ref()
-        .and_then(|o| queries::get_org_email_config(&conn, o, &state.master_key).ok())
-        .flatten();
 
     // Build crash data
     let data = CrashData {
@@ -284,7 +300,7 @@ pub async fn report_crash(
             product_id: None,
             delivery_method: delivery_method.to_string(),
             timestamp: chrono::Utc::now().timestamp(),
-            idempotency_key: uuid::Uuid::new_v4().to_string(),
+            idempotency_key: generate_email_idempotency_key(),
         },
     );
 

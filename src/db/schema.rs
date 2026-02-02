@@ -67,6 +67,8 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             config_encrypted BLOB NOT NULL,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
+            deleted_at INTEGER,
+            deleted_cascade_depth INTEGER,
             UNIQUE(org_id, name),
             CHECK (category IN ('payment', 'email')),
             CHECK (
@@ -76,6 +78,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_service_configs_org ON service_configs(org_id);
         CREATE INDEX IF NOT EXISTS idx_service_configs_org_provider ON service_configs(org_id, provider);
+        CREATE INDEX IF NOT EXISTS idx_service_configs_active ON service_configs(id) WHERE deleted_at IS NULL;
 
         -- Organizations (customers - indie devs, companies)
         CREATE TABLE IF NOT EXISTS organizations (

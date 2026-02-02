@@ -14,13 +14,16 @@
 //! - Request executes with **target member's actual role** in that org
 //! - Useful for: Admin support, testing member workflows, member-initiated actions
 //!
-//! **Audit trail:** Includes explicit `impersonator` details in JSON:
+//! **Audit trail:** The `actor_user_id` is the **target's** ID (impersonated member),
+//! with explicit `impersonator` details in the JSON details field:
 //! ```json
 //! {
-//!   "impersonator": {"user_id": "op123", "email": "admin@example.com"}
+//!   "actor_user_id": "target_member_user_id",
+//!   "details": {
+//!     "impersonator": {"user_id": "op123", "email": "admin@example.com"}
+//!   }
 //! }
 //! ```
-//! The `user_id` in the audit log is the **impersonator's** ID, not the target's.
 //!
 //! **Errors:**
 //! - `403 Forbidden`: Header present but user is not an admin+ operator

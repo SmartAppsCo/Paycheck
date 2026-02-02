@@ -14,6 +14,7 @@
 //! - RATE_LIMIT_STANDARD_RPM (default: 30)
 //! - RATE_LIMIT_RELAXED_RPM (default: 60)
 //! - RATE_LIMIT_ORG_OPS_RPM (default: 3000)
+//! - RATE_LIMIT_ACTIVATION_MAX_ENTRIES (default: 10000) - caps memory for per-email tracking
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,12 +29,18 @@ pub type RateLimitLayer = GovernorLayer<
 >;
 
 /// Creates a rate limiter layer with the specified requests per minute.
+///
+/// Uses millisecond-precision periods to correctly handle high RPM values.
+/// For 3000 RPM, period = 20ms (50 requests/second sustained).
+/// For 10 RPM, period = 6000ms (1 request every 6 seconds).
 fn create_layer(requests_per_minute: u32) -> RateLimitLayer {
     assert!(requests_per_minute > 0, "Rate limit must be greater than 0");
 
-    let period_secs = 60 / requests_per_minute as u64;
+    // Use milliseconds for sub-second precision with high RPM values.
+    // Old formula (60 / rpm) gave 0 for rpm > 60, breaking high-rate limits.
+    let period_ms = 60_000 / requests_per_minute as u64;
     let config = GovernorConfigBuilder::default()
-        .period(Duration::from_secs(period_secs.max(1)))
+        .period(Duration::from_millis(period_ms.max(1)))
         .burst_size(requests_per_minute)
         .finish()
         .expect("Failed to build rate limiter config");
@@ -70,20 +77,34 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Instant;
 
+/// Default maximum number of unique email hashes to track.
+/// Prevents unbounded memory growth from distributed attacks.
+/// Override with RATE_LIMIT_ACTIVATION_MAX_ENTRIES env var.
+pub const DEFAULT_ACTIVATION_MAX_ENTRIES: usize = 10_000;
+
 /// In-memory rate limiter for activation code requests.
 /// Limits by email hash to prevent abuse of /activation/request-code.
+///
+/// Memory is bounded by `max_entries` to prevent DoS via unique email flooding.
+/// When at capacity, new email hashes are rejected until cleanup runs.
 pub struct ActivationRateLimiter {
     requests: Mutex<HashMap<String, Vec<Instant>>>,
     max_requests: usize,
     window_secs: u64,
+    max_entries: usize,
 }
 
 impl ActivationRateLimiter {
     pub fn new(max_requests: usize, window_secs: u64) -> Self {
+        Self::with_max_entries(max_requests, window_secs, DEFAULT_ACTIVATION_MAX_ENTRIES)
+    }
+
+    pub fn with_max_entries(max_requests: usize, window_secs: u64, max_entries: usize) -> Self {
         Self {
             requests: Mutex::new(HashMap::new()),
             max_requests,
             window_secs,
+            max_entries,
         }
     }
 
@@ -94,16 +115,26 @@ impl ActivationRateLimiter {
         let now = Instant::now();
         let cutoff = now - std::time::Duration::from_secs(self.window_secs);
 
-        let timestamps = map.entry(email_hash.to_string()).or_default();
+        // Check if this email is already tracked
+        if let Some(timestamps) = map.get_mut(email_hash) {
+            // Remove old entries for this email
+            timestamps.retain(|t| *t > cutoff);
 
-        // Remove old entries
-        timestamps.retain(|t| *t > cutoff);
+            if timestamps.len() >= self.max_requests {
+                return Err("Rate limit exceeded. Please try again later.");
+            }
 
-        if timestamps.len() >= self.max_requests {
+            timestamps.push(now);
+            return Ok(());
+        }
+
+        // New email hash - check if we're at capacity
+        if map.len() >= self.max_entries {
             return Err("Rate limit exceeded. Please try again later.");
         }
 
-        timestamps.push(now);
+        // Add new entry
+        map.insert(email_hash.to_string(), vec![now]);
         Ok(())
     }
 
@@ -118,6 +149,12 @@ impl ActivationRateLimiter {
             timestamps.retain(|t| *t > cutoff);
             !timestamps.is_empty()
         });
+    }
+
+    /// Returns the number of unique keys (email hashes) currently tracked.
+    /// Useful for monitoring memory usage and testing cleanup behavior.
+    pub fn entry_count(&self) -> usize {
+        self.requests.lock().unwrap().len()
     }
 }
 

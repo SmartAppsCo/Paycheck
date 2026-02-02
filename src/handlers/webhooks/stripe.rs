@@ -10,11 +10,12 @@ use crate::crypto::MasterKey;
 use crate::db::{AppState, queries};
 use crate::models::{Organization, Project};
 use crate::payments::{
-    StripeCheckoutSession, StripeClient, StripeInvoice, StripeSubscription, StripeWebhookEvent,
+    StripeCharge, StripeCheckoutSession, StripeClient, StripeInvoice, StripeSubscription,
+    StripeWebhookEvent,
 };
 
 use super::common::{
-    CancellationData, CheckoutData, CheckoutTransactionData, RenewalData, WebhookEvent,
+    CancellationData, CheckoutData, CheckoutTransactionData, RefundData, RenewalData, WebhookEvent,
     WebhookProvider, WebhookResult, handle_webhook,
 };
 
@@ -162,6 +163,7 @@ impl WebhookProvider for StripeWebhookProvider {
             "checkout.session.completed" => parse_checkout_completed(&event),
             "invoice.paid" => parse_invoice_paid(&event),
             "customer.subscription.deleted" => parse_subscription_deleted(&event),
+            "charge.refunded" => parse_charge_refunded(&event),
             _ => Ok(WebhookEvent::Ignored),
         }
     }
@@ -240,13 +242,18 @@ fn parse_checkout_completed(event: &StripeWebhookEvent) -> Result<WebhookEvent, 
         _ => None,
     };
 
+    // Use payment_intent as order_id for refund linkage.
+    // Refunds come with payment_intent ID, so we need to store that at checkout.
+    // For subscription mode (no payment_intent), fall back to session.id.
+    let order_id = session.payment_intent.or(Some(session.id));
+
     Ok(WebhookEvent::CheckoutCompleted(CheckoutData {
         session_id,
         project_id,
         customer_id: session.customer,
         customer_email,
         subscription_id: session.subscription,
-        order_id: Some(session.id),
+        order_id,
         transaction,
     }))
 }
@@ -261,7 +268,7 @@ fn parse_invoice_paid(event: &StripeWebhookEvent) -> Result<WebhookEvent, Webhoo
     // Extract period_end before any moves
     let period_end = invoice.period_end();
 
-    let subscription_id = match invoice.subscription {
+    let subscription_id = match invoice.subscription.clone() {
         Some(id) => id,
         None => return Ok(WebhookEvent::Ignored),
     };
@@ -273,6 +280,30 @@ fn parse_invoice_paid(event: &StripeWebhookEvent) -> Result<WebhookEvent, Webhoo
         _ => return Ok(WebhookEvent::Ignored),
     };
 
+    // Extract transaction data for revenue tracking
+    let transaction = match (invoice.currency.as_ref(), invoice.total) {
+        (Some(currency), Some(total)) => {
+            let subtotal = invoice.subtotal.unwrap_or(total);
+            let tax = invoice.tax.unwrap_or(0);
+            // Invoices don't have discount breakdown like checkout sessions
+            // discount = subtotal + tax - total (if tax is additive)
+            let discount = (subtotal + tax).saturating_sub(total).max(0);
+
+            Some(CheckoutTransactionData {
+                currency: currency.to_lowercase(),
+                subtotal_cents: subtotal,
+                discount_cents: discount,
+                tax_cents: tax,
+                total_cents: total,
+                tax_inclusive: None,
+                discount_code: None, // Would need API call to fetch
+                customer_country: None, // Not in invoice
+                test_mode: invoice.livemode.map(|l| !l).unwrap_or(false),
+            })
+        }
+        _ => None,
+    };
+
     Ok(WebhookEvent::SubscriptionRenewed(RenewalData {
         subscription_id,
         is_renewal,
@@ -281,6 +312,35 @@ fn parse_invoice_paid(event: &StripeWebhookEvent) -> Result<WebhookEvent, Webhoo
         event_id: Some(invoice.id),
         // Use Stripe's billing period end for accurate expiration
         period_end,
+        transaction,
+    }))
+}
+
+fn parse_charge_refunded(event: &StripeWebhookEvent) -> Result<WebhookEvent, WebhookResult> {
+    let charge: StripeCharge = serde_json::from_value(event.data.object.clone()).map_err(|e| {
+        tracing::error!("Failed to parse charge: {}", e);
+        (StatusCode::BAD_REQUEST, "Invalid charge")
+    })?;
+
+    // Get the most recent refund from the refunds list
+    let refund = charge
+        .refunds
+        .as_ref()
+        .and_then(|r| r.data.first())
+        .ok_or((StatusCode::OK, "No refunds in charge"))?;
+
+    // Only process successful refunds
+    if refund.status != "succeeded" {
+        return Ok(WebhookEvent::Ignored);
+    }
+
+    Ok(WebhookEvent::Refunded(RefundData {
+        license_id: None, // Will be looked up via payment_intent → checkout session
+        refund_id: refund.id.clone(),
+        order_id: charge.payment_intent.unwrap_or_else(|| charge.id.clone()),
+        currency: charge.currency.to_lowercase(),
+        amount_cents: refund.amount,
+        test_mode: !charge.livemode,
     }))
 }
 

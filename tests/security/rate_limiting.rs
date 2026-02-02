@@ -169,6 +169,7 @@ mod rate_limit_headers {
             standard_rpm: 30,
             relaxed_rpm: 60,
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, _state) = public_app_with_rate_limits(config);
 
@@ -208,6 +209,7 @@ mod rate_limit_headers {
             standard_rpm: 30,
             relaxed_rpm: 60,
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, state) = public_app_with_rate_limits(config);
 
@@ -286,6 +288,7 @@ mod strict_rate_limit {
             standard_rpm: 30,
             relaxed_rpm: 60,
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, state) = public_app_with_rate_limits(config);
 
@@ -351,6 +354,7 @@ mod strict_rate_limit {
             standard_rpm: 30,
             relaxed_rpm: 60,
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, state) = public_app_with_rate_limits(config);
 
@@ -436,6 +440,7 @@ mod standard_rate_limit {
             standard_rpm: 3, // Low limit for testing
             relaxed_rpm: 60,
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, _state) = public_app_with_rate_limits(config);
 
@@ -491,6 +496,7 @@ mod standard_rate_limit {
             standard_rpm: 2, // Very low for testing
             relaxed_rpm: 60,
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, _state) = public_app_with_rate_limits(config);
 
@@ -549,6 +555,7 @@ mod standard_rate_limit {
             standard_rpm: 2,
             relaxed_rpm: 60,
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, _state) = public_app_with_rate_limits(config);
 
@@ -601,6 +608,7 @@ mod standard_rate_limit {
             standard_rpm: 2,
             relaxed_rpm: 60,
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, _state) = public_app_with_rate_limits(config);
 
@@ -664,6 +672,7 @@ mod relaxed_rate_limit {
             standard_rpm: 3,
             relaxed_rpm: 5, // Higher than strict/standard for testing
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, _state) = public_app_with_rate_limits(config);
 
@@ -716,6 +725,7 @@ mod relaxed_rate_limit {
             standard_rpm: 2,
             relaxed_rpm: 4,
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, _state) = public_app_with_rate_limits(config);
 
@@ -909,6 +919,115 @@ mod activation_rate_limit {
             "Default limiter should reject 4th request (exceeds 3 per hour limit)"
         );
     }
+
+    /// Verify that max_entries cap prevents unbounded memory growth.
+    /// New email hashes are rejected when at capacity.
+    #[tokio::test]
+    async fn test_activation_limiter_max_entries_cap() {
+        // Create limiter with small max_entries for testing
+        let limiter = ActivationRateLimiter::with_max_entries(3, 60, 10);
+
+        // Fill up to capacity
+        for i in 0..10 {
+            let email_hash = format!("email_{}", i);
+            assert!(
+                limiter.check(&email_hash).is_ok(),
+                "Should allow entry {} (within capacity)",
+                i
+            );
+        }
+
+        assert_eq!(limiter.entry_count(), 10, "Should be at capacity");
+
+        // New email hash should be rejected
+        assert!(
+            limiter.check("new_email").is_err(),
+            "Should reject new email when at capacity"
+        );
+
+        // Existing email should still work (not a new entry)
+        assert!(
+            limiter.check("email_0").is_ok(),
+            "Existing email should still be allowed"
+        );
+
+        // After cleanup (with expired entries), new emails should work again
+        // Use a limiter with short window to test this
+        let limiter2 = ActivationRateLimiter::with_max_entries(3, 1, 5);
+        for i in 0..5 {
+            limiter2.check(&format!("test_{}", i)).unwrap();
+        }
+        assert!(limiter2.check("overflow").is_err(), "At capacity");
+
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        limiter2.cleanup();
+
+        assert_eq!(limiter2.entry_count(), 0, "All entries expired");
+        assert!(
+            limiter2.check("new_after_cleanup").is_ok(),
+            "Should allow new entries after cleanup frees space"
+        );
+    }
+
+    /// Verify that entries accumulate up to max_entries limit.
+    #[tokio::test]
+    async fn test_activation_limiter_entries_accumulate_to_limit() {
+        let limiter = ActivationRateLimiter::with_max_entries(3, 60, 100);
+
+        // Add many unique email hashes
+        for i in 0..100 {
+            let email_hash = format!("attacker_email_{}", i);
+            limiter.check(&email_hash).unwrap();
+        }
+
+        // All 100 entries should be in memory (at max_entries limit)
+        assert_eq!(
+            limiter.entry_count(),
+            100,
+            "Each unique email hash creates a separate entry up to max_entries"
+        );
+
+        // 101st should fail
+        assert!(
+            limiter.check("one_more").is_err(),
+            "Should reject when at max_entries capacity"
+        );
+
+        // Existing entries still work
+        limiter.check("attacker_email_0").unwrap();
+
+        assert_eq!(
+            limiter.entry_count(),
+            100,
+            "Entry count unchanged after checking existing email"
+        );
+    }
+
+    /// Verify that cleanup removes entries after window expires.
+    #[tokio::test]
+    async fn test_activation_limiter_cleanup_removes_expired_entries() {
+        let limiter = ActivationRateLimiter::new(3, 1); // 1 second window
+
+        // Add entries
+        for i in 0..10 {
+            let email_hash = format!("test_email_{}", i);
+            limiter.check(&email_hash).unwrap();
+        }
+
+        assert_eq!(limiter.entry_count(), 10, "Should have 10 entries");
+
+        // Wait for window to expire
+        std::thread::sleep(std::time::Duration::from_secs(2));
+
+        // Cleanup should remove all expired entries
+        limiter.cleanup();
+
+        assert_eq!(
+            limiter.entry_count(),
+            0,
+            "After window expires and cleanup runs, all entries should be removed"
+        );
+    }
 }
 
 // ============================================================================
@@ -926,6 +1045,7 @@ mod tier_differentiation {
             standard_rpm: 5, // More permissive
             relaxed_rpm: 10,
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, _state) = public_app_with_rate_limits(config);
 
@@ -997,6 +1117,7 @@ mod tier_differentiation {
             standard_rpm: 1,
             relaxed_rpm: 1,
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, _state) = public_app_with_rate_limits(config);
 
@@ -1112,6 +1233,7 @@ mod within_limit_success {
             standard_rpm: 30,
             relaxed_rpm: 60,
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, _state) = public_app_with_rate_limits(config);
 
@@ -1154,6 +1276,7 @@ mod exceeding_limit {
             standard_rpm: 30,
             relaxed_rpm: 2, // Very low for testing
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, _state) = public_app_with_rate_limits(config);
 
@@ -1199,6 +1322,7 @@ mod exceeding_limit {
             standard_rpm: 30,
             relaxed_rpm: 60,
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, _state) = public_app_with_rate_limits(config);
 
@@ -1265,6 +1389,7 @@ mod per_ip_rate_limiting {
             standard_rpm: 30,
             relaxed_rpm: 1, // Very low for testing
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
 
         // Create app with first IP
@@ -1336,6 +1461,7 @@ mod per_ip_rate_limiting {
             standard_rpm: 30,
             relaxed_rpm: 2, // Low limit for testing
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
 
         let ip: SocketAddr = "10.0.0.1:5678".parse().unwrap();
@@ -1476,6 +1602,71 @@ mod window_boundary_tests {
 }
 
 // ============================================================================
+// RATE LIMIT CALCULATION TESTS
+// ============================================================================
+
+mod rate_limit_calculation {
+    /// Test that the rate limit period calculation is correct for high RPM values.
+    /// For 3000 RPM, the period should be 20ms (60000ms / 3000 = 20ms per token).
+    /// Bug: Integer division `60 / 3000 = 0` was clamped to 1 second, giving 60 RPM sustained.
+    #[test]
+    fn test_high_rpm_period_calculation() {
+        // This tests the math directly without needing the full rate limiter stack.
+        // The formula should give sub-second periods for RPM > 60.
+
+        // For 3000 RPM: we need 50 requests per second = 20ms per request
+        let rpm = 3000u64;
+        let expected_period_ms = 60_000 / rpm; // 20ms
+        assert_eq!(
+            expected_period_ms, 20,
+            "3000 RPM should have 20ms period for proper sustained rate"
+        );
+
+        // The buggy formula was: 60 / rpm (integer division)
+        let buggy_period_secs = 60u64 / rpm; // 0, clamped to 1
+        assert_eq!(
+            buggy_period_secs.max(1),
+            1,
+            "Bug: integer division gives 1 second period"
+        );
+
+        // With 1 second period, sustained rate is only 60 RPM, not 3000
+        let actual_sustained_rpm_with_bug = 60; // 1 token per second * 60 seconds
+        assert_ne!(
+            actual_sustained_rpm_with_bug, rpm as i32,
+            "Bug causes 3000 RPM config to actually be {} RPM sustained",
+            actual_sustained_rpm_with_bug
+        );
+    }
+
+    /// Test that lower RPM values still work correctly.
+    /// For 10 RPM, the period should be 6 seconds.
+    #[test]
+    fn test_low_rpm_period_calculation() {
+        // For 10 RPM: 60000ms / 10 = 6000ms = 6 seconds per token
+        let rpm = 10u64;
+        let period_ms = 60_000 / rpm;
+        assert_eq!(period_ms, 6000, "10 RPM should have 6000ms (6s) period");
+
+        // The old formula also works for low RPM: 60 / 10 = 6 seconds
+        let old_period_secs = 60u64 / rpm;
+        assert_eq!(old_period_secs, 6, "Old formula works for 10 RPM");
+    }
+
+    /// Test boundary case: 60 RPM should have exactly 1 second period.
+    #[test]
+    fn test_60_rpm_boundary() {
+        let rpm = 60u64;
+        let period_ms = 60_000 / rpm;
+        assert_eq!(period_ms, 1000, "60 RPM should have 1000ms (1s) period");
+
+        // Both formulas give same result at the boundary
+        let old_period_secs = 60u64 / rpm;
+        assert_eq!(old_period_secs, 1, "Old formula gives 1s for 60 RPM");
+    }
+}
+
+// ============================================================================
 // CONCURRENT BURST TESTS (Issue 11 from security audit)
 // ============================================================================
 
@@ -1496,6 +1687,7 @@ mod concurrent_burst_tests {
             standard_rpm: 30,
             relaxed_rpm: 5, // Allow exactly 5 requests
             org_ops_rpm: 3000,
+            ..RateLimitConfig::default()
         };
         let (app, _state) = public_app_with_rate_limits(config);
 

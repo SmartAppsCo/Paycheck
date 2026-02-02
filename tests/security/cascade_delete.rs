@@ -518,6 +518,59 @@ mod org_cascade {
             "License 2 cascade depth should be 3 when deleted via org->project->product cascade"
         );
     }
+
+    /// Delete org -> cascades to service_configs.
+    #[test]
+    fn test_delete_org_cascades_to_service_configs() {
+        let mut conn = setup_test_db();
+        let master_key = test_master_key();
+        let org = create_test_org(&mut conn, "Test Org");
+
+        // Create a service config
+        let encrypted = master_key
+            .encrypt_private_key(
+                &org.id,
+                br#"{"secret_key":"sk_test_xxx","publishable_key":"pk_test_xxx","webhook_secret":"whsec_xxx"}"#,
+            )
+            .unwrap();
+        let config = queries::create_service_config(
+            &conn,
+            &org.id,
+            "Test Stripe Config",
+            paycheck::models::ServiceProvider::Stripe,
+            &encrypted,
+        )
+        .unwrap();
+
+        // Verify config exists
+        assert!(
+            queries::get_service_config_by_id(&conn, &config.id)
+                .unwrap()
+                .is_some(),
+            "Service config should exist before org delete"
+        );
+
+        // Soft delete the organization
+        queries::soft_delete_organization(&mut conn, &org.id).expect("Soft delete failed");
+
+        // Service config should NOT be found via normal query
+        assert!(
+            queries::get_service_config_by_id(&conn, &config.id)
+                .unwrap()
+                .is_none(),
+            "Service config should be excluded from normal queries after org soft delete"
+        );
+
+        // Service config should be cascade deleted (depth 1)
+        let deleted_config = queries::get_deleted_service_config_by_id(&conn, &config.id)
+            .expect("Query failed")
+            .expect("Deleted service config should be found");
+        assert_eq!(
+            deleted_config.deleted_cascade_depth,
+            Some(1),
+            "Service config cascade depth should be 1 when deleted via org cascade"
+        );
+    }
 }
 
 // ============================================================================

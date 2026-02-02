@@ -356,6 +356,26 @@ cargo run -- --rotate-key \
   --new-key-file /etc/paycheck/master.key.new
 ```
 
+### Cryptographic RNG
+
+**Always use `OsRng` for cryptographic random generation.** Never use `thread_rng()` for:
+- Nonces (AES-GCM, etc.)
+- Key generation
+- Activation codes
+- Any security-sensitive random values
+
+```rust
+// Correct
+use rand::rngs::OsRng;
+OsRng.fill_bytes(&mut nonce);
+
+// Wrong - don't use for crypto
+use rand::thread_rng;
+thread_rng().fill_bytes(&mut nonce);
+```
+
+While `thread_rng` is a CSPRNG seeded from `OsRng`, using `OsRng` directly is the standard for cryptographic operations and maintains consistency across the codebase.
+
 ### CORS
 
 Public endpoints (`/buy`, `/redeem`, `/validate`, etc.) allow any origin—they're designed to be called from customer websites.

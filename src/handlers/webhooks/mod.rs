@@ -1,6 +1,6 @@
 pub mod common;
-mod lemonsqueezy;
-mod stripe;
+pub mod lemonsqueezy;
+pub mod stripe;
 
 pub use lemonsqueezy::handle_lemonsqueezy_webhook;
 pub use stripe::handle_stripe_webhook;

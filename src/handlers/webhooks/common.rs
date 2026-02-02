@@ -111,12 +111,31 @@ pub struct RenewalData {
     /// Billing period end from the payment provider (Unix timestamp).
     /// More accurate than calculating from product settings.
     pub period_end: Option<i64>,
+    /// Transaction data for revenue tracking (amount, currency, etc.)
+    pub transaction: Option<CheckoutTransactionData>,
 }
 
 /// Data extracted from a subscription cancellation event.
 #[derive(Debug)]
 pub struct CancellationData {
     pub subscription_id: String,
+}
+
+/// Data extracted from a refund event.
+#[derive(Debug)]
+pub struct RefundData {
+    /// The license ID to associate the refund with (looked up via charge/order)
+    pub license_id: Option<String>,
+    /// Provider's unique refund/event ID for replay prevention
+    pub refund_id: String,
+    /// Original order/charge ID for linking to purchase
+    pub order_id: String,
+    /// Currency code (lowercase)
+    pub currency: String,
+    /// Amount refunded in cents (positive value - will be stored as negative)
+    pub amount_cents: i64,
+    /// Whether this is a test mode transaction
+    pub test_mode: bool,
 }
 
 /// Parsed webhook event with provider-agnostic data.
@@ -128,6 +147,8 @@ pub enum WebhookEvent {
     SubscriptionRenewed(RenewalData),
     /// Subscription cancelled - license expires naturally
     SubscriptionCancelled(CancellationData),
+    /// Refund processed - creates negative transaction record
+    Refunded(RefundData),
     /// Event type not relevant to license management
     Ignored,
 }
@@ -176,8 +197,8 @@ pub trait WebhookProvider: Send + Sync {
 /// Process a checkout completion event - creates license only.
 ///
 /// Device creation is deferred to activation time (/redeem endpoint).
-/// Uses atomic compare-and-swap to prevent race conditions where multiple concurrent
-/// webhook deliveries could create multiple licenses from a single payment.
+/// Uses a transaction to atomically claim the payment session AND create the license.
+/// This prevents race conditions and ensures retryability if license creation fails.
 pub fn process_checkout(
     conn: &mut Connection,
     email_hasher: &EmailHasher,
@@ -187,22 +208,6 @@ pub fn process_checkout(
     product: &Product,
     data: &CheckoutData,
 ) -> WebhookResult {
-    // Atomically claim this payment session BEFORE creating any resources.
-    // This prevents race conditions where concurrent webhooks could all create licenses.
-    match queries::try_claim_payment_session(conn, &data.session_id) {
-        Ok(true) => {
-            // Successfully claimed - proceed with license creation
-        }
-        Ok(false) => {
-            // Already claimed by another request
-            return (StatusCode::OK, "Already processed");
-        }
-        Err(e) => {
-            tracing::error!("Failed to claim payment session: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error");
-        }
-    }
-
     // Compute email hash for license recovery via email
     let email_hash = data.customer_email.as_ref().map(|e| email_hasher.hash(e));
 
@@ -217,10 +222,36 @@ pub fn process_checkout(
     let now = chrono::Utc::now().timestamp();
     let exps = LicenseExpirations::from_product(product, now);
 
+    // Use a transaction to atomically claim session AND create license.
+    // If license creation fails, the session claim is rolled back so Stripe can retry.
+    let tx = match conn.transaction() {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to start transaction: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+
+    // Atomically claim this payment session BEFORE creating any resources.
+    // This prevents race conditions where concurrent webhooks could all create licenses.
+    match queries::try_claim_payment_session(&tx, &data.session_id) {
+        Ok(true) => {
+            // Successfully claimed - proceed with license creation
+        }
+        Ok(false) => {
+            // Already claimed by another request - no need to commit, just return
+            return (StatusCode::OK, "Already processed");
+        }
+        Err(e) => {
+            tracing::error!("Failed to claim payment session: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    }
+
     // Create license (no user-facing key - email hash is the identity)
     // Payment provider info is stored in the transactions table
     let license = match queries::create_license(
-        conn,
+        &tx,
         &project.id,
         &payment_session.product_id,
         &CreateLicense {
@@ -232,6 +263,7 @@ pub fn process_checkout(
     ) {
         Ok(l) => l,
         Err(e) => {
+            // Transaction will be rolled back on drop, allowing retry
             tracing::error!("Failed to create license: {}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -239,6 +271,12 @@ pub fn process_checkout(
             );
         }
     };
+
+    // Commit the transaction - session claim and license creation are now permanent
+    if let Err(e) = tx.commit() {
+        tracing::error!("Failed to commit transaction: {}", e);
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+    }
 
     // Create transaction record with payment details
     if let Some(tx_data) = &data.transaction {
@@ -427,6 +465,11 @@ pub async fn handle_webhook<P: WebhookProvider>(
                 .await
                 .unwrap_or_else(|e| e)
         }
+        WebhookEvent::Refunded(data) => {
+            handle_refund(provider, state, &headers, &body, &signature, data)
+                .await
+                .unwrap_or_else(|e| e)
+        }
         WebhookEvent::Ignored => (StatusCode::OK, "Event ignored"),
     }
 }
@@ -608,6 +651,61 @@ async fn handle_renewal<P: WebhookProvider>(
         data.period_end,
     );
 
+    // On successful renewal, create transaction record and fire metering
+    if result.0 == StatusCode::OK && result.1 == "OK" {
+        // Create transaction record for revenue tracking
+        if let Some(tx_data) = &data.transaction {
+            let net_cents = tx_data.subtotal_cents - tx_data.discount_cents;
+
+            let transaction = CreateTransaction {
+                license_id: Some(license.id.clone()),
+                project_id: project.id.clone(),
+                product_id: Some(license.product_id.clone()),
+                org_id: org.id.clone(),
+                payment_provider: provider.provider_name().to_string(),
+                provider_customer_id: license.customer_id.clone(),
+                provider_subscription_id: Some(data.subscription_id.clone()),
+                provider_order_id: data.event_id.clone().unwrap_or_default(),
+                currency: tx_data.currency.clone(),
+                subtotal_cents: tx_data.subtotal_cents,
+                discount_cents: tx_data.discount_cents,
+                net_cents,
+                tax_cents: tx_data.tax_cents,
+                total_cents: tx_data.total_cents,
+                discount_code: tx_data.discount_code.clone(),
+                tax_inclusive: tx_data.tax_inclusive,
+                customer_country: tx_data.customer_country.clone(),
+                transaction_type: TransactionType::Renewal,
+                parent_transaction_id: None,
+                is_subscription: true,
+                test_mode: tx_data.test_mode,
+            };
+
+            if let Err(e) = queries::create_transaction(&conn, &transaction) {
+                tracing::error!("Failed to create renewal transaction: {}", e);
+                // Non-fatal - license was already extended
+            }
+
+            // Fire-and-forget sales metering event
+            spawn_sales_metering(
+                state.http_client.clone(),
+                state.metering_webhook_url.clone(),
+                SalesMeteringEvent {
+                    event: "renewal".to_string(),
+                    org_id: org.id.clone(),
+                    project_id: project.id.clone(),
+                    product_id: license.product_id.clone(),
+                    license_id: license.id.clone(),
+                    transaction_id: data.event_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                    payment_provider: provider.provider_name().to_string(),
+                    amount_cents: tx_data.total_cents,
+                    currency: tx_data.currency.clone(),
+                    timestamp: chrono::Utc::now().timestamp(),
+                },
+            );
+        }
+    }
+
     // Audit log on successful renewal
     if result.0 == StatusCode::OK && result.1 == "OK" {
         let audit_conn = state.audit.get().map_err(|e| {
@@ -720,4 +818,317 @@ async fn handle_cancellation<P: WebhookProvider>(
     }
 
     Ok(result)
+}
+
+async fn handle_refund<P: WebhookProvider>(
+    provider: &P,
+    state: &AppState,
+    headers: &HeaderMap,
+    body: &Bytes,
+    signature: &str,
+    data: RefundData,
+) -> Result<WebhookResult, WebhookResult> {
+    let conn = state.db.get().map_err(|e| {
+        tracing::error!("DB connection error: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+    })?;
+
+    // Look up the original transaction by order_id to find the license
+    let original_transaction = match queries::get_transaction_by_provider_order(
+        &conn,
+        provider.provider_name(),
+        &data.order_id,
+    ) {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            tracing::warn!(
+                "No transaction found for {} order_id: {} - refund cannot be linked",
+                provider.provider_name(),
+                data.order_id
+            );
+            // Return OK to prevent retries - we can't link this refund to a transaction
+            return Ok((StatusCode::OK, "Original transaction not found"));
+        }
+        Err(e) => {
+            tracing::error!("DB error looking up transaction: {}", e);
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
+        }
+    };
+
+    // Get the license, project, and org for signature verification
+    let license = match &original_transaction.license_id {
+        Some(license_id) => db_lookup(
+            queries::get_license_by_id(&conn, license_id),
+            "License not found",
+        )?,
+        None => {
+            tracing::warn!(
+                "Original transaction {} has no license_id - refund will be recorded without license link",
+                original_transaction.id
+            );
+            // We can still record the refund, just without a license link
+            // But we need project/org for signature verification
+            let project = db_lookup(
+                queries::get_project_by_id(&conn, &original_transaction.project_id),
+                "Project not found",
+            )?;
+            let org = db_lookup(
+                queries::get_organization_by_id(&conn, &project.org_id),
+                "Organization not found",
+            )?;
+
+            // Verify signature
+            match provider.verify_signature(&conn, &project, &org, &state.master_key, body, signature) {
+                Ok(true) => {}
+                Ok(false) => return Err((StatusCode::UNAUTHORIZED, "Invalid signature")),
+                Err(e) => return Err(e),
+            }
+
+            // Process refund without license
+            return process_refund_no_license(
+                provider,
+                state,
+                headers,
+                &conn,
+                &data,
+                &original_transaction,
+                &project,
+                &org,
+            );
+        }
+    };
+
+    let product = db_lookup(
+        queries::get_product_by_id(&conn, &license.product_id),
+        "Product not found",
+    )?;
+    let project = db_lookup(
+        queries::get_project_by_id(&conn, &product.project_id),
+        "Project not found",
+    )?;
+    let org = db_lookup(
+        queries::get_organization_by_id(&conn, &project.org_id),
+        "Organization not found",
+    )?;
+
+    // Verify signature using hierarchical config (project first, then org)
+    match provider.verify_signature(&conn, &project, &org, &state.master_key, body, signature) {
+        Ok(true) => {}
+        Ok(false) => return Err((StatusCode::UNAUTHORIZED, "Invalid signature")),
+        Err(e) => return Err(e),
+    }
+
+    // Replay prevention using refund_id as event_id
+    match queries::try_record_webhook_event(&conn, provider.provider_name(), &data.refund_id) {
+        Ok(true) => {
+            // New event - proceed
+        }
+        Ok(false) => {
+            // Already processed
+            return Ok((StatusCode::OK, "Already processed"));
+        }
+        Err(e) => {
+            tracing::error!("Failed to record webhook event: {}", e);
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
+        }
+    }
+
+    // Create refund transaction record (negative amounts)
+    let transaction = CreateTransaction {
+        license_id: Some(license.id.clone()),
+        project_id: project.id.clone(),
+        product_id: Some(license.product_id.clone()),
+        org_id: org.id.clone(),
+        payment_provider: provider.provider_name().to_string(),
+        provider_customer_id: license.customer_id.clone(),
+        provider_subscription_id: original_transaction.provider_subscription_id.clone(),
+        provider_order_id: data.refund_id.clone(),
+        currency: data.currency.clone(),
+        subtotal_cents: -(data.amount_cents),
+        discount_cents: 0,
+        net_cents: -(data.amount_cents),
+        tax_cents: 0,
+        total_cents: -(data.amount_cents),
+        discount_code: None,
+        tax_inclusive: None,
+        customer_country: original_transaction.customer_country.clone(),
+        transaction_type: TransactionType::Refund,
+        parent_transaction_id: Some(original_transaction.id.clone()),
+        is_subscription: original_transaction.is_subscription,
+        test_mode: data.test_mode,
+    };
+
+    if let Err(e) = queries::create_transaction(&conn, &transaction) {
+        tracing::error!("Failed to create refund transaction: {}", e);
+        // Return error so provider will retry - we want to record refunds
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to create refund transaction"));
+    }
+
+    tracing::info!(
+        "{} refund processed: refund_id={}, order_id={}, license_id={}, amount={} {}",
+        provider.provider_name(),
+        data.refund_id,
+        data.order_id,
+        license.id,
+        data.amount_cents,
+        data.currency
+    );
+
+    // Fire-and-forget sales metering event
+    spawn_sales_metering(
+        state.http_client.clone(),
+        state.metering_webhook_url.clone(),
+        SalesMeteringEvent {
+            event: "refund".to_string(),
+            org_id: org.id.clone(),
+            project_id: project.id.clone(),
+            product_id: license.product_id.clone(),
+            license_id: license.id.clone(),
+            transaction_id: data.refund_id.clone(),
+            payment_provider: provider.provider_name().to_string(),
+            amount_cents: -(data.amount_cents), // Negative for refunds
+            currency: data.currency.clone(),
+            timestamp: chrono::Utc::now().timestamp(),
+        },
+    );
+
+    // Audit log
+    let audit_conn = state.audit.get().map_err(|e| {
+        tracing::error!("Audit DB connection error: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+    })?;
+
+    if let Err(e) = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, headers)
+        .actor(ActorType::Public, None)
+        .action(AuditAction::ReceiveRefundWebhook)
+        .resource("license", &license.id)
+        .details(&serde_json::json!({
+            "provider": provider.provider_name(),
+            "refund_id": data.refund_id,
+            "order_id": data.order_id,
+            "amount_cents": data.amount_cents,
+            "currency": data.currency,
+            "product_id": license.product_id,
+            "parent_transaction_id": original_transaction.id,
+        }))
+        .org(&org.id)
+        .project(&project.id)
+        .names(&AuditLogNames {
+            org_name: Some(org.name.clone()),
+            project_name: Some(project.name.clone()),
+            ..Default::default()
+        })
+        .save()
+    {
+        tracing::warn!("Failed to write refund audit log: {}", e);
+    }
+
+    Ok((StatusCode::OK, "OK"))
+}
+
+/// Helper for processing refunds when we can't find a linked license.
+/// Still records the transaction for revenue tracking.
+fn process_refund_no_license<P: WebhookProvider>(
+    provider: &P,
+    state: &AppState,
+    headers: &HeaderMap,
+    conn: &Connection,
+    data: &RefundData,
+    original_transaction: &crate::models::Transaction,
+    project: &Project,
+    org: &Organization,
+) -> Result<WebhookResult, WebhookResult> {
+    // Replay prevention
+    match queries::try_record_webhook_event(conn, provider.provider_name(), &data.refund_id) {
+        Ok(true) => {}
+        Ok(false) => return Ok((StatusCode::OK, "Already processed")),
+        Err(e) => {
+            tracing::error!("Failed to record webhook event: {}", e);
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
+        }
+    }
+
+    // Create refund transaction without license link
+    let transaction = CreateTransaction {
+        license_id: None,
+        project_id: project.id.clone(),
+        product_id: original_transaction.product_id.clone(),
+        org_id: org.id.clone(),
+        payment_provider: provider.provider_name().to_string(),
+        provider_customer_id: original_transaction.provider_customer_id.clone(),
+        provider_subscription_id: original_transaction.provider_subscription_id.clone(),
+        provider_order_id: data.refund_id.clone(),
+        currency: data.currency.clone(),
+        subtotal_cents: -(data.amount_cents),
+        discount_cents: 0,
+        net_cents: -(data.amount_cents),
+        tax_cents: 0,
+        total_cents: -(data.amount_cents),
+        discount_code: None,
+        tax_inclusive: None,
+        customer_country: original_transaction.customer_country.clone(),
+        transaction_type: TransactionType::Refund,
+        parent_transaction_id: Some(original_transaction.id.clone()),
+        is_subscription: original_transaction.is_subscription,
+        test_mode: data.test_mode,
+    };
+
+    if let Err(e) = queries::create_transaction(conn, &transaction) {
+        tracing::error!("Failed to create refund transaction: {}", e);
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to create refund transaction"));
+    }
+
+    tracing::info!(
+        "{} refund processed (no license link): refund_id={}, order_id={}, amount={} {}",
+        provider.provider_name(),
+        data.refund_id,
+        data.order_id,
+        data.amount_cents,
+        data.currency
+    );
+
+    // Fire metering event (without license_id)
+    spawn_sales_metering(
+        state.http_client.clone(),
+        state.metering_webhook_url.clone(),
+        SalesMeteringEvent {
+            event: "refund".to_string(),
+            org_id: org.id.clone(),
+            project_id: project.id.clone(),
+            product_id: original_transaction.product_id.clone().unwrap_or_default(),
+            license_id: String::new(),
+            transaction_id: data.refund_id.clone(),
+            payment_provider: provider.provider_name().to_string(),
+            amount_cents: -(data.amount_cents),
+            currency: data.currency.clone(),
+            timestamp: chrono::Utc::now().timestamp(),
+        },
+    );
+
+    // Audit log
+    if let Ok(audit_conn) = state.audit.get() {
+        let _ = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, headers)
+            .actor(ActorType::Public, None)
+            .action(AuditAction::ReceiveRefundWebhook)
+            .resource("transaction", &original_transaction.id)
+            .details(&serde_json::json!({
+                "provider": provider.provider_name(),
+                "refund_id": data.refund_id,
+                "order_id": data.order_id,
+                "amount_cents": data.amount_cents,
+                "currency": data.currency,
+                "parent_transaction_id": original_transaction.id,
+                "no_license_link": true,
+            }))
+            .org(&org.id)
+            .project(&project.id)
+            .names(&AuditLogNames {
+                org_name: Some(org.name.clone()),
+                project_name: Some(project.name.clone()),
+                ..Default::default()
+            })
+            .save();
+    }
+
+    Ok((StatusCode::OK, "OK"))
 }

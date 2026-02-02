@@ -688,7 +688,7 @@ mod cross_cutting {
         ).unwrap();
 
         // Try to delete - should fail because it's in use
-        let result = queries::delete_service_config(&conn, &config_id);
+        let result = queries::soft_delete_service_config(&conn, &config_id);
         assert!(result.is_err(), "Should not be able to delete config that is in use");
 
         // Clear the reference first
@@ -698,7 +698,7 @@ mod cross_cutting {
         ).unwrap();
 
         // Now deletion should succeed
-        let result = queries::delete_service_config(&conn, &config_id);
+        let result = queries::soft_delete_service_config(&conn, &config_id);
         assert!(result.is_ok(), "Should be able to delete config after clearing references");
     }
 
