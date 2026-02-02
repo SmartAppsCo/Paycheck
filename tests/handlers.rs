@@ -8,3 +8,6 @@ mod orgs;
 
 #[path = "handlers/webhooks.rs"]
 mod webhooks;
+
+#[path = "handlers/org_api_coverage.rs"]
+mod org_api_coverage;
