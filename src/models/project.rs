@@ -40,6 +40,14 @@ pub struct Project {
     pub payment_config_id: Option<String>,
     /// Email config override (null = inherit from org)
     pub email_config_id: Option<String>,
+    /// Webhook URL to POST feedback submissions to
+    pub feedback_webhook_url: Option<String>,
+    /// Email address to send feedback submissions to (fallback if webhook fails or not set)
+    pub feedback_email: Option<String>,
+    /// Webhook URL to POST crash reports to
+    pub crash_webhook_url: Option<String>,
+    /// Email address to send crash reports to (fallback if webhook fails or not set)
+    pub crash_email: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     /// Soft delete timestamp (None = active, Some = deleted at this time)
@@ -67,6 +75,18 @@ pub struct ProjectPublic {
     /// Email config override (null = inherit from org)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email_config_id: Option<String>,
+    /// Webhook URL to POST feedback submissions to
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feedback_webhook_url: Option<String>,
+    /// Email address to send feedback submissions to
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feedback_email: Option<String>,
+    /// Webhook URL to POST crash reports to
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crash_webhook_url: Option<String>,
+    /// Email address to send crash reports to
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crash_email: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     /// Soft delete timestamp (None = active, Some = deleted at this time)
@@ -91,6 +111,10 @@ impl From<Project> for ProjectPublic {
             email_webhook_url: p.email_webhook_url,
             payment_config_id: p.payment_config_id,
             email_config_id: p.email_config_id,
+            feedback_webhook_url: p.feedback_webhook_url,
+            feedback_email: p.feedback_email,
+            crash_webhook_url: p.crash_webhook_url,
+            crash_email: p.crash_email,
             created_at: p.created_at,
             updated_at: p.updated_at,
             deleted_at: p.deleted_at,
@@ -122,6 +146,18 @@ pub struct CreateProject {
     /// Email config override (null = inherit from org)
     #[serde(default)]
     pub email_config_id: Option<String>,
+    /// Webhook URL to POST feedback submissions to
+    #[serde(default)]
+    pub feedback_webhook_url: Option<String>,
+    /// Email address to send feedback submissions to
+    #[serde(default)]
+    pub feedback_email: Option<String>,
+    /// Webhook URL to POST crash reports to
+    #[serde(default)]
+    pub crash_webhook_url: Option<String>,
+    /// Email address to send crash reports to
+    #[serde(default)]
+    pub crash_email: Option<String>,
 }
 
 impl CreateProject {
@@ -227,6 +263,18 @@ pub struct UpdateProject {
     /// Email config override (use Some(None) to clear, None to leave unchanged)
     #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub email_config_id: Option<Option<String>>,
+    /// Feedback webhook URL (use Some(None) to clear, None to leave unchanged)
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub feedback_webhook_url: Option<Option<String>>,
+    /// Feedback email (use Some(None) to clear, None to leave unchanged)
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub feedback_email: Option<Option<String>>,
+    /// Crash webhook URL (use Some(None) to clear, None to leave unchanged)
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub crash_webhook_url: Option<Option<String>>,
+    /// Crash email (use Some(None) to clear, None to leave unchanged)
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub crash_email: Option<Option<String>>,
 }
 
 impl UpdateProject {

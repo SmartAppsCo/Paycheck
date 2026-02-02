@@ -501,6 +501,159 @@ DeactivateResult:
 
 ---
 
+## Feedback & Crash Reporting
+
+SDKs provide passthrough feedback collection and crash reporting. Data is forwarded to the developer via their configured webhook or email - Paycheck does not store this data.
+
+### `submitFeedback(options: FeedbackOptions) -> Promise<void>`
+
+Submits user feedback to the developer.
+
+```
+FeedbackOptions:
+  message: string             # Required. The feedback message
+  email?: string              # Optional. User's email for follow-up
+  type?: FeedbackType         # Optional. "bug" | "feature" | "question" | "other" (default: "other")
+  priority?: Priority         # Optional. "low" | "medium" | "high"
+  appVersion?: string         # Optional. App version
+  os?: string                 # Optional. Operating system (auto-detected if not provided)
+  metadata?: object           # Optional. Arbitrary metadata
+```
+
+**Behavior:**
+- POST to `/feedback` with JWT in Authorization header
+- Auto-detects OS if not provided
+- Server extracts license context (tier, features, device_id) from JWT
+- Forwards to developer's configured webhook/email
+- Throws if no token stored or delivery fails
+
+---
+
+### `reportCrash(options: CrashOptions) -> Promise<void>`
+
+Reports a crash or error to the developer.
+
+```
+CrashOptions:
+  errorType: string           # Required. Error type/class (e.g., "TypeError", "NullPointerException")
+  errorMessage: string        # Required. Error message
+  stackTrace?: StackFrame[]   # Optional. Parsed stack trace
+  fingerprint?: string        # Optional. Deduplication key (auto-generated if not provided)
+  userEmail?: string          # Optional. User's email for follow-up
+  appVersion?: string         # Optional. App version
+  os?: string                 # Optional. Operating system (auto-detected if not provided)
+  metadata?: object           # Optional. Arbitrary metadata
+  breadcrumbs?: Breadcrumb[]  # Optional. Event trail leading up to crash
+
+StackFrame:
+  file?: string               # Source file path
+  function?: string           # Function name
+  line?: number               # Line number
+  column?: number             # Column number
+
+Breadcrumb:
+  timestamp: number           # Unix timestamp in ms
+  category?: string           # Event category (ui, http, console, navigation)
+  message: string             # Event description
+```
+
+**Behavior:**
+- POST to `/crash` with JWT in Authorization header
+- Auto-detects OS if not provided
+- Auto-generates fingerprint from error type + message + top stack frame if not provided
+- Server extracts license context from JWT
+- Forwards to developer's configured webhook/email
+- Throws if no token stored or delivery fails
+
+---
+
+### `reportError(error: Error, options?: CrashOptions) -> Promise<void>`
+
+Convenience method for reporting errors with automatic type extraction.
+
+**Behavior:**
+- Extracts error type and message from the error object
+- Calls `reportCrash()` with the extracted info
+- Options override auto-extracted values if provided
+
+**Example (TypeScript):**
+```typescript
+try {
+  await riskyOperation();
+} catch (e) {
+  await paycheck.reportError(e as Error, { appVersion: "1.2.3" });
+}
+```
+
+**Example (Rust):**
+```rust
+if let Err(e) = process() {
+    paycheck.report_error(&*e, None)?;
+}
+```
+
+---
+
+### Helper Functions
+
+#### `generateFingerprint(errorType: string, errorMessage: string, stackTrace?: StackFrame[]) -> string`
+
+Creates a SHA-256 based fingerprint for crash deduplication.
+
+**Behavior:**
+- Hashes error type + message + top stack frame (file, function, line)
+- Returns first 16 hex characters
+- Consistent fingerprints allow grouping duplicate crashes
+
+---
+
+#### `sanitizePath(path: string) -> string`
+
+Sanitizes file paths by replacing home directory with `~`.
+
+**Behavior:**
+- Replaces `$HOME` or `%USERPROFILE%` with `~`
+- Useful for stack trace sanitization before sending crash reports
+- Especially important for Electron apps where paths contain user home directories
+
+**Example (TypeScript):**
+```typescript
+import { sanitizePath } from '@anthropic/paycheck-sdk';
+
+sanitizePath('/Users/john/projects/myapp/src/main.ts')
+// Returns: '~/projects/myapp/src/main.ts'
+```
+
+---
+
+#### `sanitizeStackTrace(frames: StackFrame[]) -> StackFrame[]` (TypeScript only)
+
+Convenience function to sanitize all file paths in a stack trace.
+
+**Example:**
+```typescript
+import { sanitizeStackTrace } from '@anthropic/paycheck-sdk';
+
+const sanitizedFrames = sanitizeStackTrace(stackFrames);
+await paycheck.reportCrash({
+  errorType: 'Error',
+  errorMessage: 'Something went wrong',
+  stackTrace: sanitizedFrames,
+});
+```
+
+---
+
+#### `detectOS() -> string`
+
+Returns the current operating system.
+
+**Behavior:**
+- Returns values like "linux", "macos", "windows", "ios", "android"
+- Used by `submitFeedback()` and `reportCrash()` when `os` is not provided
+
+---
+
 ## Storage Adapter Interface
 
 SDKs must support custom storage adapters:

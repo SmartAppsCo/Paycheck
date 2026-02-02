@@ -106,6 +106,7 @@ src/
 ├── email.rs          # Email service (Resend API + webhook support)
 ├── error.rs          # Error types
 ├── extractors.rs     # Custom Axum extractors (JSON errors)
+├── feedback.rs       # Feedback/crash delivery service (webhook + email)
 ├── pagination.rs     # Pagination types for list endpoints
 ├── rate_limit.rs     # Rate limiting (IP + activation code requests)
 ├── util.rs           # Shared utilities (audit builder, expirations)
@@ -142,6 +143,8 @@ src/
 | GET | `/license` | Get license info (JWT + public_key query param) |
 | POST | `/validate` | Online license validation |
 | POST | `/devices/deactivate` | Self-deactivate (JWT in Authorization header) |
+| POST | `/feedback` | Submit user feedback (JWT auth required) |
+| POST | `/crash` | Report crash/error (JWT auth required) |
 
 ### Webhooks
 
@@ -433,6 +436,50 @@ PUT /orgs/{org_id}/projects/{id}
 - Max 4 attempts total (1 initial + 3 retries), ~21 seconds worst case
 - Resend failures after all retries return an error to the caller
 - Webhook failures after all retries still return success (activation code exists, dev can retrieve via admin API)
+
+### Feedback & Crash Reporting
+
+Passthrough feedback collection and crash reporting for indie devs. Data is forwarded via webhook (primary) or email (fallback) - no storage by Paycheck.
+
+**Configuration (per-project via API):**
+```json
+PUT /orgs/{org_id}/projects/{id}
+{
+  "feedback_webhook_url": "https://myapp.com/webhooks/feedback",
+  "feedback_email": "feedback@myapp.com",
+  "crash_webhook_url": "https://myapp.com/webhooks/crashes",
+  "crash_email": "crashes@myapp.com"
+}
+```
+
+**Delivery logic:**
+1. If webhook configured, try webhook first
+2. On webhook failure (or no webhook), try email if configured
+3. Return error only if all configured methods fail
+
+**Webhook payload format:**
+```json
+{
+  "event": "feedback_submitted",
+  "timestamp": 1234567890,
+  "data": {
+    "message": "Great app, but PDF export would be nice",
+    "email": "user@example.com",
+    "type": "feature",
+    "priority": "medium",
+    "app_version": "1.2.3",
+    "os": "linux",
+    "license_id": "...",
+    "tier": "pro",
+    "features": ["export", "sync"],
+    "device_id": "...",
+    "device_type": "machine",
+    "product_id": "..."
+  }
+}
+```
+
+Crash reports use `event: "crash_reported"` with additional fields: `error_type`, `error_message`, `stack_trace`, `fingerprint`, `breadcrumbs`.
 
 ## JWT Claims
 

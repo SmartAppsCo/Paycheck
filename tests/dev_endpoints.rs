@@ -70,6 +70,10 @@ fn operator_app_with_payment_configs() -> (Router, String) {
             None,
             "test@example.com".to_string(),
         )),
+        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
     };
@@ -191,6 +195,10 @@ async fn test_operator_get_payment_config_no_configs() {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
+        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
             None,
             "test@example.com".to_string(),
         )),

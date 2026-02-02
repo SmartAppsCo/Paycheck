@@ -347,3 +347,169 @@ impl From<DeactivateResponse> for DeactivateResult {
         }
     }
 }
+
+// ==================== Feedback & Crash Reporting Types ====================
+
+/// Feedback type classification
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FeedbackType {
+    /// Bug report
+    Bug,
+    /// Feature request
+    Feature,
+    /// Question or support inquiry
+    Question,
+    /// Other feedback
+    #[default]
+    Other,
+}
+
+/// Priority level for feedback
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Priority {
+    Low,
+    Medium,
+    High,
+}
+
+/// Options for submitting feedback
+#[derive(Debug, Clone, Default)]
+pub struct FeedbackOptions {
+    /// The feedback message (required)
+    pub message: String,
+    /// User's email for follow-up
+    pub email: Option<String>,
+    /// Feedback type classification
+    pub feedback_type: Option<FeedbackType>,
+    /// Priority level
+    pub priority: Option<Priority>,
+    /// App version
+    pub app_version: Option<String>,
+    /// Operating system info
+    pub os: Option<String>,
+    /// Arbitrary metadata
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// Stack frame in a crash report
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StackFrame {
+    /// Source file path
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// Function name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function: Option<String>,
+    /// Line number
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// Column number
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<u32>,
+}
+
+/// Breadcrumb for crash context
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Breadcrumb {
+    /// When this event occurred (Unix timestamp in ms)
+    pub timestamp: i64,
+    /// Category of event (ui, http, console, navigation)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Event description
+    pub message: String,
+}
+
+/// Options for reporting a crash
+#[derive(Debug, Clone, Default)]
+pub struct CrashOptions {
+    /// Error type/class (required)
+    pub error_type: String,
+    /// Error message (required)
+    pub error_message: String,
+    /// Parsed stack trace
+    pub stack_trace: Option<Vec<StackFrame>>,
+    /// Deduplication fingerprint (auto-generated if not provided)
+    pub fingerprint: Option<String>,
+    /// User's email for follow-up
+    pub user_email: Option<String>,
+    /// App version
+    pub app_version: Option<String>,
+    /// Operating system info
+    pub os: Option<String>,
+    /// Arbitrary metadata
+    pub metadata: Option<serde_json::Value>,
+    /// Event breadcrumbs leading up to crash
+    pub breadcrumbs: Option<Vec<Breadcrumb>>,
+}
+
+/// Internal request type for feedback submission
+#[derive(Debug, Serialize)]
+pub(crate) struct FeedbackRequest {
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub feedback_type: Option<FeedbackType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<Priority>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub os: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+impl From<FeedbackOptions> for FeedbackRequest {
+    fn from(opts: FeedbackOptions) -> Self {
+        Self {
+            message: opts.message,
+            email: opts.email,
+            feedback_type: opts.feedback_type,
+            priority: opts.priority,
+            app_version: opts.app_version,
+            os: opts.os,
+            metadata: opts.metadata,
+        }
+    }
+}
+
+/// Internal request type for crash reporting
+#[derive(Debug, Serialize)]
+pub(crate) struct CrashRequest {
+    pub error_type: String,
+    pub error_message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stack_trace: Option<Vec<StackFrame>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub os: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub breadcrumbs: Option<Vec<Breadcrumb>>,
+}
+
+impl From<CrashOptions> for CrashRequest {
+    fn from(opts: CrashOptions) -> Self {
+        Self {
+            error_type: opts.error_type,
+            error_message: opts.error_message,
+            stack_trace: opts.stack_trace,
+            fingerprint: opts.fingerprint,
+            user_email: opts.user_email,
+            app_version: opts.app_version,
+            os: opts.os,
+            metadata: opts.metadata,
+            breadcrumbs: opts.breadcrumbs,
+        }
+    }
+}

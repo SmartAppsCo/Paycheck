@@ -92,8 +92,8 @@ pub mod types;
 
 // Main exports
 pub use blocking::{
-    format_activation_code, CheckoutOptions, ImportResult, OfflineValidateResult, Paycheck,
-    PaycheckOptions, SyncResult, DEFAULT_BASE_URL,
+    detect_os, format_activation_code, generate_fingerprint, sanitize_path, CheckoutOptions,
+    ImportResult, OfflineValidateResult, Paycheck, PaycheckOptions, SyncResult, DEFAULT_BASE_URL,
 };
 
 // Error types
@@ -104,9 +104,10 @@ pub use storage::{FileStorage, StorageAdapter};
 
 // Types
 pub use types::{
-    ActivationResult, CallbackResult, CallbackStatus, CheckoutParams, CheckoutResult,
-    DeactivateResult, DeviceInfo, DeviceType, LicenseClaims, LicenseDeviceInfo, LicenseInfo,
-    LicenseStatus, RequestCodeResult, ValidateResult,
+    ActivationResult, Breadcrumb, CallbackResult, CallbackStatus, CheckoutParams, CheckoutResult,
+    CrashOptions, DeactivateResult, DeviceInfo, DeviceType, FeedbackOptions, FeedbackType,
+    LicenseClaims, LicenseDeviceInfo, LicenseInfo, LicenseStatus, Priority, RequestCodeResult,
+    StackFrame, ValidateResult,
 };
 
 // Device utilities

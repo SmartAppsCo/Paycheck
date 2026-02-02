@@ -10,6 +10,9 @@ import type {
   LicenseInfo,
   DeactivateResult,
   RequestCodeResult,
+  FeedbackOptions,
+  CrashOptions,
+  StackFrame,
 } from './types';
 import { PaycheckError } from './types';
 import {
@@ -1081,6 +1084,313 @@ export class Paycheck {
       };
     }
   }
+
+  // ==================== Feedback & Crash Reporting ====================
+
+  /**
+   * Submit user feedback.
+   *
+   * Requires a valid license token. Feedback is delivered to the project's
+   * configured webhook or email - Paycheck doesn't store feedback data.
+   *
+   * @param options - Feedback details
+   *
+   * @example
+   * ```typescript
+   * await paycheck.submitFeedback({
+   *   message: 'The dark mode toggle is hard to find',
+   *   type: 'feature',
+   *   priority: 'low',
+   *   email: 'user@example.com',  // optional, for follow-up
+   * });
+   * ```
+   */
+  async submitFeedback(options: FeedbackOptions): Promise<void> {
+    const token = await this.ensureFreshToken();
+
+    await this.apiRequest('POST', '/feedback', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: {
+        message: options.message,
+        email: options.email,
+        type: options.type,
+        priority: options.priority,
+        app_version: options.appVersion,
+        os: options.os ?? detectOS(),
+        metadata: options.metadata,
+      },
+    });
+  }
+
+  /**
+   * Report a crash or error.
+   *
+   * Requires a valid license token. Crash reports are delivered to the project's
+   * configured webhook or email - Paycheck doesn't store crash data.
+   *
+   * For convenience, use `reportError()` to auto-extract error details from
+   * an Error object.
+   *
+   * @param options - Crash report details
+   *
+   * @example
+   * ```typescript
+   * await paycheck.reportCrash({
+   *   errorType: 'TypeError',
+   *   errorMessage: 'Cannot read property "foo" of undefined',
+   *   stackTrace: [
+   *     { file: 'app.js', function: 'processData', line: 42 },
+   *   ],
+   *   appVersion: '1.2.3',
+   * });
+   * ```
+   */
+  async reportCrash(options: CrashOptions): Promise<void> {
+    const token = await this.ensureFreshToken();
+
+    // Auto-generate fingerprint if not provided
+    const fingerprint =
+      options.fingerprint ??
+      generateFingerprint(
+        options.errorType,
+        options.errorMessage,
+        options.stackTrace
+      );
+
+    await this.apiRequest('POST', '/crash', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: {
+        error_type: options.errorType,
+        error_message: options.errorMessage,
+        stack_trace: options.stackTrace,
+        fingerprint,
+        user_email: options.userEmail,
+        app_version: options.appVersion,
+        os: options.os ?? detectOS(),
+        metadata: options.metadata,
+        breadcrumbs: options.breadcrumbs,
+      },
+    });
+  }
+
+  /**
+   * Report an error with auto-extracted details.
+   *
+   * Convenience wrapper around `reportCrash()` that extracts error type,
+   * message, and stack trace from an Error object.
+   *
+   * @param error - The Error to report
+   * @param options - Additional crash report options (optional)
+   *
+   * @example
+   * ```typescript
+   * try {
+   *   riskyOperation();
+   * } catch (err) {
+   *   await paycheck.reportError(err, {
+   *     appVersion: '1.2.3',
+   *     metadata: { userId: 'abc123' },
+   *   });
+   * }
+   * ```
+   */
+  async reportError(
+    error: Error,
+    options?: Partial<Omit<CrashOptions, 'errorType' | 'errorMessage'>>
+  ): Promise<void> {
+    const stackTrace = options?.stackTrace ?? parseStackTrace(error.stack);
+
+    await this.reportCrash({
+      errorType: error.name || 'Error',
+      errorMessage: error.message,
+      stackTrace,
+      fingerprint: options?.fingerprint,
+      userEmail: options?.userEmail,
+      appVersion: options?.appVersion,
+      os: options?.os,
+      metadata: options?.metadata,
+      breadcrumbs: options?.breadcrumbs,
+    });
+  }
+}
+
+// ==================== Crash Reporting Helpers ====================
+
+/**
+ * Generate a fingerprint from an error for deduplication.
+ *
+ * Creates a hash-like string from the error type, message, and top stack frame.
+ * Useful for grouping similar crashes.
+ */
+function generateFingerprint(
+  errorType: string,
+  errorMessage: string,
+  stackTrace?: StackFrame[]
+): string {
+  // Use first stack frame for location info
+  const topFrame = stackTrace?.[0];
+  const location = topFrame
+    ? `${topFrame.file || ''}:${topFrame.function || ''}:${topFrame.line || ''}`
+    : '';
+
+  // Create a simple hash from the components
+  const str = `${errorType}:${errorMessage}:${location}`;
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  return Math.abs(hash).toString(36);
+}
+
+/**
+ * Parse an Error's stack trace into structured StackFrame objects.
+ *
+ * Attempts to extract file, function, line, and column from common stack formats.
+ */
+function parseStackTrace(stack?: string): StackFrame[] {
+  if (!stack) return [];
+
+  const frames: StackFrame[] = [];
+  const lines = stack.split('\n');
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Skip the error message line
+    if (
+      !trimmed.startsWith('at ') &&
+      !trimmed.match(/^\w+@/) &&
+      !trimmed.match(/^[^@]+@/)
+    ) {
+      continue;
+    }
+
+    // Match Chrome/Node format: "at functionName (file:line:column)"
+    const chromeMatch = trimmed.match(
+      /^at\s+(?:(.+?)\s+\()?(.+?):(\d+):(\d+)\)?$/
+    );
+    if (chromeMatch) {
+      frames.push({
+        function: chromeMatch[1] || undefined,
+        file: chromeMatch[2],
+        line: parseInt(chromeMatch[3], 10),
+        column: parseInt(chromeMatch[4], 10),
+      });
+      continue;
+    }
+
+    // Match Firefox/Safari format: "functionName@file:line:column"
+    const firefoxMatch = trimmed.match(/^(.+?)@(.+?):(\d+):(\d+)$/);
+    if (firefoxMatch) {
+      frames.push({
+        function: firefoxMatch[1] || undefined,
+        file: firefoxMatch[2],
+        line: parseInt(firefoxMatch[3], 10),
+        column: parseInt(firefoxMatch[4], 10),
+      });
+    }
+  }
+
+  return frames;
+}
+
+/**
+ * Auto-detect the current operating system.
+ */
+function detectOS(): string | undefined {
+  // Browser environment
+  if (typeof navigator !== 'undefined' && navigator.userAgent) {
+    const ua = navigator.userAgent;
+    if (ua.includes('Win')) return 'Windows';
+    if (ua.includes('Mac')) return 'macOS';
+    if (ua.includes('Linux')) return 'Linux';
+    if (ua.includes('Android')) return 'Android';
+    if (ua.includes('iOS') || ua.includes('iPhone') || ua.includes('iPad'))
+      return 'iOS';
+  }
+
+  // Node.js environment
+  if (typeof process !== 'undefined' && process.platform) {
+    const platform = process.platform;
+    if (platform === 'win32') return 'Windows';
+    if (platform === 'darwin') return 'macOS';
+    if (platform === 'linux') return 'Linux';
+    return platform;
+  }
+
+  return undefined;
+}
+
+/**
+ * Sanitize a file path by removing home directory and other sensitive info.
+ *
+ * Useful for stack trace sanitization before sending crash reports,
+ * especially in Electron apps where paths may contain user home directories.
+ *
+ * @example
+ * ```ts
+ * sanitizePath('/Users/john/projects/myapp/src/main.ts')
+ * // Returns: '~/projects/myapp/src/main.ts'
+ *
+ * sanitizePath('C:\\Users\\john\\projects\\myapp\\src\\main.ts')
+ * // Returns: '~\\projects\\myapp\\src\\main.ts'
+ * ```
+ */
+export function sanitizePath(path: string): string {
+  let sanitized = path;
+
+  // Node.js environment - check for home directory
+  if (typeof process !== 'undefined') {
+    // Unix-style home directory
+    const home = process.env.HOME;
+    if (home && sanitized.includes(home)) {
+      sanitized = sanitized.replace(home, '~');
+    }
+
+    // Windows-style home directory
+    const userProfile = process.env.USERPROFILE;
+    if (userProfile && sanitized.includes(userProfile)) {
+      sanitized = sanitized.replace(userProfile, '~');
+    }
+
+    // Also handle HOMEPATH for Windows
+    const homePath = process.env.HOMEPATH;
+    const homeDrive = process.env.HOMEDRIVE;
+    if (homeDrive && homePath) {
+      const windowsHome = homeDrive + homePath;
+      if (sanitized.includes(windowsHome)) {
+        sanitized = sanitized.replace(windowsHome, '~');
+      }
+    }
+  }
+
+  return sanitized;
+}
+
+/**
+ * Sanitize all file paths in a stack trace.
+ *
+ * @example
+ * ```ts
+ * const sanitizedFrames = sanitizeStackTrace(stackFrames);
+ * await paycheck.reportCrash({
+ *   errorType: 'Error',
+ *   errorMessage: 'Something went wrong',
+ *   stackTrace: sanitizedFrames,
+ * });
+ * ```
+ */
+export function sanitizeStackTrace(frames: StackFrame[]): StackFrame[] {
+  return frames.map((frame) => ({
+    ...frame,
+    file: frame.file ? sanitizePath(frame.file) : undefined,
+  }));
 }
 
 /**

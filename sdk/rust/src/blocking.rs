@@ -5,6 +5,7 @@ use crate::error::{PaycheckError, Result, map_status_to_error_code};
 use crate::jwt::{decode_token, is_jwt_expired, is_license_expired, verify_token};
 use crate::storage::{FileStorage, StorageAdapter, keys};
 use crate::types::*;
+use sha2::{Sha256, Digest};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
@@ -809,6 +810,114 @@ impl Paycheck {
         Ok(response.into())
     }
 
+    // ==================== Feedback & Crash Reporting ====================
+
+    /// Submit feedback to the project developer.
+    ///
+    /// Requires a valid license (JWT token). The feedback is delivered to the
+    /// developer via their configured webhook or email.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use paycheck_sdk::{Paycheck, FeedbackOptions, FeedbackType, Priority};
+    ///
+    /// paycheck.submit_feedback(FeedbackOptions {
+    ///     message: "The export feature would be great with PDF support!".into(),
+    ///     email: Some("user@example.com".into()),
+    ///     feedback_type: Some(FeedbackType::Feature),
+    ///     priority: Some(Priority::Medium),
+    ///     app_version: Some("1.2.3".into()),
+    ///     ..Default::default()
+    /// })?;
+    /// ```
+    pub fn submit_feedback(&self, mut options: FeedbackOptions) -> Result<()> {
+        let token = self.ensure_fresh_token()?;
+
+        // Auto-detect OS if not provided
+        if options.os.is_none() {
+            options.os = Some(detect_os());
+        }
+
+        let request: FeedbackRequest = options.into();
+        self.post_with_auth_no_response("/feedback", &request, &token)
+    }
+
+    /// Report a crash to the project developer.
+    ///
+    /// Requires a valid license (JWT token). The crash report is delivered to the
+    /// developer via their configured webhook or email.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use paycheck_sdk::{Paycheck, CrashOptions};
+    ///
+    /// paycheck.report_crash(CrashOptions {
+    ///     error_type: "NullPointerException".into(),
+    ///     error_message: "Cannot read property 'x' of null".into(),
+    ///     app_version: Some("1.2.3".into()),
+    ///     ..Default::default()
+    /// })?;
+    /// ```
+    pub fn report_crash(&self, mut options: CrashOptions) -> Result<()> {
+        let token = self.ensure_fresh_token()?;
+
+        // Auto-detect OS if not provided
+        if options.os.is_none() {
+            options.os = Some(detect_os());
+        }
+
+        // Auto-generate fingerprint if not provided
+        if options.fingerprint.is_none() {
+            options.fingerprint = Some(generate_fingerprint(
+                &options.error_type,
+                &options.error_message,
+                options.stack_trace.as_ref(),
+            ));
+        }
+
+        let request: CrashRequest = options.into();
+        self.post_with_auth_no_response("/crash", &request, &token)
+    }
+
+    /// Report an error with automatic type extraction.
+    ///
+    /// Convenience method that extracts the error type name and message from
+    /// a Rust error. Additional options can be provided to include app version,
+    /// metadata, etc.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use paycheck_sdk::Paycheck;
+    ///
+    /// fn process() -> Result<(), Box<dyn std::error::Error>> {
+    ///     // ... some operation that might fail
+    ///     Err("Something went wrong".into())
+    /// }
+    ///
+    /// if let Err(e) = process() {
+    ///     paycheck.report_error(&*e, None)?;
+    /// }
+    /// ```
+    pub fn report_error<E: std::error::Error + ?Sized>(
+        &self,
+        error: &E,
+        options: Option<CrashOptions>,
+    ) -> Result<()> {
+        let mut crash_options = options.unwrap_or_default();
+
+        // Extract error type name if not provided
+        if crash_options.error_type.is_empty() {
+            crash_options.error_type = std::any::type_name::<E>().to_string();
+        }
+
+        // Extract error message if not provided
+        if crash_options.error_message.is_empty() {
+            crash_options.error_message = error.to_string();
+        }
+
+        self.report_crash(crash_options)
+    }
+
     // ==================== Callback Handling ====================
 
     /// Handle the callback URL after payment redirect.
@@ -909,6 +1018,23 @@ impl Paycheck {
             .map_err(|e| PaycheckError::network(e.to_string()))
     }
 
+    fn post_with_auth_no_response<B: Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+        token: &str,
+    ) -> Result<()> {
+        let url = format!("{}{}", self.base_url, path);
+
+        ureq::post(&url)
+            .header("Authorization", &format!("Bearer {}", token))
+            .header("User-Agent", "paycheck-sdk-rust/0.5.0")
+            .send_json(body)
+            .map_err(|e| self.map_ureq_error(e))?;
+
+        Ok(())
+    }
+
     fn map_ureq_error(&self, error: ureq::Error) -> PaycheckError {
         match error {
             ureq::Error::StatusCode(status) => {
@@ -943,6 +1069,67 @@ pub struct CheckoutOptions {
     pub provider: Option<String>,
     /// Your customer identifier (flows through to license)
     pub customer_id: Option<String>,
+}
+
+// ==================== Helper Functions ====================
+
+/// Detect the current operating system.
+///
+/// Returns a string like "linux", "macos", "windows", etc.
+pub fn detect_os() -> String {
+    std::env::consts::OS.to_string()
+}
+
+/// Generate a fingerprint for crash deduplication.
+///
+/// Creates a SHA-256 hash from the error type, message, and optionally
+/// the top stack frame (file + function + line).
+pub fn generate_fingerprint(
+    error_type: &str,
+    error_message: &str,
+    stack_trace: Option<&Vec<StackFrame>>,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(error_type.as_bytes());
+    hasher.update(error_message.as_bytes());
+
+    // Include top stack frame if available
+    if let Some(frames) = stack_trace {
+        if let Some(frame) = frames.first() {
+            if let Some(ref file) = frame.file {
+                hasher.update(file.as_bytes());
+            }
+            if let Some(ref function) = frame.function {
+                hasher.update(function.as_bytes());
+            }
+            if let Some(line) = frame.line {
+                hasher.update(line.to_string().as_bytes());
+            }
+        }
+    }
+
+    let result = hasher.finalize();
+    // Return first 16 hex chars for a reasonable fingerprint
+    format!("{:x}", result)[..16].to_string()
+}
+
+/// Sanitize a file path by removing home directory and other sensitive info.
+///
+/// Useful for stack trace sanitization before sending crash reports.
+pub fn sanitize_path(path: &str) -> String {
+    // Replace home directory patterns
+    let sanitized = if let Some(home) = std::env::var("HOME").ok() {
+        path.replace(&home, "~")
+    } else {
+        path.to_string()
+    };
+
+    // Also handle Windows-style home dirs
+    if let Some(userprofile) = std::env::var("USERPROFILE").ok() {
+        return sanitized.replace(&userprofile, "~");
+    }
+
+    sanitized
 }
 
 #[cfg(test)]
@@ -1061,5 +1248,75 @@ mod tests {
         assert!(validate_activation_code("MYAPP-ABOD-EF5G").is_err()); // O (looks like 0)
         assert!(validate_activation_code("AB0D-EF5G").is_err()); // 0 in bare code
         assert!(validate_activation_code("ABID-EF5G").is_err()); // I in bare code
+    }
+
+    #[test]
+    fn test_detect_os() {
+        let os = detect_os();
+        // Should return one of the known OS values
+        assert!(
+            ["linux", "macos", "windows", "ios", "android", "freebsd"].contains(&os.as_str())
+                || !os.is_empty()
+        );
+    }
+
+    #[test]
+    fn test_generate_fingerprint_basic() {
+        let fp1 = generate_fingerprint("TypeError", "Cannot read property", None);
+        let fp2 = generate_fingerprint("TypeError", "Cannot read property", None);
+
+        // Same inputs should produce same fingerprint
+        assert_eq!(fp1, fp2);
+
+        // Different inputs should produce different fingerprints
+        let fp3 = generate_fingerprint("ReferenceError", "x is not defined", None);
+        assert_ne!(fp1, fp3);
+
+        // Fingerprint should be 16 hex chars
+        assert_eq!(fp1.len(), 16);
+        assert!(fp1.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_generate_fingerprint_with_stack() {
+        let stack = vec![StackFrame {
+            file: Some("src/main.rs".to_string()),
+            function: Some("process".to_string()),
+            line: Some(42),
+            column: None,
+        }];
+
+        let fp_with_stack =
+            generate_fingerprint("TypeError", "Cannot read property", Some(&stack));
+        let fp_without_stack = generate_fingerprint("TypeError", "Cannot read property", None);
+
+        // Stack trace should affect fingerprint
+        assert_ne!(fp_with_stack, fp_without_stack);
+
+        // Different line numbers should produce different fingerprints
+        let stack2 = vec![StackFrame {
+            file: Some("src/main.rs".to_string()),
+            function: Some("process".to_string()),
+            line: Some(43),
+            column: None,
+        }];
+        let fp_different_line =
+            generate_fingerprint("TypeError", "Cannot read property", Some(&stack2));
+        assert_ne!(fp_with_stack, fp_different_line);
+    }
+
+    #[test]
+    fn test_sanitize_path() {
+        // Test that home directory is replaced
+        if let Ok(home) = std::env::var("HOME") {
+            let path = format!("{}/projects/myapp/src/main.rs", home);
+            let sanitized = sanitize_path(&path);
+            assert!(sanitized.starts_with("~"));
+            assert!(!sanitized.contains(&home));
+        }
+
+        // Paths without home dir should be unchanged
+        let path = "/usr/local/bin/app";
+        assert_eq!(sanitize_path(path), path);
     }
 }

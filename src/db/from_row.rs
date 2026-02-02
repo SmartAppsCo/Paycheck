@@ -71,7 +71,7 @@ pub const API_KEY_COLS: &str = "id, user_id, name, key_prefix, key_hash, user_ma
 
 pub const API_KEY_SCOPE_COLS: &str = "api_key_id, org_id, project_id, access";
 
-pub const PROJECT_COLS: &str = "id, org_id, name, license_key_prefix, private_key, public_key, redirect_url, email_from, email_enabled, email_webhook_url, payment_config_id, email_config_id, created_at, updated_at, deleted_at, deleted_cascade_depth";
+pub const PROJECT_COLS: &str = "id, org_id, name, license_key_prefix, private_key, public_key, redirect_url, email_from, email_enabled, email_webhook_url, payment_config_id, email_config_id, feedback_webhook_url, feedback_email, crash_webhook_url, crash_email, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
 pub const PROJECT_MEMBER_COLS: &str = "id, org_member_id, project_id, role, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
@@ -220,10 +220,14 @@ impl FromRow for Project {
             email_webhook_url: row.get(9)?,
             payment_config_id: row.get(10)?,
             email_config_id: row.get(11)?,
-            created_at: row.get(12)?,
-            updated_at: row.get(13)?,
-            deleted_at: row.get(14)?,
-            deleted_cascade_depth: row.get(15)?,
+            feedback_webhook_url: row.get(12)?,
+            feedback_email: row.get(13)?,
+            crash_webhook_url: row.get(14)?,
+            crash_email: row.get(15)?,
+            created_at: row.get(16)?,
+            updated_at: row.get(17)?,
+            deleted_at: row.get(18)?,
+            deleted_cascade_depth: row.get(19)?,
         })
     }
 }

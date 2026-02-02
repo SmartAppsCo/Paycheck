@@ -1,5 +1,11 @@
 // Main client
-export { Paycheck, createPaycheck, formatActivationCode } from './paycheck';
+export {
+  Paycheck,
+  createPaycheck,
+  formatActivationCode,
+  sanitizePath,
+  sanitizeStackTrace,
+} from './paycheck';
 export type {
   PaycheckOptions,
   OfflineValidateResult,
@@ -24,6 +30,13 @@ export type {
   DeactivateResult,
   RequestCodeResult,
   PaycheckErrorCode,
+  // Feedback & crash types
+  FeedbackType,
+  Priority,
+  FeedbackOptions,
+  StackFrame,
+  Breadcrumb,
+  CrashOptions,
 } from './types';
 export { PaycheckError } from './types';
 

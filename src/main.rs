@@ -10,6 +10,7 @@ use paycheck::config::Config;
 use paycheck::crypto::{EmailHasher, MasterKey};
 use paycheck::db::{AppState, MigrationTarget, create_pool, init_audit_db, init_db, queries, run_migrations};
 use paycheck::email::EmailService;
+use paycheck::feedback::DeliveryService;
 use paycheck::handlers;
 use paycheck::jwt::{self, JwksCache};
 use paycheck::models::{
@@ -252,6 +253,10 @@ fn seed_dev_data(state: &AppState) {
         email_webhook_url: None,
         payment_config_id: None,
         email_config_id: None,
+        feedback_webhook_url: None,
+        feedback_email: None,
+        crash_webhook_url: None,
+        crash_email: None,
     };
     let project = queries::create_project(
         &conn,
@@ -766,6 +771,12 @@ async fn main() {
         config.default_from_email.clone(),
     );
 
+    // Initialize delivery service for feedback/crash passthrough
+    let delivery_service = DeliveryService::new(
+        config.resend_api_key.clone(),
+        config.default_from_email.clone(),
+    );
+
     // Initialize JWKS cache for first-party JWT authentication
     let jwks_cache = Arc::new(JwksCache::new());
 
@@ -839,6 +850,7 @@ async fn main() {
         success_page_url: config.success_page_url.clone(),
         activation_rate_limiter: Arc::new(ActivationRateLimiter::default()),
         email_service: Arc::new(email_service),
+        delivery_service: Arc::new(delivery_service),
         jwks_cache,
         trusted_issuers: config.trusted_issuers.clone(),
     };

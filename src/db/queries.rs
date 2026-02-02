@@ -2128,9 +2128,9 @@ pub fn create_project(
     let encrypted_private_key = master_key.encrypt_private_key(&id, private_key)?;
 
     conn.execute(
-        "INSERT INTO projects (id, org_id, name, license_key_prefix, private_key, public_key, redirect_url, email_from, email_enabled, email_webhook_url, payment_config_id, email_config_id, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-        params![&id, org_id, &input.name, &input.license_key_prefix, &encrypted_private_key, public_key, &input.redirect_url, &input.email_from, input.email_enabled, &input.email_webhook_url, &input.payment_config_id, &input.email_config_id, now, now],
+        "INSERT INTO projects (id, org_id, name, license_key_prefix, private_key, public_key, redirect_url, email_from, email_enabled, email_webhook_url, payment_config_id, email_config_id, feedback_webhook_url, feedback_email, crash_webhook_url, crash_email, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+        params![&id, org_id, &input.name, &input.license_key_prefix, &encrypted_private_key, public_key, &input.redirect_url, &input.email_from, input.email_enabled, &input.email_webhook_url, &input.payment_config_id, &input.email_config_id, &input.feedback_webhook_url, &input.feedback_email, &input.crash_webhook_url, &input.crash_email, now, now],
     )?;
 
     Ok(Project {
@@ -2146,6 +2146,10 @@ pub fn create_project(
         email_webhook_url: input.email_webhook_url.clone(),
         payment_config_id: input.payment_config_id.clone(),
         email_config_id: input.email_config_id.clone(),
+        feedback_webhook_url: input.feedback_webhook_url.clone(),
+        feedback_email: input.feedback_email.clone(),
+        crash_webhook_url: input.crash_webhook_url.clone(),
+        crash_email: input.crash_email.clone(),
         created_at: now,
         updated_at: now,
         deleted_at: None,
@@ -2287,6 +2291,26 @@ pub fn update_project(conn: &Connection, id: &str, input: &UpdateProject) -> Res
     // Handle email_config_id: Option<Option<String>>
     if let Some(ref email_config_id) = input.email_config_id {
         builder = builder.set_nullable("email_config_id", email_config_id.clone());
+    }
+
+    // Handle feedback_webhook_url: Option<Option<String>>
+    if let Some(ref feedback_webhook_url) = input.feedback_webhook_url {
+        builder = builder.set_nullable("feedback_webhook_url", feedback_webhook_url.clone());
+    }
+
+    // Handle feedback_email: Option<Option<String>>
+    if let Some(ref feedback_email) = input.feedback_email {
+        builder = builder.set_nullable("feedback_email", feedback_email.clone());
+    }
+
+    // Handle crash_webhook_url: Option<Option<String>>
+    if let Some(ref crash_webhook_url) = input.crash_webhook_url {
+        builder = builder.set_nullable("crash_webhook_url", crash_webhook_url.clone());
+    }
+
+    // Handle crash_email: Option<Option<String>>
+    if let Some(ref crash_email) = input.crash_email {
+        builder = builder.set_nullable("crash_email", crash_email.clone());
     }
 
     builder.execute_returning(conn, PROJECT_COLS)

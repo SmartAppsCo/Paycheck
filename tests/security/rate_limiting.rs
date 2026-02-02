@@ -79,6 +79,10 @@ fn public_app_with_rate_limits_and_ip(
             None,
             "test@example.com".to_string(),
         )),
+        delivery_service: Arc::new(paycheck::feedback::DeliveryService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
         jwks_cache: Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
     };
@@ -124,6 +128,10 @@ fn public_app_with_activation_limiter(
         success_page_url: "http://localhost:3000/success".to_string(),
         activation_rate_limiter: Arc::new(activation_limiter),
         email_service: Arc::new(paycheck::email::EmailService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
+        delivery_service: Arc::new(paycheck::feedback::DeliveryService::new(
             None,
             "test@example.com".to_string(),
         )),

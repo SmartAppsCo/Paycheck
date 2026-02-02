@@ -256,3 +256,87 @@ export class PaycheckError extends Error {
     this.name = 'PaycheckError';
   }
 }
+
+// ==================== Feedback Types ====================
+
+/**
+ * Feedback type classification
+ */
+export type FeedbackType = 'bug' | 'feature' | 'question' | 'other';
+
+/**
+ * Priority level for feedback
+ */
+export type Priority = 'low' | 'medium' | 'high';
+
+/**
+ * Options for submitting feedback
+ */
+export interface FeedbackOptions {
+  /** The feedback message (required) */
+  message: string;
+  /** User's email for follow-up */
+  email?: string;
+  /** Feedback type classification */
+  type?: FeedbackType;
+  /** Priority level */
+  priority?: Priority;
+  /** App version */
+  appVersion?: string;
+  /** Operating system info */
+  os?: string;
+  /** Arbitrary metadata */
+  metadata?: Record<string, unknown>;
+}
+
+// ==================== Crash Reporting Types ====================
+
+/**
+ * Stack frame in a crash report
+ */
+export interface StackFrame {
+  /** Source file path */
+  file?: string;
+  /** Function name */
+  function?: string;
+  /** Line number */
+  line?: number;
+  /** Column number */
+  column?: number;
+}
+
+/**
+ * Breadcrumb for crash context
+ */
+export interface Breadcrumb {
+  /** When this event occurred (Unix timestamp in ms) */
+  timestamp: number;
+  /** Category of event (ui, http, console, navigation) */
+  category?: string;
+  /** Event description */
+  message: string;
+}
+
+/**
+ * Options for reporting a crash
+ */
+export interface CrashOptions {
+  /** Error type/class (required) */
+  errorType: string;
+  /** Error message (required) */
+  errorMessage: string;
+  /** Parsed stack trace */
+  stackTrace?: StackFrame[];
+  /** Deduplication fingerprint (auto-generated if not provided) */
+  fingerprint?: string;
+  /** User's email for follow-up */
+  userEmail?: string;
+  /** App version */
+  appVersion?: string;
+  /** Operating system info */
+  os?: string;
+  /** Arbitrary metadata */
+  metadata?: Record<string, unknown>;
+  /** Event breadcrumbs leading up to crash */
+  breadcrumbs?: Breadcrumb[];
+}

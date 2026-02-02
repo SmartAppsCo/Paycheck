@@ -107,6 +107,10 @@ fn setup_refresh_test() -> (Router, String, String, String, String) {
             None,
             "test@example.com".to_string(),
         )),
+        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
     };
@@ -280,6 +284,10 @@ async fn test_refresh_rejects_non_uuid_product_id() {
             None,
             "test@example.com".to_string(),
         )),
+        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
     };
@@ -386,6 +394,10 @@ async fn test_refresh_with_revoked_license_fails() {
             None,
             "test@example.com".to_string(),
         )),
+        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
     };
@@ -483,6 +495,10 @@ async fn test_refresh_with_revoked_jti_fails() {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
+        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
             None,
             "test@example.com".to_string(),
         )),
@@ -586,6 +602,10 @@ async fn test_refresh_with_expired_jwt_succeeds() {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
+        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
             None,
             "test@example.com".to_string(),
         )),
@@ -703,6 +723,10 @@ async fn test_refresh_with_expired_license_fails() {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
+        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
             None,
             "test@example.com".to_string(),
         )),
@@ -840,6 +864,10 @@ async fn test_refresh_with_expired_license_exp_fails() {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
+        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
             None,
             "test@example.com".to_string(),
         )),

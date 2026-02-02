@@ -101,6 +101,10 @@ fn test_project_private_key_reencrypts_with_new_master_key() {
         email_webhook_url: None,
         payment_config_id: None,
         email_config_id: None,
+        feedback_webhook_url: None,
+        feedback_email: None,
+        crash_webhook_url: None,
+        crash_email: None,
     };
     let project = queries::create_project(
         &conn,

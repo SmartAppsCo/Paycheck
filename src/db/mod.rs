@@ -15,6 +15,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use crate::config::TrustedIssuer;
 use crate::crypto::{EmailHasher, MasterKey};
 use crate::email::EmailService;
+use crate::feedback::DeliveryService;
 use crate::jwt::JwksCache;
 use crate::rate_limit::ActivationRateLimiter;
 
@@ -41,6 +42,8 @@ pub struct AppState {
     pub activation_rate_limiter: Arc<ActivationRateLimiter>,
     /// Email service for sending activation codes
     pub email_service: Arc<EmailService>,
+    /// Delivery service for feedback and crash report passthrough
+    pub delivery_service: Arc<DeliveryService>,
     /// Cache for JWKS from trusted issuers
     pub jwks_cache: Arc<JwksCache>,
     /// Trusted JWT issuers for first-party app authentication

@@ -494,6 +494,10 @@ async fn test_org_many_projects() {
             email_webhook_url: None,
             payment_config_id: None,
             email_config_id: None,
+            feedback_webhook_url: None,
+            feedback_email: None,
+            crash_webhook_url: None,
+            crash_email: None,
         };
         let (private_key, public_key) = jwt::generate_keypair();
         queries::create_project(

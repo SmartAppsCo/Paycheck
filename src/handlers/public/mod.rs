@@ -2,6 +2,7 @@ mod activation;
 mod buy;
 mod callback;
 mod devices;
+mod feedback;
 mod license;
 mod redeem;
 mod refresh;
@@ -11,6 +12,7 @@ pub use activation::*;
 pub use buy::*;
 pub use callback::*;
 pub use devices::*;
+pub use feedback::*;
 pub use license::*;
 pub use redeem::*;
 pub use refresh::*;
@@ -55,6 +57,8 @@ pub fn router(rate_limit_config: RateLimitConfig) -> Router<AppState> {
         .route("/validate", post(validate_license))
         .route("/license", get(get_license_info))
         .route("/devices/deactivate", post(deactivate_device))
+        .route("/feedback", post(submit_feedback))
+        .route("/crash", post(report_crash))
         .layer(rate_limit::standard_layer(rate_limit_config.standard_rpm));
 
     // Relaxed tier: lightweight operations

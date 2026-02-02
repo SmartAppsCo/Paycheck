@@ -9,6 +9,7 @@ pub mod db;
 pub mod email;
 pub mod error;
 pub mod extractors;
+pub mod feedback;
 pub mod handlers;
 pub mod jwt;
 pub mod middleware;

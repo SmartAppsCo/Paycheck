@@ -50,6 +50,10 @@ pub fn operator_app() -> (Router, AppState) {
             None,
             "test@example.com".to_string(),
         )),
+        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
     };
@@ -89,6 +93,10 @@ pub fn org_app() -> (Router, AppState) {
             paycheck::rate_limit::ActivationRateLimiter::default(),
         ),
         email_service: std::sync::Arc::new(paycheck::email::EmailService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
+        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
             None,
             "test@example.com".to_string(),
         )),

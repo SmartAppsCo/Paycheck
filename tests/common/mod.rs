@@ -35,6 +35,7 @@ use std::sync::Arc;
 pub use paycheck::crypto::{EmailHasher, MasterKey};
 pub use paycheck::db::{AppState, init_audit_db, init_db, queries};
 pub use paycheck::email::EmailService;
+pub use paycheck::feedback::DeliveryService;
 pub use paycheck::handlers::public::{
     deactivate_device, get_license_info, initiate_buy, payment_callback, redeem_with_code,
     request_activation_code, validate_license,
@@ -145,6 +146,10 @@ pub fn create_test_project(
         email_webhook_url: None,
         payment_config_id: None,
         email_config_id: None,
+        feedback_webhook_url: None,
+        feedback_email: None,
+        crash_webhook_url: None,
+        crash_email: None,
     };
     let (private_key, public_key) = jwt::generate_keypair();
     queries::create_project(conn, org_id, &input, &private_key, &public_key, master_key)
@@ -265,6 +270,7 @@ pub fn create_test_app_state() -> AppState {
         success_page_url: "http://localhost:3000/success".to_string(),
         activation_rate_limiter: Arc::new(ActivationRateLimiter::default()),
         email_service: Arc::new(EmailService::new(None, "test@example.com".to_string())),
+        delivery_service: Arc::new(DeliveryService::new(None, "test@example.com".to_string())),
         jwks_cache: Arc::new(JwksCache::new()),
         trusted_issuers: vec![],
     }
