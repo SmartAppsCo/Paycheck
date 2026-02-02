@@ -15,10 +15,11 @@ use crate::db::{AppState, queries};
 use crate::error::{AppError, Result, msg};
 use crate::extractors::Json;
 use crate::feedback::{
-    Breadcrumb, CrashData, DeliveryConfig, FeedbackData, FeedbackType, JwtContext, Priority,
-    StackFrame,
+    Breadcrumb, CrashData, DeliveryConfig, DeliveryResult, FeedbackData, FeedbackType, JwtContext,
+    Priority, StackFrame,
 };
 use crate::jwt;
+use crate::metering::{send_metering_event, EmailMeteringEvent};
 
 /// Request body for POST /feedback
 #[derive(Debug, Deserialize)]
@@ -160,7 +161,7 @@ pub async fn submit_feedback(
     };
 
     // Deliver feedback (uses system-level Resend key for email fallback)
-    state
+    let result = state
         .delivery_service
         .deliver_feedback(
             &config,
@@ -171,6 +172,31 @@ pub async fn submit_feedback(
             None, // Use system-level Resend key
         )
         .await?;
+
+    // Fire-and-forget metering event
+    if let Some(ref metering_url) = state.metering_webhook_url {
+        let delivery_method = match result {
+            DeliveryResult::EmailSent => "system_key", // Always system key (org_resend_key is None)
+            DeliveryResult::WebhookDelivered => "webhook",
+        };
+
+        let event = EmailMeteringEvent {
+            event: "feedback_sent".to_string(),
+            org_id: project.org_id.clone(),
+            project_id: project_id.clone(),
+            license_id: None,
+            product_id: None,
+            delivery_method: delivery_method.to_string(),
+            timestamp: chrono::Utc::now().timestamp(),
+            idempotency_key: uuid::Uuid::new_v4().to_string(),
+        };
+
+        let client = state.http_client.clone();
+        let url = metering_url.clone();
+        tokio::spawn(async move {
+            send_metering_event(&client, &url, &event).await;
+        });
+    }
 
     Ok(Json(SubmitResponse { success: true }))
 }
@@ -217,7 +243,7 @@ pub async fn report_crash(
     };
 
     // Deliver crash report (uses system-level Resend key for email fallback)
-    state
+    let result = state
         .delivery_service
         .deliver_crash(
             &config,
@@ -228,6 +254,31 @@ pub async fn report_crash(
             None, // Use system-level Resend key
         )
         .await?;
+
+    // Fire-and-forget metering event
+    if let Some(ref metering_url) = state.metering_webhook_url {
+        let delivery_method = match result {
+            DeliveryResult::EmailSent => "system_key", // Always system key (org_resend_key is None)
+            DeliveryResult::WebhookDelivered => "webhook",
+        };
+
+        let event = EmailMeteringEvent {
+            event: "crash_sent".to_string(),
+            org_id: project.org_id.clone(),
+            project_id: project_id.clone(),
+            license_id: None,
+            product_id: None,
+            delivery_method: delivery_method.to_string(),
+            timestamp: chrono::Utc::now().timestamp(),
+            idempotency_key: uuid::Uuid::new_v4().to_string(),
+        };
+
+        let client = state.http_client.clone();
+        let url = metering_url.clone();
+        tokio::spawn(async move {
+            send_metering_event(&client, &url, &event).await;
+        });
+    }
 
     Ok(Json(SubmitResponse { success: true }))
 }

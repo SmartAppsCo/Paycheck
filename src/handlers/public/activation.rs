@@ -10,9 +10,12 @@ use axum::{extract::State, http::HeaderMap};
 use serde::{Deserialize, Serialize};
 
 use crate::db::{AppState, queries};
-use crate::email::{EmailSendConfig, EmailTrigger, LicenseCodeInfo, MultiLicenseEmailConfig};
+use crate::email::{
+    EmailSendConfig, EmailSendResult, EmailTrigger, LicenseCodeInfo, MultiLicenseEmailConfig,
+};
 use crate::error::Result;
 use crate::extractors::Json;
+use crate::metering::{send_metering_event, EmailMeteringEvent};
 use crate::models::{ActorType, AuditAction, AuditLogNames};
 use crate::util::AuditLogBuilder;
 
@@ -196,6 +199,45 @@ pub async fn request_activation_code(
                 license_count = active_licenses.len(),
                 "Activation code email processed"
             );
+
+            // Fire-and-forget metering event
+            if let Some(ref metering_url) = state.metering_webhook_url {
+                let delivery_method = match result {
+                    EmailSendResult::Sent if org_resend_key.is_some() => "org_key",
+                    EmailSendResult::Sent => "system_key",
+                    EmailSendResult::WebhookCalled => "webhook",
+                    EmailSendResult::Disabled | EmailSendResult::NoApiKey => {
+                        // Don't meter if no email was actually sent
+                        ""
+                    }
+                };
+
+                if !delivery_method.is_empty() {
+                    // Use first license ID as idempotency key (or generate UUID for multi-license)
+                    let idempotency_key = if active_licenses.len() == 1 {
+                        active_licenses[0].id.clone()
+                    } else {
+                        uuid::Uuid::new_v4().to_string()
+                    };
+
+                    let event = EmailMeteringEvent {
+                        event: "activation_sent".to_string(),
+                        org_id: project.org_id.clone(),
+                        project_id: project.id.clone(),
+                        license_id: active_licenses.first().map(|l| l.id.clone()),
+                        product_id: active_licenses.first().map(|l| l.product_id.clone()),
+                        delivery_method: delivery_method.to_string(),
+                        timestamp: chrono::Utc::now().timestamp(),
+                        idempotency_key,
+                    };
+
+                    let client = state.http_client.clone();
+                    let url = metering_url.clone();
+                    tokio::spawn(async move {
+                        send_metering_event(&client, &url, &event).await;
+                    });
+                }
+            }
         }
         Err(e) => {
             // Log error but don't expose it to user

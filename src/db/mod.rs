@@ -12,6 +12,8 @@ use std::sync::Arc;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 
+use reqwest::Client;
+
 use crate::config::TrustedIssuer;
 use crate::crypto::{EmailHasher, MasterKey};
 use crate::email::EmailService;
@@ -48,6 +50,10 @@ pub struct AppState {
     pub jwks_cache: Arc<JwksCache>,
     /// Trusted JWT issuers for first-party app authentication
     pub trusted_issuers: Vec<TrustedIssuer>,
+    /// Shared HTTP client for metering webhooks
+    pub http_client: Client,
+    /// Optional webhook URL for usage metering
+    pub metering_webhook_url: Option<String>,
 }
 
 pub fn create_pool(database_path: &str) -> Result<DbPool, r2d2::Error> {

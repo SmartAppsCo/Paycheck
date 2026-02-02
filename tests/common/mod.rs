@@ -273,6 +273,8 @@ pub fn create_test_app_state() -> AppState {
         delivery_service: Arc::new(DeliveryService::new(None, "test@example.com".to_string())),
         jwks_cache: Arc::new(JwksCache::new()),
         trusted_issuers: vec![],
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
     }
 }
 

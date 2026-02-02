@@ -12,6 +12,7 @@ use rusqlite::Connection;
 use crate::crypto::{EmailHasher, MasterKey};
 use crate::db::{AppState, queries};
 use crate::error::AppError;
+use crate::metering::{send_metering_event, SalesMeteringEvent};
 use crate::models::{
     ActorType, AuditAction, AuditLogNames, CreateLicense, CreateTransaction, License,
     Organization, PaymentSession, Product, Project, TransactionType,
@@ -480,12 +481,15 @@ async fn handle_checkout<P: WebhookProvider>(
         &data,
     );
 
-    // Audit log on successful checkout (license created)
+    // Audit log and metering on successful checkout (license created)
     if result.0 == StatusCode::OK && result.1 == "OK" {
         // Re-fetch session to get the linked license_id
-        if let Ok(Some(updated_session)) = queries::get_payment_session(&conn, &data.session_id)
-            && let Some(license_id) = updated_session.license_id
-        {
+        let license_id = queries::get_payment_session(&conn, &data.session_id)
+            .ok()
+            .flatten()
+            .and_then(|s| s.license_id);
+
+        if let Some(ref license_id) = license_id {
             let audit_conn = state.audit.get().map_err(|e| {
                 tracing::error!("Audit DB connection error: {}", e);
                 (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
@@ -494,7 +498,7 @@ async fn handle_checkout<P: WebhookProvider>(
             if let Err(e) = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, headers)
                 .actor(ActorType::Public, None)
                 .action(AuditAction::ReceiveCheckoutWebhook)
-                .resource("license", &license_id)
+                .resource("license", license_id)
                 .details(&serde_json::json!({
                     "provider": provider.provider_name(),
                     "session_id": data.session_id,
@@ -518,13 +522,37 @@ async fn handle_checkout<P: WebhookProvider>(
 
         // Spawn enricher to fetch additional data from payment provider API
         // (e.g., discount codes that aren't in the webhook payload)
-        if let Some(order_id) = data.order_id {
+        if let Some(order_id) = data.order_id.clone() {
             provider.spawn_enricher(
                 state.clone(),
                 project.id.clone(),
                 org.id.clone(),
                 order_id,
             );
+        }
+
+        // Fire-and-forget sales metering event
+        if let Some(ref metering_url) = state.metering_webhook_url {
+            if let (Some(tx_data), Some(license_id)) = (&data.transaction, license_id) {
+                let event = SalesMeteringEvent {
+                    event: "purchase".to_string(),
+                    org_id: org.id.clone(),
+                    project_id: project.id.clone(),
+                    product_id: payment_session.product_id.clone(),
+                    license_id,
+                    transaction_id: data.order_id.clone().unwrap_or_else(|| data.session_id.clone()),
+                    payment_provider: provider.provider_name().to_string(),
+                    amount_cents: tx_data.total_cents,
+                    currency: tx_data.currency.clone(),
+                    timestamp: chrono::Utc::now().timestamp(),
+                };
+
+                let client = state.http_client.clone();
+                let url = metering_url.clone();
+                tokio::spawn(async move {
+                    send_metering_event(&client, &url, &event).await;
+                });
+            }
         }
     }
 

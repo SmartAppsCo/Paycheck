@@ -113,6 +113,8 @@ fn admin_app_with_origins(origins: Vec<&str>) -> (Router, AppState) {
         )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
     };
 
     // Create CORS layer with specified origins
@@ -180,6 +182,8 @@ fn operator_app_with_origins(origins: Vec<&str>) -> (Router, AppState) {
         )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
     };
 
     // Create CORS layer with specified origins

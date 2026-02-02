@@ -12,6 +12,7 @@ pub mod extractors;
 pub mod feedback;
 pub mod handlers;
 pub mod jwt;
+pub mod metering;
 pub mod middleware;
 pub mod models;
 pub mod pagination;

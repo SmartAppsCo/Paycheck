@@ -85,6 +85,8 @@ fn public_app_with_rate_limits_and_ip(
         )),
         jwks_cache: Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
     };
 
     // Use axum::Extension to directly inject ConnectInfo for PeerIpKeyExtractor
@@ -137,6 +139,8 @@ fn public_app_with_activation_limiter(
         )),
         jwks_cache: Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
     };
 
     // Use axum::Extension to directly inject ConnectInfo for PeerIpKeyExtractor

@@ -113,6 +113,8 @@ fn setup_refresh_test() -> (Router, String, String, String, String) {
         )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
     };
 
     let app = Router::new()
@@ -290,6 +292,8 @@ async fn test_refresh_rejects_non_uuid_product_id() {
         )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
     };
 
     let app = Router::new()
@@ -400,6 +404,8 @@ async fn test_refresh_with_revoked_license_fails() {
         )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
     };
 
     let app = Router::new()
@@ -504,6 +510,8 @@ async fn test_refresh_with_revoked_jti_fails() {
         )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
     };
 
     let app = Router::new()
@@ -611,6 +619,8 @@ async fn test_refresh_with_expired_jwt_succeeds() {
         )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
     };
 
     let app = Router::new()
@@ -732,6 +742,8 @@ async fn test_refresh_with_expired_license_fails() {
         )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
     };
 
     let app = Router::new()
@@ -873,6 +885,8 @@ async fn test_refresh_with_expired_license_exp_fails() {
         )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
     };
 
     let app = Router::new()

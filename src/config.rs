@@ -104,6 +104,10 @@ pub struct Config {
     /// Number of database migration backups to keep.
     /// Set via MIGRATION_BACKUP_COUNT. Default: 3. -1 = keep all. 0 = no backups.
     pub migration_backup_count: i32,
+    /// Optional webhook URL for usage metering.
+    /// When set, Paycheck emits events for emails sent and transactions created.
+    /// Set via PAYCHECK_METERING_WEBHOOK_URL.
+    pub metering_webhook_url: Option<String>,
 }
 
 /// Check that a file has secure permissions (owner read-only, no write, no group/other access).
@@ -318,6 +322,9 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(3);
 
+        // Optional metering webhook URL for usage tracking
+        let metering_webhook_url = env::var("PAYCHECK_METERING_WEBHOOK_URL").ok();
+
         Self {
             host,
             port,
@@ -340,6 +347,7 @@ impl Config {
             default_from_email,
             trusted_issuers,
             migration_backup_count,
+            metering_webhook_url,
         }
     }
 

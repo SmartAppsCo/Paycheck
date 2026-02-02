@@ -853,6 +853,8 @@ async fn main() {
         delivery_service: Arc::new(delivery_service),
         jwks_cache,
         trusted_issuers: config.trusted_issuers.clone(),
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: config.metering_webhook_url.clone(),
     };
 
     // Purge old public audit logs on startup (0 = never purge)

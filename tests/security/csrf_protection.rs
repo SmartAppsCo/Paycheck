@@ -61,6 +61,8 @@ fn org_app() -> (Router, AppState) {
         )),
         jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
         trusted_issuers: vec![],
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
     };
 
     let app = handlers::orgs::router(state.clone(), paycheck::config::RateLimitConfig::disabled())
