@@ -69,8 +69,14 @@ pub struct CheckoutData {
     /// Customer email from payment provider (for license recovery via email)
     pub customer_email: Option<String>,
     pub subscription_id: Option<String>,
-    /// Provider's order/checkout session ID (Stripe: cs_xxx, LemonSqueezy: order ID)
+    /// Provider's order ID for DB storage and refund linkage.
+    /// Stripe: payment_intent (pi_xxx) for refund webhook matching.
+    /// LemonSqueezy: order ID.
     pub order_id: Option<String>,
+    /// Provider-specific session ID for API enrichment calls.
+    /// Stripe: checkout session ID (cs_xxx) for fetching discount codes.
+    /// Not used by LemonSqueezy.
+    pub enricher_session_id: Option<String>,
     /// Transaction data extracted from the payment provider
     pub transaction: Option<CheckoutTransactionData>,
 }
@@ -108,6 +114,9 @@ pub struct RenewalData {
     pub is_paid: bool,
     /// Unique event/invoice ID for replay prevention
     pub event_id: Option<String>,
+    /// PaymentIntent used to pay this invoice.
+    /// Critical for refund linkage - refunds reference payment_intent.
+    pub payment_intent: Option<String>,
     /// Billing period end from the payment provider (Unix timestamp).
     /// More accurate than calculating from product settings.
     pub period_end: Option<i64>,
@@ -136,6 +145,10 @@ pub struct RefundData {
     pub amount_cents: i64,
     /// Whether this is a test mode transaction
     pub test_mode: bool,
+    /// Source type: "refund", "dispute", or "dispute_reversal"
+    pub source: String,
+    /// Optional metadata (JSON) for disputes: {"dispute_id": "dp_xxx", "reason": "fraudulent"}
+    pub metadata: Option<String>,
 }
 
 /// Parsed webhook event with provider-agnostic data.
@@ -183,12 +196,16 @@ pub trait WebhookProvider: Send + Sync {
     /// Spawn a background task to enrich transaction data after commit.
     /// Default implementation does nothing. Override to fetch additional data
     /// from the payment provider API (e.g., discount codes from Stripe).
+    ///
+    /// - `provider_order_id`: ID used for DB lookup (Stripe: payment_intent, LS: order ID)
+    /// - `enricher_session_id`: ID for provider API calls (Stripe: checkout session cs_xxx)
     fn spawn_enricher(
         &self,
         _state: AppState,
         _project_id: String,
         _org_id: String,
         _provider_order_id: String,
+        _enricher_session_id: Option<String>,
     ) {
         // Default: no-op
     }
@@ -272,13 +289,9 @@ pub fn process_checkout(
         }
     };
 
-    // Commit the transaction - session claim and license creation are now permanent
-    if let Err(e) = tx.commit() {
-        tracing::error!("Failed to commit transaction: {}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Database error");
-    }
-
-    // Create transaction record with payment details
+    // Create transaction record with payment details (inside atomic scope)
+    // This ensures license and transaction are created together or not at all.
+    // Critical for refund linkage - refunds look up by provider_order_id.
     if let Some(tx_data) = &data.transaction {
         // Calculate net_cents (subtotal - discount)
         let net_cents = tx_data.subtotal_cents - tx_data.discount_cents;
@@ -304,12 +317,18 @@ pub fn process_checkout(
             transaction_type: TransactionType::Purchase,
             parent_transaction_id: None,
             is_subscription: data.subscription_id.is_some(),
+            source: "payment".to_string(),
+            metadata: None,
             test_mode: tx_data.test_mode,
         };
 
-        if let Err(e) = queries::create_transaction(conn, &transaction) {
-            tracing::error!("Failed to create transaction: {}", e);
-            // Non-fatal - license was already created
+        if let Err(e) = queries::create_transaction(&tx, &transaction) {
+            // Transaction creation failed - roll back everything so Stripe can retry
+            tracing::error!("Failed to create transaction record: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create transaction",
+            );
         }
     } else {
         tracing::warn!(
@@ -318,7 +337,15 @@ pub fn process_checkout(
         );
     }
 
+    // Commit the transaction - session claim, license, and transaction are now permanent
+    if let Err(e) = tx.commit() {
+        tracing::error!("Failed to commit transaction: {}", e);
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+    }
+
     // Link license to payment session for efficient callback lookup
+    // This is outside the atomic scope intentionally - it's a convenience optimization
+    // for the callback endpoint, not critical data. Callback will fall back to search.
     if let Err(e) = queries::set_payment_session_license(conn, &data.session_id, &license.id) {
         tracing::error!("Failed to link license to session: {}", e);
         // Non-fatal - callback will fall back to search
@@ -338,77 +365,105 @@ pub fn process_checkout(
     (StatusCode::OK, "OK")
 }
 
-/// Process a subscription renewal event - extends license expiration.
+/// Atomic result from renewal processing
+pub enum RenewalResult {
+    /// New renewal processed successfully
+    Success { license_exp: Option<i64> },
+    /// Event was already processed (idempotent)
+    AlreadyProcessed,
+}
+
+/// Process a subscription renewal ATOMICALLY - replay prevention, license extension,
+/// and transaction creation all happen in a single database transaction.
 ///
-/// The `event_id` parameter is used for replay attack prevention - if the same
-/// event_id is processed twice, the second call returns "Already processed".
+/// This ensures that either ALL operations succeed or NONE do, allowing payment
+/// provider retries to work correctly if any step fails.
 ///
-/// The `period_end` parameter is the billing period end from the payment provider,
-/// which is more accurate than calculating from product settings. If not available,
-/// falls back to `now + license_exp_days`.
-pub fn process_renewal(
-    conn: &Connection,
+/// Returns `RenewalResult::Success` with the new license expiration, or
+/// `RenewalResult::AlreadyProcessed` if this event was already handled.
+pub fn process_renewal_atomic(
+    conn: &mut Connection,
     provider: &str,
     product: &Product,
-    license_id: &str,
+    license: &License,
     subscription_id: &str,
     event_id: Option<&str>,
     period_end: Option<i64>,
-) -> WebhookResult {
-    // Replay attack prevention: check if we've already processed this event
+    transaction_data: Option<&CreateTransaction>,
+) -> Result<RenewalResult, WebhookResult> {
+    // Start a database transaction for atomicity
+    let tx = conn.transaction().map_err(|e| {
+        tracing::error!("Failed to start transaction: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+    })?;
+
+    // 1. Replay attack prevention (inside transaction - rolls back if later steps fail)
     if let Some(eid) = event_id {
-        match queries::try_record_webhook_event(conn, provider, eid) {
+        match queries::try_record_webhook_event(&tx, provider, eid) {
             Ok(true) => {
                 // New event - proceed with processing
             }
             Ok(false) => {
-                // Already processed - idempotent response
-                return (StatusCode::OK, "Already processed");
+                // Already processed - no need to commit, just return
+                return Ok(RenewalResult::AlreadyProcessed);
             }
             Err(e) => {
                 tracing::error!("Failed to record webhook event: {}", e);
-                return (StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+                return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
             }
         }
     }
 
-    // Use provider's period_end if available, otherwise calculate from product settings.
-    // Provider's date is more accurate (handles prorations, billing date changes, etc.)
+    // 2. Calculate new expirations
     let now = chrono::Utc::now().timestamp();
     let fallback_exps = LicenseExpirations::from_product(product, now);
 
     let license_exp = period_end.or(fallback_exps.license_exp);
-    // For updates_exp, calculate relative offset from license_exp if provider gave period_end
     let updates_exp = match (period_end, product.license_exp_days, product.updates_exp_days) {
-        // Provider period_end available and product has both expiration settings
         (Some(pe), Some(_), Some(upd_days)) => Some(pe + (upd_days as i64 * 86400)),
-        // Provider period_end available but updates follows license (same duration)
         (Some(pe), Some(lic_days), None) if lic_days > 0 => {
-            // If updates_exp_days not set, assume same as license
             fallback_exps.updates_exp.map(|_| pe)
         }
-        // Fall back to calculated value
         _ => fallback_exps.updates_exp,
     };
 
-    if let Err(e) = queries::extend_license_expiration(conn, license_id, license_exp, updates_exp) {
+    // 3. Extend license expiration
+    if let Err(e) = queries::extend_license_expiration(&tx, &license.id, license_exp, updates_exp) {
         tracing::error!("Failed to extend license: {}", e);
-        return (
+        return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to extend license",
-        );
+        ));
     }
+
+    // 4. Create transaction record (if data provided)
+    if let Some(tx_data) = transaction_data {
+        if let Err(e) = queries::create_transaction(&tx, tx_data) {
+            tracing::error!("Failed to create renewal transaction: {}", e);
+            // Transaction will be rolled back - retry can work
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create transaction",
+            ));
+        }
+    }
+
+    // 5. Commit - all or nothing
+    tx.commit().map_err(|e| {
+        tracing::error!("Failed to commit renewal transaction: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+    })?;
 
     tracing::info!(
         "{} subscription renewed: subscription={}, license_id={}, new_expires_at={:?}{}",
         provider,
         subscription_id,
-        license_id,
+        license.id,
         license_exp,
         if period_end.is_some() { " (from provider)" } else { " (calculated)" }
     );
 
-    (StatusCode::OK, "OK")
+    Ok(RenewalResult::Success { license_exp })
 }
 
 /// Process a subscription cancellation event - just logs, license expires naturally.
@@ -427,6 +482,68 @@ pub fn process_cancellation(
     );
 
     (StatusCode::OK, "OK")
+}
+
+/// Atomic result from refund processing
+pub enum RefundResult {
+    /// New refund processed successfully
+    Success,
+    /// Event was already processed (idempotent)
+    AlreadyProcessed,
+}
+
+/// Process a refund ATOMICALLY - replay prevention and transaction creation
+/// happen in a single database transaction.
+///
+/// This ensures that either ALL operations succeed or NONE do, allowing payment
+/// provider retries to work correctly if any step fails.
+///
+/// Returns `RefundResult::Success` on success, or `RefundResult::AlreadyProcessed`
+/// if this event was already handled.
+pub fn process_refund_atomic(
+    conn: &mut Connection,
+    provider: &str,
+    refund_id: &str,
+    transaction_data: &CreateTransaction,
+) -> Result<RefundResult, WebhookResult> {
+    // Start a database transaction for atomicity
+    let tx = conn.transaction().map_err(|e| {
+        tracing::error!("Failed to start transaction: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+    })?;
+
+    // 1. Replay attack prevention (inside transaction - rolls back if later steps fail)
+    match queries::try_record_webhook_event(&tx, provider, refund_id) {
+        Ok(true) => {
+            // New event - proceed with processing
+        }
+        Ok(false) => {
+            // Already processed - no need to commit, just return
+            return Ok(RefundResult::AlreadyProcessed);
+        }
+        Err(e) => {
+            tracing::error!("Failed to record webhook event: {}", e);
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
+        }
+    }
+
+    // 2. Create refund transaction record
+    if let Err(e) = queries::create_transaction(&tx, transaction_data) {
+        tracing::error!("Failed to create refund transaction: {}", e);
+        // Transaction will be rolled back - retry can work
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create refund transaction",
+        ));
+    }
+
+    // 3. Commit - all or nothing
+    tx.commit().map_err(|e| {
+        tracing::error!("Failed to commit refund transaction: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+    })?;
+
+    Ok(RefundResult::Success)
 }
 
 /// Generic webhook handler that delegates to provider-specific implementations.
@@ -571,6 +688,7 @@ async fn handle_checkout<P: WebhookProvider>(
                 project.id.clone(),
                 org.id.clone(),
                 order_id,
+                data.enricher_session_id.clone(),
             );
         }
 
@@ -615,7 +733,8 @@ async fn handle_renewal<P: WebhookProvider>(
         return Ok((StatusCode::OK, "Invoice not paid"));
     }
 
-    let conn = state.db.get().map_err(|e| {
+    // Get mutable connection for atomic transaction
+    let mut conn = state.db.get().map_err(|e| {
         tracing::error!("DB connection error: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
     })?;
@@ -641,106 +760,110 @@ async fn handle_renewal<P: WebhookProvider>(
         Err(e) => return Err(e),
     }
 
-    let result = process_renewal(
-        &conn,
+    // Build transaction data if provided (for atomic creation with license extension)
+    let transaction_data = data.transaction.as_ref().map(|tx_data| {
+        let net_cents = tx_data.subtotal_cents - tx_data.discount_cents;
+        CreateTransaction {
+            license_id: Some(license.id.clone()),
+            project_id: project.id.clone(),
+            product_id: Some(license.product_id.clone()),
+            org_id: org.id.clone(),
+            payment_provider: provider.provider_name().to_string(),
+            provider_customer_id: license.customer_id.clone(),
+            provider_subscription_id: Some(data.subscription_id.clone()),
+            // Use payment_intent for refund linkage - refunds reference this ID.
+            // Falls back to event_id (invoice.id) for providers without payment_intent.
+            provider_order_id: data.payment_intent.clone().or(data.event_id.clone()).unwrap_or_default(),
+            currency: tx_data.currency.clone(),
+            subtotal_cents: tx_data.subtotal_cents,
+            discount_cents: tx_data.discount_cents,
+            net_cents,
+            tax_cents: tx_data.tax_cents,
+            total_cents: tx_data.total_cents,
+            discount_code: tx_data.discount_code.clone(),
+            tax_inclusive: tx_data.tax_inclusive,
+            customer_country: tx_data.customer_country.clone(),
+            transaction_type: TransactionType::Renewal,
+            parent_transaction_id: None,
+            is_subscription: true,
+            source: "payment".to_string(),
+            metadata: None,
+            test_mode: tx_data.test_mode,
+        }
+    });
+
+    // Process renewal ATOMICALLY - replay prevention, license extension, and
+    // transaction creation all happen in a single database transaction.
+    // If any step fails, everything is rolled back and payment provider can retry.
+    let renewal_result = process_renewal_atomic(
+        &mut conn,
         provider.provider_name(),
         &product,
-        &license.id,
+        &license,
         &data.subscription_id,
         data.event_id.as_deref(),
         data.period_end,
-    );
+        transaction_data.as_ref(),
+    )?;
 
-    // On successful renewal, create transaction record and fire metering
-    if result.0 == StatusCode::OK && result.1 == "OK" {
-        // Create transaction record for revenue tracking
-        if let Some(tx_data) = &data.transaction {
-            let net_cents = tx_data.subtotal_cents - tx_data.discount_cents;
-
-            let transaction = CreateTransaction {
-                license_id: Some(license.id.clone()),
-                project_id: project.id.clone(),
-                product_id: Some(license.product_id.clone()),
-                org_id: org.id.clone(),
-                payment_provider: provider.provider_name().to_string(),
-                provider_customer_id: license.customer_id.clone(),
-                provider_subscription_id: Some(data.subscription_id.clone()),
-                provider_order_id: data.event_id.clone().unwrap_or_default(),
-                currency: tx_data.currency.clone(),
-                subtotal_cents: tx_data.subtotal_cents,
-                discount_cents: tx_data.discount_cents,
-                net_cents,
-                tax_cents: tx_data.tax_cents,
-                total_cents: tx_data.total_cents,
-                discount_code: tx_data.discount_code.clone(),
-                tax_inclusive: tx_data.tax_inclusive,
-                customer_country: tx_data.customer_country.clone(),
-                transaction_type: TransactionType::Renewal,
-                parent_transaction_id: None,
-                is_subscription: true,
-                test_mode: tx_data.test_mode,
-            };
-
-            if let Err(e) = queries::create_transaction(&conn, &transaction) {
-                tracing::error!("Failed to create renewal transaction: {}", e);
-                // Non-fatal - license was already extended
-            }
-
-            // Fire-and-forget sales metering event
-            spawn_sales_metering(
-                state.http_client.clone(),
-                state.metering_webhook_url.clone(),
-                SalesMeteringEvent {
-                    event: "renewal".to_string(),
-                    org_id: org.id.clone(),
-                    project_id: project.id.clone(),
-                    product_id: license.product_id.clone(),
-                    license_id: license.id.clone(),
-                    transaction_id: data.event_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
-                    payment_provider: provider.provider_name().to_string(),
-                    amount_cents: tx_data.total_cents,
-                    currency: tx_data.currency.clone(),
-                    timestamp: chrono::Utc::now().timestamp(),
-                },
-            );
+    // Determine the result for response and post-processing
+    let (result, license_exp) = match renewal_result {
+        RenewalResult::AlreadyProcessed => {
+            return Ok((StatusCode::OK, "Already processed"));
         }
+        RenewalResult::Success { license_exp } => {
+            ((StatusCode::OK, "OK"), license_exp)
+        }
+    };
+
+    // Fire-and-forget sales metering event (only on new successful renewal)
+    if let Some(tx_data) = &data.transaction {
+        spawn_sales_metering(
+            state.http_client.clone(),
+            state.metering_webhook_url.clone(),
+            SalesMeteringEvent {
+                event: "renewal".to_string(),
+                org_id: org.id.clone(),
+                project_id: project.id.clone(),
+                product_id: license.product_id.clone(),
+                license_id: license.id.clone(),
+                transaction_id: data.event_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                payment_provider: provider.provider_name().to_string(),
+                amount_cents: tx_data.total_cents,
+                currency: tx_data.currency.clone(),
+                timestamp: chrono::Utc::now().timestamp(),
+            },
+        );
     }
 
     // Audit log on successful renewal
-    if result.0 == StatusCode::OK && result.1 == "OK" {
-        let audit_conn = state.audit.get().map_err(|e| {
-            tracing::error!("Audit DB connection error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
-        })?;
+    let audit_conn = state.audit.get().map_err(|e| {
+        tracing::error!("Audit DB connection error: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+    })?;
 
-        // Compute new expirations for logging (same logic as process_renewal)
-        let now = chrono::Utc::now().timestamp();
-        let fallback_exps = LicenseExpirations::from_product(&product, now);
-        let license_exp = data.period_end.or(fallback_exps.license_exp);
-
-        if let Err(e) = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, headers)
-            .actor(ActorType::Public, None)
-            .action(AuditAction::ReceiveRenewalWebhook)
-            .resource("license", &license.id)
-            .details(&serde_json::json!({
-                "provider": provider.provider_name(),
-                "subscription_id": data.subscription_id,
-                "event_id": data.event_id,
-                "product_id": product.id,
-                "new_expires_at": license_exp,
-                "period_end_from_provider": data.period_end.is_some(),
-            }))
-            .org(&org.id)
-            .project(&project.id)
-            .names(&AuditLogNames {
-                org_name: Some(org.name.clone()),
-                project_name: Some(project.name.clone()),
-                ..Default::default()
-            })
-            .save()
-        {
-            tracing::warn!("Failed to write renewal audit log: {}", e);
-        }
+    if let Err(e) = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, headers)
+        .actor(ActorType::Public, None)
+        .action(AuditAction::ReceiveRenewalWebhook)
+        .resource("license", &license.id)
+        .details(&serde_json::json!({
+            "provider": provider.provider_name(),
+            "subscription_id": data.subscription_id,
+            "event_id": data.event_id,
+            "product_id": product.id,
+            "new_expires_at": license_exp,
+            "period_end_from_provider": data.period_end.is_some(),
+        }))
+        .org(&org.id)
+        .project(&project.id)
+        .names(&AuditLogNames {
+            org_name: Some(org.name.clone()),
+            project_name: Some(project.name.clone()),
+            ..Default::default()
+        })
+        .save()
+    {
+        tracing::warn!("Failed to write renewal audit log: {}", e);
     }
 
     Ok(result)
@@ -828,7 +951,7 @@ async fn handle_refund<P: WebhookProvider>(
     signature: &str,
     data: RefundData,
 ) -> Result<WebhookResult, WebhookResult> {
-    let conn = state.db.get().map_err(|e| {
+    let mut conn = state.db.get().map_err(|e| {
         tracing::error!("DB connection error: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, "Database error")
     })?;
@@ -884,12 +1007,12 @@ async fn handle_refund<P: WebhookProvider>(
                 Err(e) => return Err(e),
             }
 
-            // Process refund without license
+            // Process refund without license (needs mutable conn for atomic processing)
             return process_refund_no_license(
                 provider,
                 state,
                 headers,
-                &conn,
+                &mut conn,
                 &data,
                 &original_transaction,
                 &project,
@@ -918,22 +1041,7 @@ async fn handle_refund<P: WebhookProvider>(
         Err(e) => return Err(e),
     }
 
-    // Replay prevention using refund_id as event_id
-    match queries::try_record_webhook_event(&conn, provider.provider_name(), &data.refund_id) {
-        Ok(true) => {
-            // New event - proceed
-        }
-        Ok(false) => {
-            // Already processed
-            return Ok((StatusCode::OK, "Already processed"));
-        }
-        Err(e) => {
-            tracing::error!("Failed to record webhook event: {}", e);
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
-        }
-    }
-
-    // Create refund transaction record (negative amounts)
+    // Build refund transaction record (negative amounts)
     let transaction = CreateTransaction {
         license_id: Some(license.id.clone()),
         project_id: project.id.clone(),
@@ -955,13 +1063,22 @@ async fn handle_refund<P: WebhookProvider>(
         transaction_type: TransactionType::Refund,
         parent_transaction_id: Some(original_transaction.id.clone()),
         is_subscription: original_transaction.is_subscription,
+        source: data.source.clone(),
+        metadata: data.metadata.clone(),
         test_mode: data.test_mode,
     };
 
-    if let Err(e) = queries::create_transaction(&conn, &transaction) {
-        tracing::error!("Failed to create refund transaction: {}", e);
-        // Return error so provider will retry - we want to record refunds
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to create refund transaction"));
+    // Process refund ATOMICALLY - replay prevention and transaction creation
+    // happen in a single database transaction.
+    let refund_result = process_refund_atomic(
+        &mut conn,
+        provider.provider_name(),
+        &data.refund_id,
+        &transaction,
+    )?;
+
+    if matches!(refund_result, RefundResult::AlreadyProcessed) {
+        return Ok((StatusCode::OK, "Already processed"));
     }
 
     tracing::info!(
@@ -974,23 +1091,36 @@ async fn handle_refund<P: WebhookProvider>(
         data.currency
     );
 
+    // Determine metering event type based on source
+    let metering_event = match data.source.as_str() {
+        "dispute" => "dispute",
+        "dispute_reversal" => "dispute_reversal",
+        _ => "refund",
+    };
+
     // Fire-and-forget sales metering event
     spawn_sales_metering(
         state.http_client.clone(),
         state.metering_webhook_url.clone(),
         SalesMeteringEvent {
-            event: "refund".to_string(),
+            event: metering_event.to_string(),
             org_id: org.id.clone(),
             project_id: project.id.clone(),
             product_id: license.product_id.clone(),
             license_id: license.id.clone(),
             transaction_id: data.refund_id.clone(),
             payment_provider: provider.provider_name().to_string(),
-            amount_cents: -(data.amount_cents), // Negative for refunds
+            amount_cents: -(data.amount_cents), // Negative for refunds/disputes
             currency: data.currency.clone(),
             timestamp: chrono::Utc::now().timestamp(),
         },
     );
+
+    // Determine audit action based on source
+    let audit_action = match data.source.as_str() {
+        "dispute" | "dispute_reversal" => AuditAction::ReceiveDisputeWebhook,
+        _ => AuditAction::ReceiveRefundWebhook,
+    };
 
     // Audit log
     let audit_conn = state.audit.get().map_err(|e| {
@@ -1000,7 +1130,7 @@ async fn handle_refund<P: WebhookProvider>(
 
     if let Err(e) = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, headers)
         .actor(ActorType::Public, None)
-        .action(AuditAction::ReceiveRefundWebhook)
+        .action(audit_action)
         .resource("license", &license.id)
         .details(&serde_json::json!({
             "provider": provider.provider_name(),
@@ -1032,23 +1162,13 @@ fn process_refund_no_license<P: WebhookProvider>(
     provider: &P,
     state: &AppState,
     headers: &HeaderMap,
-    conn: &Connection,
+    conn: &mut Connection,
     data: &RefundData,
     original_transaction: &crate::models::Transaction,
     project: &Project,
     org: &Organization,
 ) -> Result<WebhookResult, WebhookResult> {
-    // Replay prevention
-    match queries::try_record_webhook_event(conn, provider.provider_name(), &data.refund_id) {
-        Ok(true) => {}
-        Ok(false) => return Ok((StatusCode::OK, "Already processed")),
-        Err(e) => {
-            tracing::error!("Failed to record webhook event: {}", e);
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database error"));
-        }
-    }
-
-    // Create refund transaction without license link
+    // Build refund transaction without license link
     let transaction = CreateTransaction {
         license_id: None,
         project_id: project.id.clone(),
@@ -1070,12 +1190,22 @@ fn process_refund_no_license<P: WebhookProvider>(
         transaction_type: TransactionType::Refund,
         parent_transaction_id: Some(original_transaction.id.clone()),
         is_subscription: original_transaction.is_subscription,
+        source: data.source.clone(),
+        metadata: data.metadata.clone(),
         test_mode: data.test_mode,
     };
 
-    if let Err(e) = queries::create_transaction(conn, &transaction) {
-        tracing::error!("Failed to create refund transaction: {}", e);
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to create refund transaction"));
+    // Process refund ATOMICALLY - replay prevention and transaction creation
+    // happen in a single database transaction.
+    let refund_result = process_refund_atomic(
+        conn,
+        provider.provider_name(),
+        &data.refund_id,
+        &transaction,
+    )?;
+
+    if matches!(refund_result, RefundResult::AlreadyProcessed) {
+        return Ok((StatusCode::OK, "Already processed"));
     }
 
     tracing::info!(
@@ -1087,12 +1217,19 @@ fn process_refund_no_license<P: WebhookProvider>(
         data.currency
     );
 
+    // Determine metering event type based on source
+    let metering_event = match data.source.as_str() {
+        "dispute" => "dispute",
+        "dispute_reversal" => "dispute_reversal",
+        _ => "refund",
+    };
+
     // Fire metering event (without license_id)
     spawn_sales_metering(
         state.http_client.clone(),
         state.metering_webhook_url.clone(),
         SalesMeteringEvent {
-            event: "refund".to_string(),
+            event: metering_event.to_string(),
             org_id: org.id.clone(),
             project_id: project.id.clone(),
             product_id: original_transaction.product_id.clone().unwrap_or_default(),
@@ -1105,11 +1242,17 @@ fn process_refund_no_license<P: WebhookProvider>(
         },
     );
 
+    // Determine audit action based on source
+    let audit_action = match data.source.as_str() {
+        "dispute" | "dispute_reversal" => AuditAction::ReceiveDisputeWebhook,
+        _ => AuditAction::ReceiveRefundWebhook,
+    };
+
     // Audit log
     if let Ok(audit_conn) = state.audit.get() {
         let _ = AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, headers)
             .actor(ActorType::Public, None)
-            .action(AuditAction::ReceiveRefundWebhook)
+            .action(audit_action)
             .resource("transaction", &original_transaction.id)
             .details(&serde_json::json!({
                 "provider": provider.provider_name(),
@@ -1118,6 +1261,7 @@ fn process_refund_no_license<P: WebhookProvider>(
                 "amount_cents": data.amount_cents,
                 "currency": data.currency,
                 "parent_transaction_id": original_transaction.id,
+                "source": data.source,
                 "no_license_link": true,
             }))
             .org(&org.id)

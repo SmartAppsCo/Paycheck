@@ -674,7 +674,7 @@ mod cross_cutting {
 
     #[test]
     fn test_config_deletion_blocked_when_in_use() {
-        let conn = setup_test_db();
+        let mut conn = setup_test_db();
         let master_key = test_master_key();
         let org = create_test_org(&conn, "Test Org");
 
@@ -688,7 +688,7 @@ mod cross_cutting {
         ).unwrap();
 
         // Try to delete - should fail because it's in use
-        let result = queries::soft_delete_service_config(&conn, &config_id);
+        let result = queries::soft_delete_service_config(&mut conn, &config_id);
         assert!(result.is_err(), "Should not be able to delete config that is in use");
 
         // Clear the reference first
@@ -698,7 +698,7 @@ mod cross_cutting {
         ).unwrap();
 
         // Now deletion should succeed
-        let result = queries::soft_delete_service_config(&conn, &config_id);
+        let result = queries::soft_delete_service_config(&mut conn, &config_id);
         assert!(result.is_ok(), "Should be able to delete config after clearing references");
     }
 

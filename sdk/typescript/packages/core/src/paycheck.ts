@@ -27,6 +27,7 @@ import {
   isLicenseExpired,
   coversVersion as checkCoversVersion,
   hasFeature as checkHasFeature,
+  validateIssuer,
 } from './jwt';
 
 /**
@@ -461,6 +462,11 @@ export class Paycheck {
       return { valid: false, reason: 'Invalid token format' };
     }
 
+    // Validate issuer
+    if (!validateIssuer(claims)) {
+      return { valid: false, reason: 'Invalid issuer', claims };
+    }
+
     // Check device ID matches
     if (claims.device_id !== this.deviceId) {
       return { valid: false, reason: 'Device mismatch', claims };
@@ -486,7 +492,7 @@ export class Paycheck {
           {
             body: {
               public_key: this.publicKey,
-              jti: claims.jti,
+              token,
             },
           }
         );
@@ -565,6 +571,16 @@ export class Paycheck {
       };
     }
 
+    // Validate issuer
+    if (!validateIssuer(claims)) {
+      return {
+        valid: false,
+        synced: false,
+        offline: true,
+        reason: 'Invalid issuer',
+      };
+    }
+
     // Check device ID matches
     if (claims.device_id !== this.deviceId) {
       return {
@@ -589,7 +605,7 @@ export class Paycheck {
         {
           body: {
             public_key: this.publicKey,
-            jti: claims.jti,
+            token,
           },
         }
       );
@@ -779,6 +795,11 @@ export class Paycheck {
       claims = decodeToken(token);
     } catch {
       return { valid: false, reason: 'Invalid token format' };
+    }
+
+    // Validate issuer
+    if (!validateIssuer(claims)) {
+      return { valid: false, reason: 'Invalid issuer', claims };
     }
 
     // Check device ID matches

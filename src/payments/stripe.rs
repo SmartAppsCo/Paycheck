@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use hmac::{Hmac, Mac};
 use reqwest::Client;
 use serde::Deserialize;
@@ -29,7 +31,10 @@ pub struct StripeClient {
 impl StripeClient {
     pub fn new(config: &StripeConfig) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .expect("failed to build HTTP client"),
             secret_key: config.secret_key.clone(),
             webhook_secret: config.webhook_secret.clone(),
         }
@@ -166,9 +171,10 @@ impl StripeClient {
 
         // Parse and validate timestamp to prevent replay attacks.
         // Reject webhooks older than WEBHOOK_TIMESTAMP_TOLERANCE_SECS.
-        let timestamp: i64 = timestamp_str
-            .parse()
-            .map_err(|_| AppError::BadRequest(msg::INVALID_TIMESTAMP_IN_SIGNATURE.into()))?;
+        let timestamp: i64 = timestamp_str.parse().map_err(|e| {
+            tracing::debug!("Invalid timestamp in Stripe signature: {}", e);
+            AppError::BadRequest(msg::INVALID_TIMESTAMP_IN_SIGNATURE.into())
+        })?;
 
         let now = chrono::Utc::now().timestamp();
         let age = now - timestamp;
@@ -195,8 +201,10 @@ impl StripeClient {
         let signed_payload = format!("{}.{}", timestamp_str, String::from_utf8_lossy(payload));
 
         // Compute expected signature
-        let mut mac = HmacSha256::new_from_slice(self.webhook_secret.as_bytes())
-            .map_err(|_| AppError::Internal(msg::INVALID_WEBHOOK_SECRET.into()))?;
+        let mut mac = HmacSha256::new_from_slice(self.webhook_secret.as_bytes()).map_err(|e| {
+            tracing::error!("Invalid Stripe webhook secret configuration: {}", e);
+            AppError::Internal(msg::INVALID_WEBHOOK_SECRET.into())
+        })?;
         mac.update(signed_payload.as_bytes());
         let expected = hex::encode(mac.finalize().into_bytes());
 
@@ -303,6 +311,15 @@ pub struct StripeInvoiceLines {
     pub data: Vec<StripeInvoiceLineItem>,
 }
 
+/// Discount amount breakdown from Stripe invoice
+#[derive(Debug, Deserialize)]
+pub struct StripeDiscountAmount {
+    /// Discount amount in cents
+    pub amount: i64,
+    /// Discount ID (e.g., "di_xxx")
+    pub discount: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct StripeInvoice {
     pub id: String,
@@ -323,6 +340,13 @@ pub struct StripeInvoice {
     pub total: Option<i64>,
     /// Whether this is a test mode invoice
     pub livemode: Option<bool>,
+    /// PaymentIntent used to pay this invoice.
+    /// Critical for refund linkage - refunds reference payment_intent.
+    pub payment_intent: Option<String>,
+    /// Breakdown of discount amounts applied to this invoice.
+    /// Use this instead of calculating discount from subtotal/tax/total,
+    /// as the calculation assumes additive tax and breaks with inclusive tax.
+    pub total_discount_amounts: Option<Vec<StripeDiscountAmount>>,
 }
 
 impl StripeInvoice {
@@ -332,6 +356,15 @@ impl StripeInvoice {
             .as_ref()
             .and_then(|l| l.data.first())
             .map(|item| item.period.end)
+    }
+
+    /// Get total discount amount from total_discount_amounts array.
+    /// Returns 0 if no discounts are present.
+    pub fn total_discount(&self) -> i64 {
+        self.total_discount_amounts
+            .as_ref()
+            .map(|amounts| amounts.iter().map(|d| d.amount).sum())
+            .unwrap_or(0)
     }
 }
 
@@ -344,39 +377,46 @@ pub struct StripeSubscription {
     pub status: String, // "active", "canceled", etc.
 }
 
-// ============ charge.refunded ============
+// ============ refund.created ============
 
+/// Refund object from refund.created webhook event.
+/// This is Stripe's recommended way to handle refunds, especially partial refunds.
 #[derive(Debug, Deserialize)]
-pub struct StripeRefund {
+pub struct StripeRefundEvent {
     pub id: String,
     /// Amount refunded in cents
     pub amount: i64,
     /// Currency code (lowercase)
     pub currency: String,
-    /// Status of the refund
-    pub status: String, // "succeeded", "pending", "failed", etc.
-}
-
-#[derive(Debug, Deserialize)]
-pub struct StripeRefundList {
-    pub data: Vec<StripeRefund>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct StripeCharge {
-    pub id: String,
-    /// Payment intent ID (used to look up checkout session)
+    /// Status of the refund ("succeeded", "pending", "failed", "canceled")
+    pub status: String,
+    /// The charge ID this refund is for
+    pub charge: Option<String>,
+    /// The payment intent ID (preferred for order linkage)
     pub payment_intent: Option<String>,
-    /// Amount in cents
+    /// Whether this is test mode
+    #[serde(default)]
+    pub livemode: bool,
+}
+
+// ============ charge.dispute.created / charge.dispute.closed ============
+
+#[derive(Debug, Deserialize)]
+pub struct StripeDispute {
+    pub id: String,
+    /// The charge ID this dispute is for
+    pub charge: String,
+    /// The payment intent ID (used to look up original transaction)
+    pub payment_intent: Option<String>,
+    /// Disputed amount in cents
     pub amount: i64,
-    /// Amount refunded in cents
-    pub amount_refunded: i64,
     /// Currency code (lowercase)
     pub currency: String,
-    /// Whether fully refunded
-    pub refunded: bool,
-    /// Whether this is a test mode charge
+    /// Dispute status: "warning_needs_response", "warning_under_review", "warning_closed",
+    /// "needs_response", "under_review", "won", "lost"
+    pub status: String,
+    /// Reason for dispute: "fraudulent", "duplicate", "product_not_received", etc.
+    pub reason: String,
+    /// Whether this is a test mode dispute
     pub livemode: bool,
-    /// List of refunds on this charge
-    pub refunds: Option<StripeRefundList>,
 }

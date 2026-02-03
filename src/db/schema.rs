@@ -248,6 +248,11 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             parent_transaction_id TEXT REFERENCES transactions(id),
             is_subscription INTEGER NOT NULL DEFAULT 0,
 
+            -- Source distinguishes voluntary refunds from disputes
+            source TEXT NOT NULL DEFAULT 'payment',  -- 'payment', 'refund', 'dispute', 'dispute_reversal'
+            -- Flexible metadata for provider-specific data (dispute_id, reason, etc.)
+            metadata TEXT,
+
             test_mode INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL
         );

@@ -238,12 +238,25 @@ mod expiration_validation {
     #[tokio::test]
     async fn test_validate_rejects_invalid_jti() {
         let (app, state) = public_app();
-        let (public_key, _, _, _, _) = setup_complete_license(&state);
+        let (public_key, private_key, license_id, _, _) = setup_complete_license(&state);
 
-        // Try to validate with a non-existent JTI
+        // Create a token with a JTI that doesn't exist in the database
+        let fake_jti = "non-existent-jti-12345678";
+        let claims = create_test_claims(
+            Some(future_timestamp(ONE_YEAR)),
+            Some(future_timestamp(UPDATES_VALID_DAYS)),
+            "pro",
+            "test-product-id",
+            "test-device-id",
+            "uuid",
+        );
+        let fake_token =
+            jwt::sign_claims(&claims, &private_key, &license_id, "Test Project", fake_jti).unwrap();
+
+        // Try to validate with a token containing non-existent JTI
         let body = json!({
             "public_key": public_key,
-            "jti": "non-existent-jti-12345678"
+            "token": fake_token
         });
 
         let response = app
@@ -276,15 +289,15 @@ mod expiration_validation {
         );
     }
 
-    /// Verify that /validate endpoint returns valid: true for a valid JTI.
+    /// Verify that /validate endpoint returns valid: true for a valid token.
     #[tokio::test]
-    async fn test_validate_accepts_valid_jti() {
+    async fn test_validate_accepts_valid_token() {
         let (app, state) = public_app();
-        let (public_key, _, _, jti, _) = setup_complete_license(&state);
+        let (public_key, _, _, _, token) = setup_complete_license(&state);
 
         let body = json!({
             "public_key": public_key,
-            "jti": jti
+            "token": token
         });
 
         let response = app
@@ -302,7 +315,7 @@ mod expiration_validation {
         assert_eq!(
             response.status(),
             StatusCode::OK,
-            "validate endpoint should return 200 OK for valid JTI"
+            "validate endpoint should return 200 OK for valid token"
         );
 
         let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -312,7 +325,7 @@ mod expiration_validation {
 
         assert_eq!(
             json["valid"], true,
-            "existing valid JTI should return valid: true in response body"
+            "existing valid token should return valid: true in response body"
         );
     }
 
@@ -585,12 +598,12 @@ mod jti_validation {
     #[tokio::test]
     async fn test_validate_checks_jti_revocation() {
         let (app, state) = public_app();
-        let (public_key, _, license_id, jti, _) = setup_complete_license(&state);
+        let (public_key, _, license_id, jti, token) = setup_complete_license(&state);
 
         // First validate should succeed
         let body = json!({
             "public_key": public_key,
-            "jti": jti.clone()
+            "token": token
         });
 
         let response = app
@@ -610,7 +623,7 @@ mod jti_validation {
             .await
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
-        assert_eq!(json["valid"], true, "JTI should be valid before revocation");
+        assert_eq!(json["valid"], true, "token should be valid before JTI revocation");
 
         // Revoke the JTI
         {
@@ -637,7 +650,7 @@ mod jti_validation {
         let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
         assert_eq!(
             json["valid"], false,
-            "JTI should be invalid after being added to revocation list"
+            "token should be invalid after JTI is added to revocation list"
         );
     }
 
@@ -1205,12 +1218,12 @@ mod license_revocation {
     #[tokio::test]
     async fn test_validate_rejects_revoked_license() {
         let (app, state) = public_app();
-        let (public_key, _, license_id, jti, _) = setup_complete_license(&state);
+        let (public_key, _, license_id, _, token) = setup_complete_license(&state);
 
         // First validate should succeed
         let body = json!({
             "public_key": public_key,
-            "jti": jti.clone()
+            "token": token
         });
 
         let response = app

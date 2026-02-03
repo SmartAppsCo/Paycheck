@@ -67,9 +67,10 @@ pub async fn validate_first_party_token(
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
-    let payload_bytes = URL_SAFE_NO_PAD
-        .decode(parts[1])
-        .map_err(|_| AppError::JwtValidationFailed("Invalid token encoding".to_string()))?;
+    let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1]).map_err(|e| {
+        tracing::debug!("Invalid base64 encoding in JWT payload: {}", e);
+        AppError::JwtValidationFailed("Invalid token encoding".to_string())
+    })?;
 
     let unverified: UnverifiedClaims = serde_json::from_slice(&payload_bytes)
         .map_err(|e| AppError::JwtValidationFailed(format!("Invalid token payload: {}", e)))?;

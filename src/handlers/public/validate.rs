@@ -3,15 +3,16 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::db::{AppState, queries};
-use crate::error::{AppError, Result, msg};
+use crate::error::Result;
 use crate::extractors::Json;
-use crate::util::LicenseExpirations;
+use crate::jwt::verify_token_allow_expired;
 
 #[derive(Debug, Deserialize)]
 pub struct ValidateRequest {
     /// Public key - identifies the project
     pub public_key: String,
-    pub jti: String,
+    /// Full JWT token - verified server-side to extract JTI
+    pub token: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,10 +46,27 @@ pub async fn validate_license(
         Some(p) => p,
         None => return Ok(invalid_response()),
     };
-    let project_id = project.id;
+    let project_id = project.id.clone();
+
+    // Verify the JWT signature and extract claims
+    // Uses allow_expired because the JWT's `exp` is a short freshness window,
+    // but the license itself might still be valid (checked below via license.expires_at)
+    let claims = match verify_token_allow_expired(&req.token, &project.public_key) {
+        Ok(c) => c,
+        Err(_) => {
+            // Invalid signature, malformed token, or wrong issuer
+            return Ok(invalid_response());
+        }
+    };
+
+    // Extract the JTI from the verified claims
+    let jti: String = match &claims.jwt_id {
+        Some(jti) => jti.clone(),
+        None => return Ok(invalid_response()),
+    };
 
     // Find the device by JTI
-    let device = match queries::get_device_by_jti(&conn, &req.jti)? {
+    let device = match queries::get_device_by_jti(&conn, &jti)? {
         Some(d) => d,
         None => return Ok(invalid_response()),
     };
@@ -65,7 +83,7 @@ pub async fn validate_license(
     }
 
     // Check if this specific JTI is revoked
-    if queries::is_jti_revoked(&conn, &req.jti)? {
+    if queries::is_jti_revoked(&conn, &jti)? {
         return Ok(invalid_response());
     }
 
@@ -76,32 +94,18 @@ pub async fn validate_license(
         return Ok(invalid_response());
     }
 
-    // Get the product for expiration info
-    let product = queries::get_product_by_id(&conn, &license.product_id)?
-        .ok_or_else(|| AppError::Internal(msg::PRODUCT_NOT_FOUND.into()))?;
-
     // Verify project matches
-    if product.project_id != project_id {
+    if license.project_id != project_id {
         return Ok(invalid_response());
     }
 
-    // Update last seen
-    queries::update_device_last_seen(&conn, &device.id)?;
-
-    // Calculate current expirations based on activation time
-    let exps = LicenseExpirations::from_product(&product, device.activated_at);
-
-    // Check if license_exp has passed
-    if let Some(exp) = exps.license_exp
-        && Utc::now().timestamp() > exp
-    {
-        return Ok(invalid_response());
-    }
+    // Update last seen (only if stale)
+    queries::update_device_last_seen(&conn, &device.id, device.last_seen_at)?;
 
     Ok(Json(ValidateResponse {
         valid: true,
         reason: None,
-        license_exp: exps.license_exp,
-        updates_exp: exps.updates_exp,
+        license_exp: license.expires_at,
+        updates_exp: license.updates_expires_at,
     }))
 }

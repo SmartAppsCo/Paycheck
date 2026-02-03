@@ -244,3 +244,17 @@ fn test_various_key_sizes() {
             .is_ok()
     );
 }
+
+// ============ JWKS CACHE TESTS ============
+// Note: RwLock poisoning recovery tests are in src/jwt/jwks.rs (unit tests)
+// because they need internal access to poison the lock.
+
+/// Test that JwksCache can be created and used.
+#[test]
+fn test_jwks_cache_creation() {
+    use paycheck::jwt::JwksCache;
+
+    let cache = JwksCache::new();
+    // Cache should be created successfully
+    assert!(std::mem::size_of_val(&cache) > 0);
+}

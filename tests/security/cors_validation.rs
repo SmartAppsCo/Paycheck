@@ -132,6 +132,7 @@ fn admin_app_with_origins(origins: Vec<&str>) -> (Router, AppState) {
         .allow_headers([
             HeaderName::from_static("authorization"),
             HeaderName::from_static("content-type"),
+            HeaderName::from_static("x-on-behalf-of"),
         ])
         .allow_credentials(true);
 
@@ -201,6 +202,7 @@ fn operator_app_with_origins(origins: Vec<&str>) -> (Router, AppState) {
         .allow_headers([
             HeaderName::from_static("authorization"),
             HeaderName::from_static("content-type"),
+            HeaderName::from_static("x-on-behalf-of"),
         ])
         .allow_credentials(true);
 
@@ -734,6 +736,62 @@ mod admin_cors {
                 "Should allow Content-Type header"
             );
         }
+    }
+
+    /// Verify X-On-Behalf-Of header is allowed for impersonation
+    ///
+    /// Admin UIs need to send X-On-Behalf-Of header for operator impersonation.
+    /// This header must be in the CORS allowed headers list.
+    #[tokio::test]
+    async fn test_admin_allows_impersonation_header() {
+        let allowed_origin = "https://console.paycheck.dev";
+        let (app, state) = admin_app_with_origins(vec![allowed_origin]);
+
+        // Create test data
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        drop(conn);
+
+        // Preflight request asking to use X-On-Behalf-Of header
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri(format!("/orgs/{}/members", org.id))
+                    .header("Origin", allowed_origin)
+                    .header("Access-Control-Request-Method", "GET")
+                    .header(
+                        "Access-Control-Request-Headers",
+                        "authorization,x-on-behalf-of",
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "Preflight with X-On-Behalf-Of should succeed"
+        );
+
+        let headers = response
+            .headers()
+            .get("access-control-allow-headers")
+            .map(|v| v.to_str().unwrap_or(""));
+
+        assert!(
+            headers.is_some(),
+            "Response should have Access-Control-Allow-Headers"
+        );
+
+        let headers_lower = headers.unwrap().to_lowercase();
+        assert!(
+            headers_lower.contains("x-on-behalf-of"),
+            "Should allow X-On-Behalf-Of header for impersonation, got: {}",
+            headers_lower
+        );
     }
 
     /// Verify operator endpoints also have restricted CORS

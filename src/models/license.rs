@@ -42,6 +42,25 @@ pub struct CreateLicense {
     pub updates_expires_at: Option<i64>,
 }
 
+/// Input for updating an existing license.
+///
+/// Uses the "optional nullable" pattern:
+/// - `None` = don't change this field
+/// - `Some(value)` = set to value (for String fields)
+/// - `Some(None)` = set to NULL (for Option<i64> fields)
+/// - `Some(Some(value))` = set to value (for Option<i64> fields)
+#[derive(Debug, Default)]
+pub struct UpdateLicense {
+    /// New email hash. None = don't change.
+    pub email_hash: Option<String>,
+    /// New customer ID. None = don't change.
+    pub customer_id: Option<String>,
+    /// New expiration. None = don't change, Some(None) = perpetual, Some(Some(ts)) = set.
+    pub expires_at: Option<Option<i64>>,
+    /// New updates expiration. None = don't change, Some(None) = all versions, Some(Some(ts)) = set.
+    pub updates_expires_at: Option<Option<i64>>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActivationCode {
     pub code: String,

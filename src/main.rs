@@ -1,3 +1,4 @@
+use axum::extract::DefaultBodyLimit;
 use axum::Router;
 use clap::Parser;
 use tower_http::trace::TraceLayer;
@@ -857,7 +858,10 @@ async fn main() {
         delivery_service: Arc::new(delivery_service),
         jwks_cache,
         trusted_issuers: config.trusted_issuers.clone(),
-        http_client: reqwest::Client::new(),
+        http_client: reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .expect("failed to build HTTP client"),
         metering_webhook_url: config.metering_webhook_url.clone(),
     };
 
@@ -947,6 +951,8 @@ async fn main() {
         .merge(handlers::operators::router(state.clone()).layer(console_cors.clone()))
         // Organization API (org member key auth, console CORS only, high rate limit)
         .merge(handlers::orgs::router(state.clone(), config.rate_limit).layer(console_cors))
+        // Global body size limit - protects against memory exhaustion from large payloads
+        .layer(DefaultBodyLimit::max(config.max_body_size))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

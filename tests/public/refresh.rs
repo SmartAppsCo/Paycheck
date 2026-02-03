@@ -770,16 +770,26 @@ async fn test_refresh_with_expired_license_fails() {
     );
 }
 
-/// Test that refresh fails when product-derived license_exp has passed
-/// (based on device.activated_at + product.license_exp_days)
+/// Test that a renewed subscription refreshes correctly.
+///
+/// This tests the scenario where:
+/// 1. User buys a 30-day subscription
+/// 2. Device activates (activated_at = purchase time)
+/// 3. 60 days pass (device.activated_at is now 60 days ago)
+/// 4. User renews - webhook updates license.expires_at to 30 days from now
+/// 5. Refresh should succeed and return the stored expiration
+///
+/// BUG: The current implementation calculates expiration from
+/// device.activated_at + product.license_exp_days, which ignores the renewal.
 #[tokio::test]
-async fn test_refresh_with_expired_license_exp_fails() {
+async fn test_refresh_renewed_subscription_uses_stored_expiration() {
     let master_key = test_master_key();
 
     let manager = SqliteConnectionManager::memory();
     let pool = Pool::builder().max_size(4).build(manager).unwrap();
 
     let token: String;
+    let expected_license_exp: i64;
 
     {
         let mut conn = pool.get().unwrap();
@@ -788,13 +798,13 @@ async fn test_refresh_with_expired_license_exp_fails() {
         let org = create_test_org(&mut conn, "Test Org");
         let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
 
-        // Create a product with 1-day license expiration
+        // Create a 30-day subscription product
         let input = paycheck::models::CreateProduct {
-            name: "Short License".to_string(),
+            name: "Monthly Sub".to_string(),
             tier: "pro".to_string(),
-            price_cents: None,
-            currency: None,
-            license_exp_days: Some(1), // License expires 1 day after activation
+            price_cents: Some(999),
+            currency: Some("usd".to_string()),
+            license_exp_days: Some(30), // 30-day subscription
             updates_exp_days: Some(365),
             activation_limit: Some(5),
             device_limit: Some(3),
@@ -805,36 +815,38 @@ async fn test_refresh_with_expired_license_exp_fails() {
         };
         let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
 
-        // License itself doesn't expire (no database-level expiration)
-        let license = create_test_license(&mut conn, &project.id, &product.id, None);
+        // Create license with initial expiration
+        let license = create_test_license(
+            &mut conn,
+            &project.id,
+            &product.id,
+            Some(future_timestamp(30)),
+        );
 
-        // Create device - but manually set activated_at to 2 days ago
-        // so the license_exp (activated_at + 1 day) is in the past
-        let jti = uuid::Uuid::new_v4().to_string();
-        queries::create_device(
-            &conn,
-            &license.id,
-            "test-device",
-            DeviceType::Uuid,
-            &jti,
-            Some("Test Device"),
-        )
-        .unwrap();
+        // Create device
+        let device = create_test_device(&mut conn, &license.id, "test-device", DeviceType::Uuid);
 
-        // Manually backdate the activation to 2 days ago
+        // Simulate time passing: backdate device activation to 60 days ago
         conn.execute(
             "UPDATE devices SET activated_at = ?1 WHERE jti = ?2",
-            rusqlite::params![past_timestamp(2 * ONE_DAY), &jti],
+            rusqlite::params![past_timestamp(60), &device.jti],
         )
         .unwrap();
 
-        // Fetch the device to get the backdated record
-        let device = queries::get_device_by_jti(&mut conn, &jti).unwrap().unwrap();
+        // Simulate renewal: update license.expires_at to 30 days from now
+        expected_license_exp = future_timestamp(30);
+        queries::extend_license_expiration(
+            &conn,
+            &license.id,
+            Some(expected_license_exp),
+            Some(future_timestamp(365)),
+        )
+        .unwrap();
 
-        // Create claims
+        // Create JWT (with old claims - doesn't matter, refresh recalculates)
         let claims = LicenseClaims {
-            license_exp: Some(past_timestamp(ONE_DAY)), // This is what the server will calculate
-            updates_exp: Some(future_timestamp(ONE_YEAR - 2 * ONE_DAY)),
+            license_exp: Some(past_timestamp(30)), // Old expired value in JWT
+            updates_exp: Some(future_timestamp(ONE_YEAR)),
             tier: product.tier.clone(),
             features: product.features.clone(),
             device_id: device.device_id.clone(),
@@ -846,7 +858,6 @@ async fn test_refresh_with_expired_license_exp_fails() {
             .decrypt_private_key(&project.id, &project.private_key)
             .unwrap();
 
-        // Create a valid JWT
         token = jwt::sign_claims(
             &claims,
             &private_key,
@@ -905,10 +916,188 @@ async fn test_refresh_with_expired_license_exp_fails() {
         .await
         .unwrap();
 
-    // Should fail - license_exp (activated_at + license_exp_days) is in the past
+    // The license was renewed - refresh should succeed!
     assert_eq!(
         response.status(),
-        StatusCode::UNAUTHORIZED,
-        "Refresh should fail when license_exp (from product settings) has passed"
+        StatusCode::OK,
+        "Refresh should succeed for renewed subscription. license.expires_at is in the future, \
+         but the bug calculates expiration from device.activated_at + product.license_exp_days \
+         which ignores the renewal."
+    );
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: Value = serde_json::from_slice(&body).expect("Response should be valid JSON");
+
+    // Decode the new token and verify it has the correct (stored) expiration
+    let new_token = json["token"].as_str().expect("token should be a string");
+    let new_claims = jwt::decode_unverified(new_token).unwrap();
+
+    let now = chrono::Utc::now().timestamp();
+    assert!(
+        new_claims.license_exp.unwrap() > now,
+        "New JWT should have license_exp in the future (from stored renewal), \
+         got {} which is {} seconds from now",
+        new_claims.license_exp.unwrap(),
+        new_claims.license_exp.unwrap() - now
     );
 }
+
+/// Test that a perpetual license (expires_at = None) refreshes successfully
+/// regardless of how long ago the device was activated.
+///
+/// Previously this was a bug: the code calculated expiration from
+/// device.activated_at + product.license_exp_days, which would incorrectly
+/// reject perpetual licenses after the product's default period elapsed.
+#[tokio::test]
+async fn test_refresh_perpetual_license_ignores_product_exp_days() {
+    let master_key = test_master_key();
+
+    let manager = SqliteConnectionManager::memory();
+    let pool = Pool::builder().max_size(4).build(manager).unwrap();
+
+    let token: String;
+
+    {
+        let mut conn = pool.get().unwrap();
+        paycheck::db::init_db(&conn).unwrap();
+
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+
+        // Create a product with 1-day license expiration default
+        let input = paycheck::models::CreateProduct {
+            name: "Short License".to_string(),
+            tier: "pro".to_string(),
+            price_cents: None,
+            currency: None,
+            license_exp_days: Some(1), // Product default: 1 day
+            updates_exp_days: Some(365),
+            activation_limit: Some(5),
+            device_limit: Some(3),
+            device_inactive_days: None,
+            features: vec![],
+            payment_config_id: None,
+            email_config_id: None,
+        };
+        let product = queries::create_product(&mut conn, &project.id, &input).unwrap();
+
+        // Create a PERPETUAL license (expires_at = None)
+        let license = create_test_license(&mut conn, &project.id, &product.id, None);
+
+        // Create device activated 2 days ago
+        let jti = uuid::Uuid::new_v4().to_string();
+        queries::create_device(
+            &conn,
+            &license.id,
+            "test-device",
+            DeviceType::Uuid,
+            &jti,
+            Some("Test Device"),
+        )
+        .unwrap();
+
+        // Backdate activation to 2 days ago (longer than product's 1-day default)
+        conn.execute(
+            "UPDATE devices SET activated_at = ?1 WHERE jti = ?2",
+            rusqlite::params![past_timestamp(2 * ONE_DAY), &jti],
+        )
+        .unwrap();
+
+        let device = queries::get_device_by_jti(&mut conn, &jti).unwrap().unwrap();
+
+        let claims = LicenseClaims {
+            license_exp: None, // Perpetual
+            updates_exp: Some(future_timestamp(ONE_YEAR)),
+            tier: product.tier.clone(),
+            features: product.features.clone(),
+            device_id: device.device_id.clone(),
+            device_type: "uuid".to_string(),
+            product_id: product.id.clone(),
+        };
+
+        let private_key = master_key
+            .decrypt_private_key(&project.id, &project.private_key)
+            .unwrap();
+
+        token = jwt::sign_claims(
+            &claims,
+            &private_key,
+            &license.id,
+            &project.name,
+            &device.jti,
+        )
+        .unwrap();
+    }
+
+    let audit_manager = SqliteConnectionManager::memory();
+    let audit_pool = Pool::builder().max_size(4).build(audit_manager).unwrap();
+    {
+        let conn = audit_pool.get().unwrap();
+        paycheck::db::init_audit_db(&conn).unwrap();
+    }
+
+    let state = AppState {
+        db: pool,
+        audit: audit_pool,
+        base_url: "http://localhost:3000".to_string(),
+        audit_log_enabled: false,
+        master_key,
+        email_hasher: paycheck::crypto::EmailHasher::from_bytes([0xAA; 32]),
+        success_page_url: "http://localhost:3000/success".to_string(),
+        activation_rate_limiter: std::sync::Arc::new(
+            paycheck::rate_limit::ActivationRateLimiter::default(),
+        ),
+        email_service: std::sync::Arc::new(paycheck::email::EmailService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
+        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
+        jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
+        trusted_issuers: vec![],
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
+    };
+
+    let app = Router::new()
+        .route("/refresh", post(refresh_token))
+        .with_state(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/refresh")
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Perpetual license should refresh successfully regardless of activation time
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "Perpetual license (expires_at = None) should refresh successfully, \
+         even if device was activated longer ago than product.license_exp_days"
+    );
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: Value = serde_json::from_slice(&body).expect("Response should be valid JSON");
+
+    // New token should also have no license_exp (perpetual)
+    let new_token = json["token"].as_str().expect("token should be a string");
+    let new_claims = jwt::decode_unverified(new_token).unwrap();
+    assert!(
+        new_claims.license_exp.is_none(),
+        "Refreshed perpetual license should still have no license_exp"
+    );
+}
+

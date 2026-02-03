@@ -34,9 +34,11 @@ pub fn sign_claims(
         return Err(AppError::Internal(msg::INVALID_PRIVATE_KEY_LENGTH.into()));
     }
 
-    let key_bytes: [u8; 32] = private_key
-        .try_into()
-        .map_err(|_| AppError::Internal(msg::FAILED_TO_CONVERT_KEY_BYTES.into()))?;
+    let key_bytes: [u8; 32] = private_key.try_into().map_err(|e| {
+        // This should never happen after the length check above
+        tracing::error!("Failed to convert private key bytes after length check: {:?}", e);
+        AppError::Internal(msg::FAILED_TO_CONVERT_KEY_BYTES.into())
+    })?;
 
     let signing_key = SigningKey::from_bytes(&key_bytes);
     let key_pair = Ed25519KeyPair::from_bytes(&signing_key.to_keypair_bytes())
@@ -65,9 +67,10 @@ pub fn decode_unverified(token: &str) -> Result<LicenseClaims> {
         return Err(AppError::BadRequest(msg::INVALID_TOKEN_FORMAT.into()));
     }
 
-    let payload = BASE64_URL
-        .decode(parts[1])
-        .map_err(|_| AppError::BadRequest(msg::INVALID_TOKEN_ENCODING.into()))?;
+    let payload = BASE64_URL.decode(parts[1]).map_err(|e| {
+        tracing::debug!("Invalid base64 encoding in token payload: {}", e);
+        AppError::BadRequest(msg::INVALID_TOKEN_ENCODING.into())
+    })?;
 
     #[derive(Deserialize)]
     struct TokenPayload {
@@ -75,8 +78,10 @@ pub fn decode_unverified(token: &str) -> Result<LicenseClaims> {
         claims: LicenseClaims,
     }
 
-    let payload: TokenPayload = serde_json::from_slice(&payload)
-        .map_err(|_| AppError::BadRequest(msg::INVALID_TOKEN_PAYLOAD.into()))?;
+    let payload: TokenPayload = serde_json::from_slice(&payload).map_err(|e| {
+        tracing::debug!("Invalid JSON in token payload: {}", e);
+        AppError::BadRequest(msg::INVALID_TOKEN_PAYLOAD.into())
+    })?;
 
     Ok(payload.claims)
 }
@@ -111,9 +116,11 @@ fn verify_token_internal(
         return Err(AppError::Internal(msg::INVALID_PUBLIC_KEY_LENGTH.into()));
     }
 
-    let key_bytes: [u8; 32] = public_bytes
-        .try_into()
-        .map_err(|_| AppError::Internal(msg::FAILED_TO_CONVERT_KEY_BYTES.into()))?;
+    let key_bytes: [u8; 32] = public_bytes.try_into().map_err(|e| {
+        // This should never happen after the length check above
+        tracing::error!("Failed to convert public key bytes after length check: {:?}", e);
+        AppError::Internal(msg::FAILED_TO_CONVERT_KEY_BYTES.into())
+    })?;
 
     let verifying_key = VerifyingKey::from_bytes(&key_bytes)
         .map_err(|e| AppError::Internal(format!("Invalid public key: {}", e)))?;

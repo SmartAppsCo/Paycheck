@@ -56,4 +56,6 @@ export {
   isLicenseExpired,
   coversVersion,
   hasFeature,
+  validateIssuer,
+  EXPECTED_ISSUER,
 } from './jwt';

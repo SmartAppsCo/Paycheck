@@ -72,11 +72,10 @@ pub async fn request_activation_code(
         }
     };
 
-    // Look up ALL licenses by email hash and project (user may have multiple)
-    let licenses = queries::get_licenses_by_email_hash(&conn, &project.id, &email_hash)?;
-
-    // Filter to non-revoked licenses only (query already does this, but be explicit)
-    let active_licenses: Vec<_> = licenses.into_iter().filter(|l| !l.revoked).collect();
+    // Look up active licenses by email hash and project (user may have multiple).
+    // The query filters out revoked, deleted, and expired licenses - only active
+    // licenses that can actually be redeemed will receive activation codes.
+    let active_licenses = queries::get_licenses_by_email_hash(&conn, &project.id, &email_hash)?;
 
     if active_licenses.is_empty() {
         tracing::debug!(

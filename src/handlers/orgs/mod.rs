@@ -223,9 +223,9 @@ pub fn router(state: AppState, rate_limit_config: RateLimitConfig) -> Router<App
 
     let merged = org_routes.merge(project_routes);
 
-    // Apply rate limiting if configured (skip if rpm is 0, useful for tests)
-    if rate_limit_config.org_ops_rpm > 0 {
-        merged.layer(rate_limit::org_ops_layer(rate_limit_config.org_ops_rpm))
+    // Apply rate limiting if configured (None when rpm is 0, useful for tests)
+    if let Some(layer) = rate_limit::org_ops_layer(rate_limit_config.org_ops_rpm) {
+        merged.layer(layer)
     } else {
         merged
     }

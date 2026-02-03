@@ -782,6 +782,85 @@ mod restore_cascade {
         );
     }
 
+    /// Restore user -> restores cascaded project_members (depth 2).
+    ///
+    /// When a user is deleted, project_members are cascade-deleted at depth 2
+    /// (via org_members at depth 1). Restoring the user should restore both.
+    #[test]
+    fn test_restore_user_restores_project_members() {
+        let mut conn = setup_test_db();
+        let master_key = test_master_key();
+
+        // Setup: org -> project -> user -> org_member -> project_member
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let (user, org_member, _api_key) =
+            create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Member);
+        let project_member =
+            create_test_project_member(&mut conn, &org_member.id, &project.id, ProjectMemberRole::View);
+
+        // Verify project member exists initially
+        let members_before = queries::list_project_members(&conn, &project.id).expect("Query failed");
+        assert_eq!(members_before.len(), 1, "Should have 1 project member initially");
+
+        // Soft delete the user (cascades to org_member at depth 1, project_member at depth 2)
+        queries::soft_delete_user(&mut conn, &user.id).expect("Soft delete failed");
+
+        // Verify both are deleted
+        assert!(
+            queries::get_org_member_by_id(&mut conn, &org_member.id)
+                .unwrap()
+                .is_none(),
+            "Org member should be excluded after user soft delete"
+        );
+        let members_after_delete = queries::list_project_members(&conn, &project.id).expect("Query failed");
+        assert_eq!(
+            members_after_delete.len(),
+            0,
+            "Project member should be excluded after user soft delete"
+        );
+
+        // Verify project_member has correct cascade depth
+        let deleted_pm: Option<(Option<i64>, Option<i32>)> = conn
+            .query_row(
+                "SELECT deleted_at, deleted_cascade_depth FROM project_members WHERE id = ?1",
+                rusqlite::params![project_member.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+        assert!(
+            deleted_pm.is_some(),
+            "Project member should exist in DB"
+        );
+        let (deleted_at, depth) = deleted_pm.unwrap();
+        assert!(deleted_at.is_some(), "Project member deleted_at should be set");
+        assert_eq!(depth, Some(2), "Project member cascade depth should be 2");
+
+        // Restore the user
+        queries::restore_user(&mut conn, &user.id, false).expect("Restore failed");
+
+        // Org member should be restored
+        assert!(
+            queries::get_org_member_by_id(&mut conn, &org_member.id)
+                .unwrap()
+                .is_some(),
+            "Org member should be restored after user restore"
+        );
+
+        // BUG TEST: Project member should ALSO be restored
+        let members_after_restore = queries::list_project_members(&conn, &project.id).expect("Query failed");
+        assert_eq!(
+            members_after_restore.len(),
+            1,
+            "BUG: Project members not restored when user is restored. \
+             restore_user only restores org_members (depth 1) but not project_members (depth 2)."
+        );
+        assert_eq!(
+            members_after_restore[0].id, project_member.id,
+            "Restored project member should be the original one"
+        );
+    }
+
     /// Restore org -> restores cascaded projects/products/licenses.
     #[test]
     fn test_restore_org_restores_entire_hierarchy() {
@@ -867,6 +946,152 @@ mod restore_cascade {
                 .unwrap()
                 .is_some(),
             "License should be restored when parent org is restored"
+        );
+    }
+
+    /// Restore org -> restores cascaded service_configs.
+    ///
+    /// When an org is deleted, service_configs are cascade-deleted at depth 1.
+    /// Restoring the org should restore them.
+    #[test]
+    fn test_restore_org_restores_service_configs() {
+        let mut conn = setup_test_db();
+        let master_key = test_master_key();
+        let org = create_test_org(&mut conn, "Test Org");
+
+        // Create a service config
+        let encrypted = master_key
+            .encrypt_private_key(
+                &org.id,
+                br#"{"secret_key":"sk_test_xxx","publishable_key":"pk_test_xxx","webhook_secret":"whsec_xxx"}"#,
+            )
+            .unwrap();
+        let config = queries::create_service_config(
+            &conn,
+            &org.id,
+            "Test Stripe Config",
+            paycheck::models::ServiceProvider::Stripe,
+            &encrypted,
+        )
+        .unwrap();
+
+        // Verify config exists
+        assert!(
+            queries::get_service_config_by_id(&conn, &config.id)
+                .unwrap()
+                .is_some(),
+            "Service config should exist before org delete"
+        );
+
+        // Soft delete the organization (cascades to service_configs at depth 1)
+        queries::soft_delete_organization(&mut conn, &org.id).expect("Soft delete failed");
+
+        // Verify service config is deleted
+        assert!(
+            queries::get_service_config_by_id(&conn, &config.id)
+                .unwrap()
+                .is_none(),
+            "Service config should be excluded after org soft delete"
+        );
+
+        // Verify service_config has correct cascade depth
+        let deleted_config: Option<(Option<i64>, Option<i32>)> = conn
+            .query_row(
+                "SELECT deleted_at, deleted_cascade_depth FROM service_configs WHERE id = ?1",
+                rusqlite::params![config.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+        assert!(deleted_config.is_some(), "Service config should exist in DB");
+        let (deleted_at, depth) = deleted_config.unwrap();
+        assert!(deleted_at.is_some(), "Service config deleted_at should be set");
+        assert_eq!(depth, Some(1), "Service config cascade depth should be 1");
+
+        // Restore the organization
+        queries::restore_organization(&mut conn, &org.id).expect("Restore failed");
+
+        // BUG TEST: Service config should be restored
+        let config_after = queries::get_service_config_by_id(&conn, &config.id).unwrap();
+        assert!(
+            config_after.is_some(),
+            "BUG: Service configs not restored when org is restored. \
+             restore_organization restores org_members, projects, products, licenses but not service_configs."
+        );
+    }
+
+    /// Restore org_member -> restores cascaded project_members.
+    ///
+    /// When an org_member is deleted, project_members are cascade-deleted at depth 1.
+    /// Restoring the org_member should restore them.
+    #[test]
+    fn test_restore_org_member_restores_project_members() {
+        let mut conn = setup_test_db();
+        let master_key = test_master_key();
+
+        // Setup: org -> project -> org_member -> project_member
+        let org = create_test_org(&mut conn, "Test Org");
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let (_user, org_member, _api_key) =
+            create_test_org_member(&mut conn, &org.id, "member@test.com", OrgMemberRole::Member);
+        let project_member =
+            create_test_project_member(&mut conn, &org_member.id, &project.id, ProjectMemberRole::View);
+
+        // Verify project member exists initially
+        let members_before = queries::list_project_members(&conn, &project.id).expect("Query failed");
+        assert_eq!(members_before.len(), 1, "Should have 1 project member initially");
+
+        // Soft delete the org_member (cascades to project_member at depth 1)
+        queries::soft_delete_org_member(&mut conn, &org_member.id).expect("Soft delete failed");
+
+        // Verify both are deleted
+        assert!(
+            queries::get_org_member_by_id(&mut conn, &org_member.id)
+                .unwrap()
+                .is_none(),
+            "Org member should be excluded after soft delete"
+        );
+        let members_after_delete = queries::list_project_members(&conn, &project.id).expect("Query failed");
+        assert_eq!(
+            members_after_delete.len(),
+            0,
+            "Project member should be excluded after org_member soft delete"
+        );
+
+        // Verify project_member has correct cascade depth
+        let deleted_pm: Option<(Option<i64>, Option<i32>)> = conn
+            .query_row(
+                "SELECT deleted_at, deleted_cascade_depth FROM project_members WHERE id = ?1",
+                rusqlite::params![project_member.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+        assert!(deleted_pm.is_some(), "Project member should exist in DB");
+        let (deleted_at, depth) = deleted_pm.unwrap();
+        assert!(deleted_at.is_some(), "Project member deleted_at should be set");
+        assert_eq!(depth, Some(1), "Project member cascade depth should be 1");
+
+        // Restore the org_member (with force since it may have been cascade-deleted)
+        queries::restore_org_member(&mut conn, &org_member.id, false).expect("Restore failed");
+
+        // Org member should be restored
+        assert!(
+            queries::get_org_member_by_id(&mut conn, &org_member.id)
+                .unwrap()
+                .is_some(),
+            "Org member should be restored"
+        );
+
+        // BUG TEST: Project member should ALSO be restored
+        let members_after_restore = queries::list_project_members(&conn, &project.id).expect("Query failed");
+        assert_eq!(
+            members_after_restore.len(),
+            1,
+            "BUG: Project members not restored when org_member is restored. \
+             restore_org_member only restores the org_member itself but not project_members (depth 1)."
+        );
+        assert_eq!(
+            members_after_restore[0].id, project_member.id,
+            "Restored project member should be the original one"
         );
     }
 

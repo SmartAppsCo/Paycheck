@@ -67,7 +67,28 @@ impl UpdateBuilder {
         self
     }
 
+    /// Set a column only if the outer Option is Some, using the inner Option for NULL.
+    /// Use this for Option<Option<T>> where:
+    /// - None = don't change (skip)
+    /// - Some(None) = set to NULL
+    /// - Some(Some(v)) = set to v
+    fn set_opt_nullable<V: Into<Value>>(self, column: &'static str, value: Option<Option<V>>) -> Self {
+        match value {
+            None => self, // Don't change
+            Some(inner) => self.set_nullable(column, inner),
+        }
+    }
+
     fn execute(mut self, conn: &Connection) -> Result<bool> {
+        self.execute_with_filter(conn, "")
+    }
+
+    /// Execute the update, but only for non-soft-deleted records.
+    fn execute_soft_delete(mut self, conn: &Connection) -> Result<bool> {
+        self.execute_with_filter(conn, " AND deleted_at IS NULL")
+    }
+
+    fn execute_with_filter(&mut self, conn: &Connection, filter: &str) -> Result<bool> {
         if self.fields.is_empty() {
             return Ok(false);
         }
@@ -79,9 +100,9 @@ impl UpdateBuilder {
             .iter()
             .map(|(col, _)| format!("{} = ?", col))
             .collect();
-        let mut values: Vec<Value> = self.fields.into_iter().map(|(_, v)| v).collect();
-        values.push(self.id.into());
-        let sql = format!("UPDATE {} SET {} WHERE id = ?", self.table, sets.join(", "));
+        let mut values: Vec<Value> = self.fields.iter().map(|(_, v)| v.clone()).collect();
+        values.push(std::mem::take(&mut self.id).into());
+        let sql = format!("UPDATE {} SET {} WHERE id = ?{}", self.table, sets.join(", "), filter);
         let affected = conn.execute(&sql, rusqlite::params_from_iter(values))?;
         Ok(affected > 0)
     }
@@ -273,12 +294,22 @@ pub fn restore_user(conn: &mut Connection, id: &str, force: bool) -> Result<bool
 
     check_restore_allowed(user.deleted_cascade_depth, force, "User")?;
 
-    let deleted_at = user.deleted_at.unwrap();
+    let deleted_at = user
+        .deleted_at
+        .ok_or_else(|| AppError::Internal("deleted_at missing for deleted user".into()))?;
 
     let tx = conn.transaction()?;
 
-    // Restore cascaded children (org_members)
+    // Restore cascaded children (org_members at depth 1)
     restore_cascaded_direct(&tx, "org_members", "user_id", id, deleted_at)?;
+
+    // Restore cascaded children (project_members at depth 2 - via org_members)
+    tx.execute(
+        "UPDATE project_members SET deleted_at = NULL, deleted_cascade_depth = NULL
+         WHERE org_member_id IN (SELECT id FROM org_members WHERE user_id = ?1)
+         AND deleted_at = ?2 AND deleted_cascade_depth > 0",
+        params![id, deleted_at],
+    )?;
 
     // Restore the user
     restore_entity(&tx, "users", id)?;
@@ -315,10 +346,14 @@ pub fn get_user_with_roles(conn: &Connection, id: &str) -> Result<Option<UserWit
              ORDER BY o.name",
         )?;
         stmt.query_map([&id], |row| {
-            let role: OrgMemberRole = row
-                .get::<_, String>(3)?
-                .parse()
-                .map_err(|_| rusqlite::Error::InvalidColumnType(3, "role".to_string(), rusqlite::types::Type::Text))?;
+            let role_str: String = row.get(3)?;
+            let role: OrgMemberRole = role_str.parse().map_err(|_| {
+                tracing::error!(
+                    "Invalid role '{}' in org_members table. Database may be corrupted.",
+                    role_str
+                );
+                rusqlite::Error::InvalidColumnType(3, "role".to_string(), rusqlite::types::Type::Text)
+            })?;
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, role))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?
@@ -409,9 +444,13 @@ pub fn list_users_with_roles_paginated(
     // Group memberships by user_id
     let mut membership_map: HashMap<String, Vec<UserOrgMembership>> = HashMap::new();
     for (user_id, id, org_id, org_name, role_str) in membership_rows {
-        let role = role_str
-            .parse::<OrgMemberRole>()
-            .map_err(|_| AppError::Internal(format!("Invalid role in database: {}", role_str)))?;
+        let role = role_str.parse::<OrgMemberRole>().map_err(|_| {
+            tracing::error!(
+                "Invalid role '{}' in org_members table. Database may be corrupted.",
+                role_str
+            );
+            AppError::Internal(format!("Invalid role in database: {}", role_str))
+        })?;
         membership_map
             .entry(user_id)
             .or_default()
@@ -1253,23 +1292,12 @@ pub fn update_organization(
     id: &str,
     input: &UpdateOrganization,
 ) -> Result<bool> {
-    let mut builder = UpdateBuilder::new("organizations", id).with_updated_at();
-
-    if let Some(ref name) = input.name {
-        builder = builder.set("name", name.clone());
-    }
-
-    // Handle payment_config_id: Option<Option<String>>
-    if let Some(ref payment_config_id) = input.payment_config_id {
-        builder = builder.set_nullable("payment_config_id", payment_config_id.clone());
-    }
-
-    // Handle email_config_id: Option<Option<String>>
-    if let Some(ref email_config_id) = input.email_config_id {
-        builder = builder.set_nullable("email_config_id", email_config_id.clone());
-    }
-
-    let result: Option<Organization> = builder.execute_returning(conn, ORGANIZATION_COLS)?;
+    let result: Option<Organization> = UpdateBuilder::new("organizations", id)
+        .with_updated_at()
+        .set_opt("name", input.name.clone())
+        .set_opt_nullable("payment_config_id", input.payment_config_id.clone())
+        .set_opt_nullable("email_config_id", input.email_config_id.clone())
+        .execute_returning(conn, ORGANIZATION_COLS)?;
     Ok(result.is_some())
 }
 
@@ -1381,19 +1409,24 @@ pub fn update_service_config(
     builder.execute_returning(conn, SERVICE_CONFIG_COLS)
 }
 
-/// Soft delete a service config (fails if still referenced by active entities)
-pub fn soft_delete_service_config(conn: &Connection, id: &str) -> Result<bool> {
+/// Soft delete a service config (fails if still referenced by active entities).
+/// Uses a transaction to prevent TOCTOU races between check and delete.
+pub fn soft_delete_service_config(conn: &mut Connection, id: &str) -> Result<bool> {
     use super::soft_delete::soft_delete_entity;
 
+    let tx = conn.transaction()?;
+
     // Check if referenced by org, project, or product (only active ones)
-    let usage = get_service_config_usage(conn, id)?;
+    let usage = get_service_config_usage(&tx, id)?;
     if !usage.orgs.is_empty() || !usage.projects.is_empty() || !usage.products.is_empty() {
         return Err(AppError::BadRequest(
             "Cannot delete service config that is still in use".into(),
         ));
     }
 
-    Ok(soft_delete_entity(conn, "service_configs", id)?.deleted)
+    let deleted = soft_delete_entity(&tx, "service_configs", id)?.deleted;
+    tx.commit()?;
+    Ok(deleted)
 }
 
 /// Get a soft-deleted service config by ID (for restore operations and testing).
@@ -1782,7 +1815,9 @@ pub fn restore_organization(conn: &mut Connection, id: &str) -> Result<bool> {
         return Ok(false);
     };
 
-    let deleted_at = org.deleted_at.unwrap();
+    let deleted_at = org
+        .deleted_at
+        .ok_or_else(|| AppError::Internal("deleted_at missing for deleted organization".into()))?;
 
     let tx = conn.transaction()?;
 
@@ -1805,6 +1840,7 @@ pub fn restore_organization(conn: &mut Connection, id: &str) -> Result<bool> {
     )?;
     restore_cascaded_direct(&tx, "projects", "org_id", id, deleted_at)?;
     restore_cascaded_direct(&tx, "org_members", "org_id", id, deleted_at)?;
+    restore_cascaded_direct(&tx, "service_configs", "org_id", id, deleted_at)?;
 
     // Restore the organization itself
     restore_entity(&tx, "organizations", id)?;
@@ -2086,16 +2122,28 @@ pub fn get_deleted_org_member_by_user_and_org(
 
 /// Restore a soft-deleted org member.
 /// Returns Err if depth > 0 and force=false (was cascaded from org/user delete).
-pub fn restore_org_member(conn: &Connection, id: &str, force: bool) -> Result<bool> {
-    use super::soft_delete::{check_restore_allowed, restore_entity};
+pub fn restore_org_member(conn: &mut Connection, id: &str, force: bool) -> Result<bool> {
+    use super::soft_delete::{check_restore_allowed, restore_cascaded_direct, restore_entity};
 
     let Some(member) = get_deleted_org_member_by_id(conn, id)? else {
         return Ok(false);
     };
 
     check_restore_allowed(member.deleted_cascade_depth, force, "Org member")?;
-    restore_entity(conn, "org_members", id)?;
 
+    let deleted_at = member
+        .deleted_at
+        .ok_or_else(|| AppError::Internal("deleted_at missing for deleted org member".into()))?;
+
+    let tx = conn.transaction()?;
+
+    // Restore cascaded children (project_members at depth 1)
+    restore_cascaded_direct(&tx, "project_members", "org_member_id", id, deleted_at)?;
+
+    // Restore the org_member itself
+    restore_entity(&tx, "org_members", id)?;
+
+    tx.commit()?;
     Ok(true)
 }
 
@@ -2319,65 +2367,24 @@ pub fn update_project_private_key(conn: &Connection, id: &str, private_key: &[u8
 }
 
 /// Update a project. Returns the updated project, or None if not found.
+/// Uses Option<Option<T>> pattern for nullable fields:
+/// None = leave unchanged, Some(None) = clear, Some(Some(v)) = set
 pub fn update_project(conn: &Connection, id: &str, input: &UpdateProject) -> Result<Option<Project>> {
-    // All nullable fields use Option<Option<T>> pattern:
-    // None = leave unchanged, Some(None) = clear, Some(Some(v)) = set
-    let mut builder = UpdateBuilder::new("projects", id)
+    UpdateBuilder::new("projects", id)
         .with_updated_at()
         .set_opt("name", input.name.clone())
-        .set_opt("license_key_prefix", input.license_key_prefix.clone());
-
-    // Handle redirect_url: Option<Option<String>>
-    if let Some(ref redirect_url) = input.redirect_url {
-        builder = builder.set_nullable("redirect_url", redirect_url.clone());
-    }
-
-    // Handle email_from: Option<Option<String>>
-    if let Some(ref email_from) = input.email_from {
-        builder = builder.set_nullable("email_from", email_from.clone());
-    }
-
-    // Handle email_enabled: Option<bool>
-    if let Some(email_enabled) = input.email_enabled {
-        builder = builder.set("email_enabled", email_enabled as i32);
-    }
-
-    // Handle email_webhook_url: Option<Option<String>>
-    if let Some(ref email_webhook_url) = input.email_webhook_url {
-        builder = builder.set_nullable("email_webhook_url", email_webhook_url.clone());
-    }
-
-    // Handle payment_config_id: Option<Option<String>>
-    if let Some(ref payment_config_id) = input.payment_config_id {
-        builder = builder.set_nullable("payment_config_id", payment_config_id.clone());
-    }
-
-    // Handle email_config_id: Option<Option<String>>
-    if let Some(ref email_config_id) = input.email_config_id {
-        builder = builder.set_nullable("email_config_id", email_config_id.clone());
-    }
-
-    // Handle feedback_webhook_url: Option<Option<String>>
-    if let Some(ref feedback_webhook_url) = input.feedback_webhook_url {
-        builder = builder.set_nullable("feedback_webhook_url", feedback_webhook_url.clone());
-    }
-
-    // Handle feedback_email: Option<Option<String>>
-    if let Some(ref feedback_email) = input.feedback_email {
-        builder = builder.set_nullable("feedback_email", feedback_email.clone());
-    }
-
-    // Handle crash_webhook_url: Option<Option<String>>
-    if let Some(ref crash_webhook_url) = input.crash_webhook_url {
-        builder = builder.set_nullable("crash_webhook_url", crash_webhook_url.clone());
-    }
-
-    // Handle crash_email: Option<Option<String>>
-    if let Some(ref crash_email) = input.crash_email {
-        builder = builder.set_nullable("crash_email", crash_email.clone());
-    }
-
-    builder.execute_returning(conn, PROJECT_COLS)
+        .set_opt("license_key_prefix", input.license_key_prefix.clone())
+        .set_opt_nullable("redirect_url", input.redirect_url.clone())
+        .set_opt_nullable("email_from", input.email_from.clone())
+        .set_opt("email_enabled", input.email_enabled.map(|b| b as i32))
+        .set_opt_nullable("email_webhook_url", input.email_webhook_url.clone())
+        .set_opt_nullable("payment_config_id", input.payment_config_id.clone())
+        .set_opt_nullable("email_config_id", input.email_config_id.clone())
+        .set_opt_nullable("feedback_webhook_url", input.feedback_webhook_url.clone())
+        .set_opt_nullable("feedback_email", input.feedback_email.clone())
+        .set_opt_nullable("crash_webhook_url", input.crash_webhook_url.clone())
+        .set_opt_nullable("crash_email", input.crash_email.clone())
+        .execute_returning(conn, PROJECT_COLS)
 }
 
 pub fn delete_project(conn: &Connection, id: &str) -> Result<bool> {
@@ -2430,7 +2437,9 @@ pub fn restore_project(conn: &mut Connection, id: &str, force: bool) -> Result<b
 
     check_restore_allowed(project.deleted_cascade_depth, force, "Project")?;
 
-    let deleted_at = project.deleted_at.unwrap();
+    let deleted_at = project
+        .deleted_at
+        .ok_or_else(|| AppError::Internal("deleted_at missing for deleted project".into()))?;
 
     let tx = conn.transaction()?;
 
@@ -2741,7 +2750,7 @@ pub fn update_product(conn: &Connection, id: &str, input: &UpdateProduct) -> Res
         .map(serde_json::to_string)
         .transpose()?;
 
-    let mut builder = UpdateBuilder::new("products", id)
+    UpdateBuilder::new("products", id)
         .set_opt("name", input.name.clone())
         .set_opt("tier", input.tier.clone())
         .set_opt("license_exp_days", input.license_exp_days)
@@ -2751,19 +2760,10 @@ pub fn update_product(conn: &Connection, id: &str, input: &UpdateProduct) -> Res
         .set_opt("device_inactive_days", input.device_inactive_days)
         .set_opt("features", features_json)
         .set_opt("price_cents", input.price_cents)
-        .set_opt("currency", input.currency.clone());
-
-    // Handle payment_config_id: Option<Option<String>>
-    if let Some(ref payment_config_id) = input.payment_config_id {
-        builder = builder.set_nullable("payment_config_id", payment_config_id.clone());
-    }
-
-    // Handle email_config_id: Option<Option<String>>
-    if let Some(ref email_config_id) = input.email_config_id {
-        builder = builder.set_nullable("email_config_id", email_config_id.clone());
-    }
-
-    builder.execute_returning(conn, PRODUCT_COLS)
+        .set_opt("currency", input.currency.clone())
+        .set_opt_nullable("payment_config_id", input.payment_config_id.clone())
+        .set_opt_nullable("email_config_id", input.email_config_id.clone())
+        .execute_returning(conn, PRODUCT_COLS)
 }
 
 pub fn delete_product(conn: &Connection, id: &str) -> Result<bool> {
@@ -2815,7 +2815,9 @@ pub fn restore_product(conn: &mut Connection, id: &str, force: bool) -> Result<b
 
     check_restore_allowed(product.deleted_cascade_depth, force, "Product")?;
 
-    let deleted_at = product.deleted_at.unwrap();
+    let deleted_at = product
+        .deleted_at
+        .ok_or_else(|| AppError::Internal("deleted_at missing for deleted product".into()))?;
 
     let tx = conn.transaction()?;
 
@@ -3294,16 +3296,22 @@ pub fn list_licenses_for_project(
     Ok(rows)
 }
 
+/// Increment the activation count for a license.
+/// Only affects non-deleted licenses.
 pub fn increment_activation_count(conn: &Connection, id: &str) -> Result<()> {
     conn.execute(
-        "UPDATE licenses SET activation_count = activation_count + 1 WHERE id = ?1",
+        "UPDATE licenses SET activation_count = activation_count + 1 \
+         WHERE id = ?1 AND deleted_at IS NULL",
         params![id],
     )?;
     Ok(())
 }
 
 pub fn revoke_license(conn: &Connection, id: &str) -> Result<bool> {
-    let affected = conn.execute("UPDATE licenses SET revoked = 1 WHERE id = ?1", params![id])?;
+    let affected = conn.execute(
+        "UPDATE licenses SET revoked = 1 WHERE id = ?1 AND deleted_at IS NULL",
+        params![id],
+    )?;
     Ok(affected > 0)
 }
 
@@ -3497,22 +3505,24 @@ pub fn get_license_by_subscription(
 }
 
 /// Update a license's fields.
+/// Only updates fields that are `Some` in the input - `None` means "don't change".
+/// For expiration fields, `Some(None)` sets to NULL (perpetual), `Some(Some(ts))` sets the value.
+/// Only affects non-deleted licenses.
 pub fn update_license(
     conn: &Connection,
     license_id: &str,
-    email_hash: Option<&str>,
-    customer_id: Option<&str>,
-    expires_at: Option<i64>,
-    updates_expires_at: Option<i64>,
+    input: &UpdateLicense,
 ) -> Result<bool> {
-    let affected = conn.execute(
-        "UPDATE licenses SET email_hash = ?1, customer_id = ?2, expires_at = ?3, updates_expires_at = ?4 WHERE id = ?5",
-        params![email_hash, customer_id, expires_at, updates_expires_at, license_id],
-    )?;
-    Ok(affected > 0)
+    UpdateBuilder::new("licenses", license_id)
+        .set_opt("email_hash", input.email_hash.clone())
+        .set_opt("customer_id", input.customer_id.clone())
+        .set_opt_nullable("expires_at", input.expires_at)
+        .set_opt_nullable("updates_expires_at", input.updates_expires_at)
+        .execute_soft_delete(conn)
 }
 
-/// Extend license expiration dates (for subscription renewals)
+/// Extend license expiration dates (for subscription renewals).
+/// Only affects non-deleted licenses.
 pub fn extend_license_expiration(
     conn: &Connection,
     license_id: &str,
@@ -3520,7 +3530,8 @@ pub fn extend_license_expiration(
     new_updates_expires_at: Option<i64>,
 ) -> Result<()> {
     conn.execute(
-        "UPDATE licenses SET expires_at = ?1, updates_expires_at = ?2 WHERE id = ?3",
+        "UPDATE licenses SET expires_at = ?1, updates_expires_at = ?2 \
+         WHERE id = ?3 AND deleted_at IS NULL",
         params![new_expires_at, new_updates_expires_at, license_id],
     )?;
     Ok(())
@@ -3785,9 +3796,15 @@ pub fn create_device(
 }
 
 pub fn get_device_by_jti(conn: &Connection, jti: &str) -> Result<Option<Device>> {
+    // Join with licenses to exclude devices whose parent license is soft-deleted.
+    // This is defense-in-depth - callers also check the license, but the query
+    // should be consistent and not return orphaned devices.
     query_one(
         conn,
-        &format!("SELECT {} FROM devices WHERE jti = ?1", DEVICE_COLS),
+        "SELECT d.id, d.license_id, d.device_id, d.device_type, d.name, d.jti, d.activated_at, d.last_seen_at
+         FROM devices d
+         JOIN licenses l ON d.license_id = l.id
+         WHERE d.jti = ?1 AND l.deleted_at IS NULL",
         &[&jti],
     )
 }
@@ -3847,12 +3864,17 @@ pub fn count_active_devices_for_license(
     }
 }
 
-pub fn update_device_last_seen(conn: &Connection, id: &str) -> Result<()> {
+/// Update device last_seen_at, but only if more than 10 minutes stale.
+/// This reduces write volume significantly since validate/refresh are called frequently.
+pub fn update_device_last_seen(conn: &Connection, id: &str, current_last_seen: i64) -> Result<()> {
+    const STALE_THRESHOLD_SECS: i64 = 600; // 10 minutes
     let now = now();
-    conn.execute(
-        "UPDATE devices SET last_seen_at = ?1 WHERE id = ?2",
-        params![now, id],
-    )?;
+    if now - current_last_seen > STALE_THRESHOLD_SECS {
+        conn.execute(
+            "UPDATE devices SET last_seen_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
+    }
     Ok(())
 }
 
@@ -4083,6 +4105,7 @@ pub fn create_transaction(conn: &Connection, input: &CreateTransaction) -> Resul
             currency, subtotal_cents, discount_cents, net_cents, tax_cents, total_cents,
             discount_code, tax_inclusive, customer_country,
             transaction_type, parent_transaction_id, is_subscription,
+            source, metadata,
             test_mode, created_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5,
@@ -4090,7 +4113,8 @@ pub fn create_transaction(conn: &Connection, input: &CreateTransaction) -> Resul
             ?10, ?11, ?12, ?13, ?14, ?15,
             ?16, ?17, ?18,
             ?19, ?20, ?21,
-            ?22, ?23
+            ?22, ?23,
+            ?24, ?25
         )",
         params![
             &id,
@@ -4114,6 +4138,8 @@ pub fn create_transaction(conn: &Connection, input: &CreateTransaction) -> Resul
             input.transaction_type.as_str(),
             &input.parent_transaction_id,
             if input.is_subscription { 1 } else { 0 },
+            &input.source,
+            &input.metadata,
             if input.test_mode { 1 } else { 0 },
             now,
         ],
@@ -4141,6 +4167,8 @@ pub fn create_transaction(conn: &Connection, input: &CreateTransaction) -> Resul
         transaction_type: input.transaction_type,
         parent_transaction_id: input.parent_transaction_id.clone(),
         is_subscription: input.is_subscription,
+        source: input.source.clone(),
+        metadata: input.metadata.clone(),
         test_mode: input.test_mode,
         created_at: now,
     })
@@ -4308,6 +4336,7 @@ pub fn get_transactions_by_org_paginated(
 }
 
 /// Get aggregate transaction statistics for an org within a date range.
+/// Returns stats grouped by currency to avoid mixing incompatible units.
 pub fn get_transaction_stats(
     conn: &Connection,
     org_id: &str,
@@ -4353,13 +4382,39 @@ pub fn get_transaction_stats(
     let where_clause = conditions.join(" AND ");
     let params_refs: Vec<&dyn ToSql> = params.iter().map(|p| p.as_ref()).collect();
 
-    let sql = format!(
+    // Query 1: Get revenue stats grouped by currency
+    let currency_sql = format!(
         "SELECT
+            currency,
             COALESCE(SUM(CASE WHEN transaction_type IN ('purchase', 'renewal') THEN net_cents ELSE 0 END), 0) as gross_revenue,
             COALESCE(SUM(CASE WHEN transaction_type = 'refund' THEN ABS(net_cents) ELSE 0 END), 0) as refunded,
             COALESCE(SUM(net_cents), 0) as net_revenue,
             COALESCE(SUM(CASE WHEN transaction_type IN ('purchase', 'renewal') THEN discount_cents ELSE 0 END), 0) as total_discount,
-            COALESCE(SUM(CASE WHEN transaction_type IN ('purchase', 'renewal') THEN tax_cents ELSE 0 END), 0) as total_tax,
+            COALESCE(SUM(CASE WHEN transaction_type IN ('purchase', 'renewal') THEN tax_cents ELSE 0 END), 0) as total_tax
+        FROM transactions
+        WHERE {}
+        GROUP BY currency
+        ORDER BY gross_revenue DESC",
+        where_clause
+    );
+
+    let mut stmt = conn.prepare(&currency_sql)?;
+    let by_currency: Vec<CurrencyStats> = stmt
+        .query_map(params_refs.as_slice(), |row| {
+            Ok(CurrencyStats {
+                currency: row.get(0)?,
+                gross_revenue_cents: row.get(1)?,
+                refunded_cents: row.get(2)?,
+                net_revenue_cents: row.get(3)?,
+                total_discount_cents: row.get(4)?,
+                total_tax_cents: row.get(5)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    // Query 2: Get total counts (safe to aggregate across currencies)
+    let counts_sql = format!(
+        "SELECT
             COUNT(CASE WHEN transaction_type = 'purchase' THEN 1 END) as purchase_count,
             COUNT(CASE WHEN transaction_type = 'renewal' THEN 1 END) as renewal_count,
             COUNT(CASE WHEN transaction_type = 'refund' THEN 1 END) as refund_count
@@ -4367,17 +4422,15 @@ pub fn get_transaction_stats(
         where_clause
     );
 
-    conn.query_row(&sql, params_refs.as_slice(), |row| {
-        Ok(TransactionStats {
-            gross_revenue_cents: row.get(0)?,
-            refunded_cents: row.get(1)?,
-            net_revenue_cents: row.get(2)?,
-            total_discount_cents: row.get(3)?,
-            total_tax_cents: row.get(4)?,
-            purchase_count: row.get(5)?,
-            renewal_count: row.get(6)?,
-            refund_count: row.get(7)?,
-        })
+    let (purchase_count, renewal_count, refund_count) =
+        conn.query_row(&counts_sql, params_refs.as_slice(), |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
+        })?;
+
+    Ok(TransactionStats {
+        by_currency,
+        purchase_count,
+        renewal_count,
+        refund_count,
     })
-    .map_err(Into::into)
 }

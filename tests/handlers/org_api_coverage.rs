@@ -144,6 +144,8 @@ mod license_filter_tests {
                     customer_country: Some("US".to_string()),
                     parent_transaction_id: None,
                     is_subscription: false,
+                    source: "payment".to_string(),
+                    metadata: None,
                     test_mode: false,
                 },
             )
@@ -186,6 +188,8 @@ mod license_filter_tests {
                     customer_country: Some("US".to_string()),
                     parent_transaction_id: None,
                     is_subscription: false,
+                    source: "payment".to_string(),
+                    metadata: None,
                     test_mode: false,
                 },
             )
@@ -814,6 +818,8 @@ mod transaction_tests {
             customer_country: Some("US".to_string()),
             parent_transaction_id: None,
             is_subscription: false,
+            source: "payment".to_string(),
+            metadata: None,
             test_mode,
         }
     }
@@ -953,11 +959,147 @@ mod transaction_tests {
             json["purchase_count"], 5,
             "Should count all 5 purchase transactions"
         );
+
+        // Stats are now grouped by currency
+        let by_currency = json["by_currency"].as_array().expect("by_currency should be array");
+        assert_eq!(by_currency.len(), 1, "Should have exactly one currency (usd)");
+
+        let usd_stats = &by_currency[0];
+        assert_eq!(usd_stats["currency"], "usd", "Currency should be usd");
         // net_revenue_cents = gross - refunds, for 5 purchases at 4999 cents each = 24995
         assert_eq!(
-            json["net_revenue_cents"], 24995,
+            usd_stats["net_revenue_cents"], 24995,
             "Net revenue should be 5 * $49.99 = $249.95 (in cents)"
         );
+    }
+
+    /// Test that transaction stats correctly group by currency.
+    ///
+    /// This prevents the bug where USD and EUR amounts were summed together,
+    /// producing meaningless totals like "15000 cents" for $100 + €50.
+    #[tokio::test]
+    async fn test_transaction_stats_group_by_currency() {
+        let (app, state) = org_app();
+        let master_key = test_master_key();
+
+        let org_id: String;
+        let project_id: String;
+        let api_key: String;
+
+        {
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&conn, "Test Org");
+            let (_user, _member, key) =
+                create_test_org_member(&mut conn, &org.id, "cfo@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&conn, &project.id, "Pro Plan", "pro");
+
+            // Create USD transactions
+            queries::create_transaction(
+                &conn,
+                &CreateTransaction {
+                    license_id: None,
+                    project_id: project.id.clone(),
+                    product_id: Some(product.id.clone()),
+                    org_id: org.id.clone(),
+                    payment_provider: "stripe".to_string(),
+                    provider_customer_id: None,
+                    provider_subscription_id: None,
+                    provider_order_id: "pi_usd_1".to_string(),
+                    currency: "usd".to_string(),
+                    subtotal_cents: 10000,
+                    discount_cents: 0,
+                    net_cents: 10000,
+                    tax_cents: 0,
+                    total_cents: 10000,
+                    discount_code: None,
+                    tax_inclusive: None,
+                    customer_country: Some("US".to_string()),
+                    transaction_type: TransactionType::Purchase,
+                    parent_transaction_id: None,
+                    is_subscription: false,
+                    source: "payment".to_string(),
+                    metadata: None,
+                    test_mode: false,
+                },
+            )
+            .unwrap();
+
+            // Create EUR transactions
+            queries::create_transaction(
+                &conn,
+                &CreateTransaction {
+                    license_id: None,
+                    project_id: project.id.clone(),
+                    product_id: Some(product.id.clone()),
+                    org_id: org.id.clone(),
+                    payment_provider: "stripe".to_string(),
+                    provider_customer_id: None,
+                    provider_subscription_id: None,
+                    provider_order_id: "pi_eur_1".to_string(),
+                    currency: "eur".to_string(),
+                    subtotal_cents: 5000,
+                    discount_cents: 0,
+                    net_cents: 5000,
+                    tax_cents: 0,
+                    total_cents: 5000,
+                    discount_code: None,
+                    tax_inclusive: None,
+                    customer_country: Some("DE".to_string()),
+                    transaction_type: TransactionType::Purchase,
+                    parent_transaction_id: None,
+                    is_subscription: false,
+                    source: "payment".to_string(),
+                    metadata: None,
+                    test_mode: false,
+                },
+            )
+            .unwrap();
+
+            org_id = org.id;
+            project_id = project.id;
+            api_key = key;
+        }
+
+        // Query transaction stats
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/orgs/{}/projects/{}/transactions/stats",
+                        org_id, project_id
+                    ))
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+
+        // Total counts span all currencies
+        assert_eq!(json["purchase_count"], 2, "Should count both purchases");
+
+        // Revenue is grouped by currency - NOT summed together
+        let by_currency = json["by_currency"].as_array().expect("by_currency should be array");
+        assert_eq!(by_currency.len(), 2, "Should have two currencies (usd, eur)");
+
+        // Find each currency's stats (order is by gross_revenue DESC)
+        let usd_stats = by_currency.iter().find(|s| s["currency"] == "usd").expect("should have usd");
+        let eur_stats = by_currency.iter().find(|s| s["currency"] == "eur").expect("should have eur");
+
+        assert_eq!(usd_stats["net_revenue_cents"], 10000, "USD should be $100.00");
+        assert_eq!(eur_stats["net_revenue_cents"], 5000, "EUR should be €50.00");
+
+        // The old bug would have returned a single sum of 15000 "cents" which is meaningless
+        // Now we correctly separate them by currency
     }
 
     /// Test filtering transactions by test_mode.

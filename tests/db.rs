@@ -20,3 +20,6 @@ mod api_key_atomicity;
 
 #[path = "db/service_config_inheritance.rs"]
 mod service_config_inheritance;
+
+#[path = "db/bulk_license_atomicity.rs"]
+mod bulk_license_atomicity;

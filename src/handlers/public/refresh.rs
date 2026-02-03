@@ -8,7 +8,7 @@ use crate::error::{AppError, Result};
 use crate::extractors::Json;
 use crate::jwt::{self, LicenseClaims};
 use crate::models::{ActorType, AuditAction, AuditLogNames};
-use crate::util::{AuditLogBuilder, LicenseExpirations, extract_bearer_token};
+use crate::util::{AuditLogBuilder, extract_bearer_token};
 
 /// Validate that a string is a valid UUID format.
 /// This is a cheap check to reject garbage before hitting the database.
@@ -53,8 +53,10 @@ pub async fn refresh_token(
         queries::get_project_by_id(&conn, &product.project_id)?.ok_or(AppError::Unauthorized)?;
 
     // Now verify the token signature (allowing expired tokens)
-    let verified = jwt::verify_token_allow_expired(token, &project.public_key)
-        .map_err(|_| AppError::Unauthorized)?;
+    let verified = jwt::verify_token_allow_expired(token, &project.public_key).map_err(|e| {
+        tracing::debug!("JWT signature verification failed during refresh: {}", e);
+        AppError::Unauthorized
+    })?;
 
     let jti = verified.jwt_id.ok_or(AppError::Unauthorized)?;
 
@@ -87,24 +89,13 @@ pub async fn refresh_token(
         return Err(AppError::Unauthorized);
     }
 
-    // Update last_seen_at
-    queries::update_device_last_seen(&conn, &device.id)?;
+    // Update last_seen_at (only if stale)
+    queries::update_device_last_seen(&conn, &device.id, device.last_seen_at)?;
 
-    // Calculate fresh expirations from current database values
-    let now = Utc::now().timestamp();
-    let exps = LicenseExpirations::from_product(&product, device.activated_at);
-
-    // Check if license_exp has passed
-    if let Some(exp) = exps.license_exp
-        && now > exp
-    {
-        return Err(AppError::Unauthorized);
-    }
-
-    // Build new claims with updated expirations
+    // Build new claims with stored expirations
     let claims = LicenseClaims {
-        license_exp: exps.license_exp,
-        updates_exp: exps.updates_exp,
+        license_exp: license.expires_at,
+        updates_exp: license.updates_expires_at,
         tier: product.tier.clone(),
         features: product.features.clone(),
         device_id: device.device_id.clone(),

@@ -191,10 +191,10 @@ async fn cannot_impersonate_member_from_different_org() {
         .await
         .unwrap();
 
-    // User is not a member of org2, so should get NOT_FOUND
+    // User is not a member of org2 - return FORBIDDEN to avoid leaking membership info
     assert_eq!(
         response.status(),
-        StatusCode::NOT_FOUND,
+        StatusCode::FORBIDDEN,
         "impersonating member of org1 should not grant access to org2"
     );
 }
@@ -242,7 +242,7 @@ async fn impersonation_respects_member_permissions() {
 }
 
 #[tokio::test]
-async fn impersonating_nonexistent_member_returns_not_found() {
+async fn impersonating_nonexistent_member_returns_forbidden() {
     let (app, state) = org_app();
     let mut conn = state.db.get().unwrap();
 
@@ -264,10 +264,11 @@ async fn impersonating_nonexistent_member_returns_not_found() {
         .await
         .unwrap();
 
+    // Return FORBIDDEN (not NOT_FOUND) to avoid leaking membership information
     assert_eq!(
         response.status(),
-        StatusCode::NOT_FOUND,
-        "impersonating nonexistent user should return not found"
+        StatusCode::FORBIDDEN,
+        "impersonating nonexistent user should return forbidden"
     );
 }
 
@@ -346,9 +347,10 @@ async fn test_operator_cannot_impersonate_deleted_member() {
         .unwrap();
 
     // Should fail - deleted members cannot be impersonated
+    // Return FORBIDDEN (not NOT_FOUND) to avoid leaking membership information
     assert_eq!(
         response.status(),
-        StatusCode::NOT_FOUND,
+        StatusCode::FORBIDDEN,
         "soft-deleted members should not be impersonatable"
     );
 }
@@ -426,9 +428,10 @@ async fn test_operator_cannot_impersonate_user_not_in_any_org() {
         .unwrap();
 
     // Should fail - user is not a member of the org
+    // Return FORBIDDEN (not NOT_FOUND) to avoid leaking membership information
     assert_eq!(
         response.status(),
-        StatusCode::NOT_FOUND,
+        StatusCode::FORBIDDEN,
         "users without org membership should not be impersonatable"
     );
 }
@@ -497,11 +500,11 @@ async fn test_impersonation_with_invalid_user_id_format() {
         .await
         .unwrap();
 
-    // Should return NOT_FOUND (user doesn't exist) rather than crash
+    // Should return FORBIDDEN (not NOT_FOUND) to avoid leaking membership info
     assert_eq!(
         response.status(),
-        StatusCode::NOT_FOUND,
-        "invalid user_id format in X-On-Behalf-Of should return not found gracefully"
+        StatusCode::FORBIDDEN,
+        "invalid user_id format in X-On-Behalf-Of should return forbidden gracefully"
     );
 }
 
@@ -779,9 +782,10 @@ async fn test_cannot_impersonate_member_then_access_different_org() {
         .unwrap();
 
     // Should fail - the impersonated user is not a member of org_b
+    // Return FORBIDDEN (not NOT_FOUND) to avoid leaking membership information
     assert_eq!(
         response.status(),
-        StatusCode::NOT_FOUND,
+        StatusCode::FORBIDDEN,
         "impersonating org_a member should not grant access to org_b"
     );
 }
@@ -819,10 +823,10 @@ async fn test_impersonation_requires_member_in_requested_org() {
         .await
         .unwrap();
 
-    // Should return NOT_FOUND - member is not in org_b
+    // Return FORBIDDEN (not NOT_FOUND) to avoid leaking membership information
     assert_eq!(
         response.status(),
-        StatusCode::NOT_FOUND,
+        StatusCode::FORBIDDEN,
         "impersonation target must be a member of the requested org"
     );
 }
@@ -863,11 +867,12 @@ async fn test_synthetic_access_blocked_when_impersonation_header_present() {
         .await
         .unwrap();
 
-    // Should be NOT_FOUND (impersonation failed) not OK (synthetic access)
+    // Should be FORBIDDEN (impersonation failed) not OK (synthetic access)
     // This proves impersonation path takes precedence and doesn't fall through
+    // Using FORBIDDEN instead of NOT_FOUND to avoid leaking membership info
     assert_eq!(
         response.status(),
-        StatusCode::NOT_FOUND,
+        StatusCode::FORBIDDEN,
         "failed impersonation should not fall through to synthetic access"
     );
 }
@@ -944,5 +949,205 @@ async fn test_synthetic_access_grants_owner_permissions() {
         response.status(),
         StatusCode::OK,
         "synthetic access should grant owner-level permissions for admin+ operators"
+    );
+}
+
+// ========================================================================
+// Self-Role Escalation Prevention Tests
+// ========================================================================
+
+/// An operator who is also an org member cannot use impersonation to escalate
+/// their own org role. This is a critical security boundary.
+///
+/// Attack scenario:
+/// 1. Operator (user_id: "op123") has "member" role in org
+/// 2. Org has an owner (user_id: "owner456")
+/// 3. Operator impersonates owner: X-On-Behalf-Of: owner456
+/// 4. Operator calls PUT /orgs/{org}/members/op123 with {"role": "owner"}
+/// 5. Without proper check, this would escalate operator's own role
+#[tokio::test]
+async fn test_operator_cannot_escalate_own_role_via_impersonation() {
+    let (app, state) = org_app();
+    let mut conn = state.db.get().unwrap();
+
+    // Create an admin operator who is ALSO an org member with limited role
+    let (op_user, operator_key) =
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
+
+    // Create an org
+    let org = create_test_org(&mut conn, "Test Org");
+
+    // Add the operator as an org member with "member" role (not owner)
+    let member_input = paycheck::models::CreateOrgMember {
+        user_id: op_user.id.clone(),
+        role: OrgMemberRole::Member,
+    };
+    paycheck::db::queries::create_org_member(&mut conn, &org.id, &member_input)
+        .expect("Failed to create org member");
+
+    // Create another user who IS the org owner
+    let (owner_user, _owner_member, _owner_key) =
+        create_test_org_member(&mut conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
+
+    // Attack: Impersonate the owner and try to change operator's own role to owner
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/orgs/{}/members/{}", org.id, op_user.id))
+                .header("Authorization", format!("Bearer {}", operator_key))
+                .header("X-On-Behalf-Of", &owner_user.id) // Impersonate the owner
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{"role": "owner"}"#)) // Try to escalate self to owner
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // This MUST fail - operators cannot escalate their own role via impersonation
+    assert_eq!(
+        response.status(),
+        StatusCode::BAD_REQUEST,
+        "operator should not be able to escalate their own role via impersonation"
+    );
+}
+
+/// Even when not impersonating, the "cannot change own role" check should work.
+/// This verifies the base case that the check is actually functioning.
+#[tokio::test]
+async fn test_owner_cannot_change_own_role_directly() {
+    let (app, state) = org_app();
+    let mut conn = state.db.get().unwrap();
+
+    // Create an org with an owner
+    let org = create_test_org(&mut conn, "Test Org");
+    let (_owner_user, _owner_member, owner_key) =
+        create_test_org_member(&mut conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
+
+    // Owner tries to change their own role
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/orgs/{}/members/{}", org.id, _owner_user.id))
+                .header("Authorization", format!("Bearer {}", owner_key))
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{"role": "member"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Should fail - can't change your own role
+    assert_eq!(
+        response.status(),
+        StatusCode::BAD_REQUEST,
+        "owner should not be able to change their own role"
+    );
+}
+
+// ========================================================================
+// Information Leakage Prevention Tests
+// ========================================================================
+
+/// Failed impersonation should not reveal whether a user is a member of an org.
+///
+/// Security issue: If we return different status codes for "user exists but not in org"
+/// vs "user in org", an operator could probe org membership by checking response codes.
+///
+/// Fix: Return 403 Forbidden for all impersonation failures (not 404 Not Found).
+/// This doesn't reveal whether the user exists in the org or not.
+#[tokio::test]
+async fn test_impersonation_failure_does_not_leak_membership_status() {
+    use tower::Service;
+
+    let (mut app, state) = org_app();
+    let mut conn = state.db.get().unwrap();
+
+    // Create an admin operator
+    let (_user, operator_key) =
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
+
+    // Create two orgs
+    let org_a = create_test_org(&mut conn, "Org A");
+    let org_b = create_test_org(&mut conn, "Org B");
+
+    // Create a member in org_a only
+    let (member_user, _member, _member_key) =
+        create_test_org_member(&mut conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
+
+    // Create a user who is not a member of any org
+    let orphan_user = create_test_user(&mut conn, "orphan@test.com", "Orphan User");
+
+    // Case 1: User exists but is not in org_b
+    let response1 = app
+        .call(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/orgs/{}/members", org_b.id))
+                .header("Authorization", format!("Bearer {}", operator_key))
+                .header("X-On-Behalf-Of", &member_user.id)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Case 2: User exists but has no org memberships at all
+    let response2 = app
+        .call(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/orgs/{}/members", org_b.id))
+                .header("Authorization", format!("Bearer {}", operator_key))
+                .header("X-On-Behalf-Of", &orphan_user.id)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Case 3: User ID doesn't exist at all
+    let response3 = app
+        .call(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/orgs/{}/members", org_b.id))
+                .header("Authorization", format!("Bearer {}", operator_key))
+                .header("X-On-Behalf-Of", "nonexistent-user-id")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // All three cases should return the SAME status code (403 Forbidden)
+    // This prevents information leakage about org membership
+    assert_eq!(
+        response1.status(),
+        StatusCode::FORBIDDEN,
+        "impersonating user not in target org should return 403 (not 404)"
+    );
+    assert_eq!(
+        response2.status(),
+        StatusCode::FORBIDDEN,
+        "impersonating user with no org memberships should return 403 (not 404)"
+    );
+    assert_eq!(
+        response3.status(),
+        StatusCode::FORBIDDEN,
+        "impersonating nonexistent user should return 403 (not 404)"
+    );
+
+    // Verify all responses are identical (same status code prevents oracle)
+    assert_eq!(
+        response1.status(),
+        response2.status(),
+        "response for 'user in different org' should match 'user with no orgs'"
+    );
+    assert_eq!(
+        response2.status(),
+        response3.status(),
+        "response for 'user with no orgs' should match 'nonexistent user'"
     );
 }

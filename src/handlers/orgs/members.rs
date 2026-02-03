@@ -102,9 +102,19 @@ pub async fn update_org_member(
     let conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
-    // Prevent changing your own role
-    if path.user_id == ctx.member.user_id && input.role.is_some() {
-        return Err(AppError::BadRequest(msg::CANNOT_CHANGE_OWN_ROLE.into()));
+    // Prevent changing your own role (or the impersonator's role via impersonation)
+    if input.role.is_some() {
+        // Check 1: The acting member (impersonated or self) can't change their own role
+        if path.user_id == ctx.member.user_id {
+            return Err(AppError::BadRequest(msg::CANNOT_CHANGE_OWN_ROLE.into()));
+        }
+        // Check 2: When impersonating, the operator can't change their own role either
+        // This prevents privilege escalation via impersonation
+        if let Some(ref impersonator) = ctx.impersonator {
+            if path.user_id == impersonator.user_id {
+                return Err(AppError::BadRequest(msg::CANNOT_CHANGE_OWN_ROLE.into()));
+            }
+        }
     }
 
     let mut member =
@@ -189,14 +199,14 @@ pub async fn restore_org_member(
 ) -> Result<Json<OrgMemberWithUser>> {
     ctx.require_owner()?;
 
-    let conn = state.db.get()?;
+    let mut conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     let existing =
         queries::get_deleted_org_member_by_user_and_org(&conn, &path.user_id, &path.org_id)?
             .or_not_found(msg::DELETED_MEMBER_NOT_FOUND)?;
 
-    queries::restore_org_member(&conn, &existing.id, input.force)?;
+    queries::restore_org_member(&mut conn, &existing.id, input.force)?;
 
     // Get user info for audit log
     let user = queries::get_user_by_id(&conn, &path.user_id)?

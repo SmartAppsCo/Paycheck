@@ -2,7 +2,7 @@
 
 use crate::device::{generate_uuid, get_machine_id};
 use crate::error::{PaycheckError, Result, map_status_to_error_code};
-use crate::jwt::{decode_token, is_jwt_expired, is_license_expired, verify_token};
+use crate::jwt::{decode_token, is_jwt_expired, is_license_expired, validate_issuer, verify_token};
 use crate::storage::{FileStorage, StorageAdapter, keys};
 use crate::types::*;
 use sha2::{Sha256, Digest};
@@ -364,6 +364,15 @@ impl Paycheck {
             }
         };
 
+        // Validate issuer
+        if !validate_issuer(&claims) {
+            return OfflineValidateResult {
+                valid: false,
+                claims: Some(claims),
+                reason: Some("Invalid issuer".to_string()),
+            };
+        }
+
         // Check device ID matches
         if claims.device_id != self.device_id {
             return OfflineValidateResult {
@@ -413,12 +422,12 @@ impl Paycheck {
         #[derive(Serialize)]
         struct ValidateRequest {
             public_key: String,
-            jti: String,
+            token: String,
         }
 
         let body = ValidateRequest {
             public_key: self.public_key.clone(),
-            jti: claims.jti,
+            token: token.clone(),
         };
 
         match self.post::<ValidateResponse, _>("/validate", &body) {
@@ -494,6 +503,17 @@ impl Paycheck {
             }
         };
 
+        // Validate issuer
+        if !validate_issuer(&claims) {
+            return SyncResult {
+                valid: false,
+                claims: Some(claims),
+                synced: false,
+                offline: true,
+                reason: Some("Invalid issuer".to_string()),
+            };
+        }
+
         // Check device ID matches
         if claims.device_id != self.device_id {
             return SyncResult {
@@ -509,12 +529,12 @@ impl Paycheck {
         #[derive(Serialize)]
         struct ValidateRequest {
             public_key: String,
-            jti: String,
+            token: String,
         }
 
         let body = ValidateRequest {
             public_key: self.public_key.clone(),
-            jti: claims.jti.clone(),
+            token: token.clone(),
         };
 
         match self.post::<ValidateResponse, _>("/validate", &body) {
@@ -616,6 +636,15 @@ impl Paycheck {
                 };
             }
         };
+
+        // Validate issuer
+        if !validate_issuer(&claims) {
+            return ImportResult {
+                valid: false,
+                claims: Some(claims),
+                reason: Some("Invalid issuer".to_string()),
+            };
+        }
 
         // Check device ID matches
         if claims.device_id != self.device_id {

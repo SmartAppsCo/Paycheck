@@ -1067,6 +1067,48 @@ mod operator_isolation {
             "View-only operators should not have synthetic access"
         );
     }
+
+    /// Operator synthetic access to non-existent org should return 404.
+    /// This prevents org ID enumeration and audit log pollution.
+    ///
+    /// Security issue: Without org existence check, operators can probe for valid
+    /// org IDs (real orgs return data, fake orgs return empty lists) and audit logs
+    /// get polluted with entries for non-existent orgs.
+    #[tokio::test]
+    async fn operator_synthetic_access_nonexistent_org_returns_404() {
+        let (app, state) = org_app();
+        let mut conn = state.db.get().unwrap();
+
+        // Create an admin operator (has synthetic access capability)
+        let (_op_user, operator_key) =
+            create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
+
+        // Use a fake org ID that doesn't exist
+        let fake_org_id = "nonexistent-org-00000000-0000-0000-0000-000000000000";
+
+        // Try to list members of non-existent org
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/orgs/{}/members", fake_org_id))
+                    .header("Authorization", format!("Bearer {}", operator_key))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Should return 404, not 200 with empty list
+        // This prevents:
+        // 1. Org ID enumeration (different response for real vs fake orgs)
+        // 2. Audit log pollution (logging actions for non-existent orgs)
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "Operator access to non-existent org should return 404, not succeed with empty data"
+        );
+    }
 }
 
 // ============================================================================

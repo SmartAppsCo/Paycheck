@@ -143,6 +143,17 @@ pub fn has_feature(claims: &LicenseClaims, feature: &str) -> bool {
     claims.features.iter().any(|f| f == feature)
 }
 
+/// Expected issuer for Paycheck JWTs
+pub const EXPECTED_ISSUER: &str = "paycheck";
+
+/// Validate the JWT issuer claim.
+///
+/// Returns `true` if the issuer is "paycheck", `false` otherwise.
+/// This should be called after decoding to ensure the JWT was issued by Paycheck.
+pub fn validate_issuer(claims: &LicenseClaims) -> bool {
+    claims.iss == EXPECTED_ISSUER
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,5 +170,34 @@ mod tests {
         assert_eq!(claims.tier, "pro");
         assert!(has_feature(&claims, "export"));
         assert!(!has_feature(&claims, "nonexistent"));
+    }
+
+    #[test]
+    fn test_validate_issuer_rejects_wrong_issuer() {
+        // Token with wrong issuer: "wrong-issuer" instead of "paycheck"
+        // Header: {"alg":"EdDSA","typ":"JWT"}
+        // Payload: {"iss":"wrong-issuer","sub":"license-123","aud":"test.com","jti":"jti-123","iat":1704067200,"exp":1704070800,"license_exp":null,"updates_exp":null,"tier":"pro","features":["export"],"device_id":"device-123","device_type":"uuid","product_id":"product-123"}
+        let wrong_issuer_token = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ3cm9uZy1pc3N1ZXIiLCJzdWIiOiJsaWNlbnNlLTEyMyIsImF1ZCI6InRlc3QuY29tIiwianRpIjoianRpLTEyMyIsImlhdCI6MTcwNDA2NzIwMCwiZXhwIjoxNzA0MDcwODAwLCJsaWNlbnNlX2V4cCI6bnVsbCwidXBkYXRlc19leHAiOm51bGwsInRpZXIiOiJwcm8iLCJmZWF0dXJlcyI6WyJleHBvcnQiXSwiZGV2aWNlX2lkIjoiZGV2aWNlLTEyMyIsImRldmljZV90eXBlIjoidXVpZCIsInByb2R1Y3RfaWQiOiJwcm9kdWN0LTEyMyJ9.signature";
+
+        // decode_token should work (it doesn't validate issuer)
+        let claims = decode_token(wrong_issuer_token).unwrap();
+        assert_eq!(claims.iss, "wrong-issuer");
+
+        // validate_issuer should reject it
+        assert!(
+            !validate_issuer(&claims),
+            "validate_issuer should reject wrong issuer"
+        );
+    }
+
+    #[test]
+    fn test_validate_issuer_accepts_correct_issuer() {
+        let token = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJwYXljaGVjayIsInN1YiI6ImxpY2Vuc2UtMTIzIiwiYXVkIjoidGVzdC5jb20iLCJqdGkiOiJqdGktMTIzIiwiaWF0IjoxNzA0MDY3MjAwLCJleHAiOjE3MDQwNzA4MDAsImxpY2Vuc2VfZXhwIjpudWxsLCJ1cGRhdGVzX2V4cCI6bnVsbCwidGllciI6InBybyIsImZlYXR1cmVzIjpbImV4cG9ydCJdLCJkZXZpY2VfaWQiOiJkZXZpY2UtMTIzIiwiZGV2aWNlX3R5cGUiOiJ1dWlkIiwicHJvZHVjdF9pZCI6InByb2R1Y3QtMTIzIn0.signature";
+
+        let claims = decode_token(token).unwrap();
+        assert!(
+            validate_issuer(&claims),
+            "validate_issuer should accept 'paycheck' issuer"
+        );
     }
 }

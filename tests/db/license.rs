@@ -137,6 +137,8 @@ fn test_create_transaction_with_license() {
         transaction_type: TransactionType::Purchase,
         parent_transaction_id: None,
         is_subscription: true,
+        source: "payment".to_string(),
+        metadata: None,
         test_mode: false,
     };
     let tx = queries::create_transaction(&mut conn, &tx_input)
@@ -262,6 +264,8 @@ fn test_get_license_by_subscription() {
         transaction_type: TransactionType::Purchase,
         parent_transaction_id: None,
         is_subscription: true,
+        source: "payment".to_string(),
+        metadata: None,
         test_mode: false,
     };
     queries::create_transaction(&mut conn, &tx_input).expect("Failed to create transaction");
@@ -316,6 +320,8 @@ fn test_get_license_by_subscription_wrong_provider() {
         transaction_type: TransactionType::Purchase,
         parent_transaction_id: None,
         is_subscription: true,
+        source: "payment".to_string(),
+        metadata: None,
         test_mode: false,
     };
     queries::create_transaction(&mut conn, &tx_input).expect("Failed to create transaction");
@@ -481,6 +487,187 @@ fn test_extend_license_expiration() {
         updated.updates_expires_at,
         Some(new_exp),
         "license updates_expires_at should be extended to new date"
+    );
+}
+
+// ============ License Update Tests ============
+
+/// Tests that update_license correctly handles partial updates.
+///
+/// Bug: The old implementation overwrote all fields unconditionally - passing None
+/// would set columns to NULL, wiping data. This test ensures that:
+/// - None = don't change the field (skip)
+/// - Some(None) = explicitly set to NULL
+/// - Some(Some(value)) = set to value
+#[test]
+fn test_update_license_partial_update_preserves_other_fields() {
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
+
+    // Create license with all fields populated
+    let original_email_hash = test_email_hasher().hash("original@example.com");
+    let original_customer_id = "cust_original".to_string();
+    let original_expires_at = future_timestamp(ONE_YEAR);
+    let original_updates_expires_at = future_timestamp(ONE_MONTH);
+
+    let input = CreateLicense {
+        email_hash: Some(original_email_hash.clone()),
+        customer_id: Some(original_customer_id.clone()),
+        expires_at: Some(original_expires_at),
+        updates_expires_at: Some(original_updates_expires_at),
+    };
+    let license =
+        queries::create_license(&mut conn, &project.id, &product.id, &input).expect("Create failed");
+
+    // Update ONLY the email_hash, leaving other fields unchanged
+    let new_email_hash = test_email_hasher().hash("new@example.com");
+    let update = UpdateLicense {
+        email_hash: Some(new_email_hash.clone()),
+        customer_id: None,         // Don't change
+        expires_at: None,          // Don't change
+        updates_expires_at: None,  // Don't change
+    };
+    let result = queries::update_license(&conn, &license.id, &update).expect("Update failed");
+    assert!(result, "update should return true when license exists");
+
+    // Verify: email_hash changed, all other fields preserved
+    let updated = queries::get_license_by_id(&conn, &license.id)
+        .expect("Query failed")
+        .expect("License not found");
+
+    assert_eq!(
+        updated.email_hash,
+        Some(new_email_hash),
+        "email_hash should be updated to new value"
+    );
+    assert_eq!(
+        updated.customer_id,
+        Some(original_customer_id),
+        "customer_id should be PRESERVED when update passes None"
+    );
+    assert_eq!(
+        updated.expires_at,
+        Some(original_expires_at),
+        "expires_at should be PRESERVED when update passes None"
+    );
+    assert_eq!(
+        updated.updates_expires_at,
+        Some(original_updates_expires_at),
+        "updates_expires_at should be PRESERVED when update passes None"
+    );
+}
+
+/// Tests that update_license can explicitly set fields to NULL using Some(None).
+#[test]
+fn test_update_license_explicit_null_sets_field_to_null() {
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
+
+    // Create license with expiration dates set
+    let input = CreateLicense {
+        email_hash: Some(test_email_hasher().hash("user@example.com")),
+        customer_id: Some("cust_123".to_string()),
+        expires_at: Some(future_timestamp(ONE_YEAR)),
+        updates_expires_at: Some(future_timestamp(ONE_MONTH)),
+    };
+    let license =
+        queries::create_license(&mut conn, &project.id, &product.id, &input).expect("Create failed");
+
+    // Explicitly set expires_at to NULL (convert to perpetual license)
+    // while preserving other fields
+    let update = UpdateLicense {
+        email_hash: None,                    // Don't change
+        customer_id: None,                   // Don't change
+        expires_at: Some(None),              // Explicitly set to NULL (perpetual)
+        updates_expires_at: None,            // Don't change
+    };
+    queries::update_license(&conn, &license.id, &update).expect("Update failed");
+
+    let updated = queries::get_license_by_id(&conn, &license.id)
+        .expect("Query failed")
+        .expect("License not found");
+
+    assert!(
+        updated.expires_at.is_none(),
+        "expires_at should be NULL after explicit Some(None)"
+    );
+    assert!(
+        updated.updates_expires_at.is_some(),
+        "updates_expires_at should be PRESERVED (not wiped)"
+    );
+    assert!(
+        updated.customer_id.is_some(),
+        "customer_id should be PRESERVED (not wiped)"
+    );
+}
+
+/// Tests that update_license returns false for non-existent licenses.
+#[test]
+fn test_update_license_nonexistent_returns_false() {
+    let conn = setup_test_db();
+
+    let update = UpdateLicense {
+        email_hash: Some("new_hash".to_string()),
+        customer_id: None,
+        expires_at: None,
+        updates_expires_at: None,
+    };
+    let result =
+        queries::update_license(&conn, "nonexistent_license_id", &update).expect("Query failed");
+
+    assert!(
+        !result,
+        "update_license should return false for non-existent license"
+    );
+}
+
+/// Tests that update_license ignores soft-deleted licenses.
+#[test]
+fn test_update_license_ignores_soft_deleted() {
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
+    let license = create_test_license(
+        &mut conn,
+        &project.id,
+        &product.id,
+        Some(future_timestamp(ONE_YEAR)),
+    );
+
+    let original_email_hash = license.email_hash.clone();
+
+    // Soft delete the license
+    queries::soft_delete_license(&mut conn, &license.id).expect("Soft delete failed");
+
+    // Try to update the soft-deleted license
+    let update = UpdateLicense {
+        email_hash: Some("new_hash".to_string()),
+        customer_id: None,
+        expires_at: None,
+        updates_expires_at: None,
+    };
+    let result = queries::update_license(&conn, &license.id, &update).expect("Query failed");
+
+    assert!(
+        !result,
+        "update_license should return false for soft-deleted license"
+    );
+
+    // Verify the deleted license was not modified
+    let deleted_license = queries::get_deleted_license_by_id(&conn, &license.id)
+        .expect("Query failed")
+        .expect("Deleted license should exist");
+    assert_eq!(
+        deleted_license.email_hash, original_email_hash,
+        "soft-deleted license should not have been modified"
     );
 }
 

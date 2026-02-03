@@ -131,8 +131,14 @@ impl ServiceConfig {
     pub fn decrypt_stripe_config(&self, master_key: &MasterKey) -> Result<StripeConfig> {
         debug_assert_eq!(self.provider, ServiceProvider::Stripe);
         let decrypted = master_key.decrypt_private_key(&self.org_id, &self.config_encrypted)?;
-        let json = String::from_utf8(decrypted)
-            .map_err(|_| AppError::Internal("Invalid UTF-8 in Stripe config".into()))?;
+        let json = String::from_utf8(decrypted).map_err(|e| {
+            tracing::error!(
+                "Corrupted Stripe config for org {}: invalid UTF-8 after decryption: {}",
+                self.org_id,
+                e
+            );
+            AppError::Internal("Invalid UTF-8 in Stripe config".into())
+        })?;
         let config: StripeConfig = serde_json::from_str(&json)?;
         Ok(config)
     }
@@ -141,8 +147,14 @@ impl ServiceConfig {
     pub fn decrypt_ls_config(&self, master_key: &MasterKey) -> Result<LemonSqueezyConfig> {
         debug_assert_eq!(self.provider, ServiceProvider::LemonSqueezy);
         let decrypted = master_key.decrypt_private_key(&self.org_id, &self.config_encrypted)?;
-        let json = String::from_utf8(decrypted)
-            .map_err(|_| AppError::Internal("Invalid UTF-8 in LemonSqueezy config".into()))?;
+        let json = String::from_utf8(decrypted).map_err(|e| {
+            tracing::error!(
+                "Corrupted LemonSqueezy config for org {}: invalid UTF-8 after decryption: {}",
+                self.org_id,
+                e
+            );
+            AppError::Internal("Invalid UTF-8 in LemonSqueezy config".into())
+        })?;
         let config: LemonSqueezyConfig = serde_json::from_str(&json)?;
         Ok(config)
     }
@@ -151,8 +163,14 @@ impl ServiceConfig {
     pub fn decrypt_resend_api_key(&self, master_key: &MasterKey) -> Result<String> {
         debug_assert_eq!(self.provider, ServiceProvider::Resend);
         let decrypted = master_key.decrypt_private_key(&self.org_id, &self.config_encrypted)?;
-        let api_key = String::from_utf8(decrypted)
-            .map_err(|_| AppError::Internal("Invalid UTF-8 in Resend API key".into()))?;
+        let api_key = String::from_utf8(decrypted).map_err(|e| {
+            tracing::error!(
+                "Corrupted Resend API key for org {}: invalid UTF-8 after decryption: {}",
+                self.org_id,
+                e
+            );
+            AppError::Internal("Invalid UTF-8 in Resend API key".into())
+        })?;
         Ok(api_key)
     }
 }

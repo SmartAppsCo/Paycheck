@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use hmac::{Hmac, Mac};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -97,7 +99,10 @@ pub struct LemonSqueezyClient {
 impl LemonSqueezyClient {
     pub fn new(config: &LemonSqueezyConfig) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .expect("failed to build HTTP client"),
             api_key: config.api_key.clone(),
             store_id: config.store_id.clone(),
             webhook_secret: config.webhook_secret.clone(),
@@ -175,8 +180,10 @@ impl LemonSqueezyClient {
     }
 
     pub fn verify_webhook_signature(&self, payload: &[u8], signature: &str) -> Result<bool> {
-        let mut mac = HmacSha256::new_from_slice(self.webhook_secret.as_bytes())
-            .map_err(|_| AppError::Internal(msg::INVALID_WEBHOOK_SECRET.into()))?;
+        let mut mac = HmacSha256::new_from_slice(self.webhook_secret.as_bytes()).map_err(|e| {
+            tracing::error!("Invalid LemonSqueezy webhook secret configuration: {}", e);
+            AppError::Internal(msg::INVALID_WEBHOOK_SECRET.into())
+        })?;
         mac.update(payload);
         let expected = hex::encode(mac.finalize().into_bytes());
 
@@ -268,6 +275,8 @@ pub struct LemonSqueezySubscriptionInvoiceAttributes {
     pub currency: Option<String>,
     /// Subtotal before tax (in cents)
     pub subtotal: Option<i64>,
+    /// Total discount amount (in cents) - for recurring coupons
+    pub discount_total: Option<i64>,
     /// Tax amount (in cents)
     pub tax: Option<i64>,
     /// Final total amount (in cents)
@@ -307,6 +316,25 @@ pub struct LemonSqueezyRefundAttributes {
     pub currency: String,
     /// Refund status
     pub status: String, // "succeeded", "pending", etc.
+    /// Test mode indicator
+    pub test_mode: Option<bool>,
+}
+
+// ============ subscription_payment_refunded ============
+
+/// Attributes for subscription invoice refund events.
+/// LemonSqueezy sends this when a subscription payment is refunded.
+/// The invoice ID (data.id) matches the ID stored from subscription_payment_success.
+#[derive(Debug, Deserialize)]
+pub struct LemonSqueezySubscriptionInvoiceRefundAttributes {
+    pub subscription_id: i64,
+    pub store_id: i64,
+    /// Refund status - "refunded" when complete
+    pub status: String,
+    /// Currency code (e.g., "USD", "EUR")
+    pub currency: Option<String>,
+    /// Total amount refunded (in cents)
+    pub total: Option<i64>,
     /// Test mode indicator
     pub test_mode: Option<bool>,
 }

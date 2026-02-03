@@ -115,6 +115,10 @@ pub struct Config {
     /// When set, Paycheck emits events for emails sent and transactions created.
     /// Set via PAYCHECK_METERING_WEBHOOK_URL.
     pub metering_webhook_url: Option<String>,
+    /// Maximum request body size in bytes.
+    /// Protects against memory exhaustion from large payloads.
+    /// Set via PAYCHECK_MAX_BODY_SIZE. Default: 1MB.
+    pub max_body_size: usize,
 }
 
 /// Check that a file has secure permissions (owner read-only, no write, no group/other access).
@@ -336,6 +340,12 @@ impl Config {
         // Optional metering webhook URL for usage tracking
         let metering_webhook_url = env::var("PAYCHECK_METERING_WEBHOOK_URL").ok();
 
+        // Maximum request body size (default 1MB)
+        let max_body_size: usize = env::var("PAYCHECK_MAX_BODY_SIZE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1024 * 1024); // 1MB default
+
         Self {
             host,
             port,
@@ -359,6 +369,7 @@ impl Config {
             trusted_issuers,
             migration_backup_count,
             metering_webhook_url,
+            max_body_size,
         }
     }
 
@@ -390,6 +401,7 @@ impl Config {
             .allow_headers([
                 HeaderName::from_static("authorization"),
                 HeaderName::from_static("content-type"),
+                HeaderName::from_static("x-on-behalf-of"),
             ])
             .allow_credentials(true)
     }

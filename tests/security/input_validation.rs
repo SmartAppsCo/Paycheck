@@ -1051,6 +1051,308 @@ mod input_size_limits {
 }
 
 // ============================================================================
+// LICENSE COUNT VALIDATION TESTS
+// ============================================================================
+
+mod license_count_validation {
+    use super::*;
+
+    /// Test that creating licenses with count=0 is rejected.
+    ///
+    /// This test documents an important invariant: the license creation handler
+    /// relies on count >= 1 to avoid a potential panic on `.last().unwrap()`.
+    /// If this validation were removed, the handler could panic.
+    #[tokio::test]
+    async fn test_create_license_with_count_zero_rejected() {
+        let (app, state) = org_app();
+        let master_key = test_master_key();
+
+        let org_id: String;
+        let project_id: String;
+        let product_id: String;
+        let api_key: String;
+
+        {
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let (_, _, key) =
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+
+            org_id = org.id;
+            project_id = project.id;
+            product_id = product.id;
+            api_key = key;
+        }
+
+        let body = json!({
+            "product_id": product_id,
+            "email": "test@example.com",
+            "count": 0
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/orgs/{}/projects/{}/licenses",
+                        org_id, project_id
+                    ))
+                    .header("content-type", "application/json")
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .body(Body::from(serde_json::to_string(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Must be rejected with 400 Bad Request - this validation prevents a panic
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "count=0 must be rejected to prevent potential panic in handler"
+        );
+
+        let json = body_json(response).await;
+        assert!(
+            json["details"]
+                .as_str()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains("count"),
+            "Error details should mention count: got {:?}",
+            json
+        );
+    }
+
+    /// Test that creating licenses with negative count is rejected.
+    #[tokio::test]
+    async fn test_create_license_with_negative_count_rejected() {
+        let (app, state) = org_app();
+        let master_key = test_master_key();
+
+        let org_id: String;
+        let project_id: String;
+        let product_id: String;
+        let api_key: String;
+
+        {
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let (_, _, key) =
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+
+            org_id = org.id;
+            project_id = project.id;
+            product_id = product.id;
+            api_key = key;
+        }
+
+        let body = json!({
+            "product_id": product_id,
+            "email": "test@example.com",
+            "count": -5
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/orgs/{}/projects/{}/licenses",
+                        org_id, project_id
+                    ))
+                    .header("content-type", "application/json")
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .body(Body::from(serde_json::to_string(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "Negative count must be rejected"
+        );
+    }
+
+    /// Test that creating licenses with count > 100 is rejected.
+    #[tokio::test]
+    async fn test_create_license_with_count_over_max_rejected() {
+        let (app, state) = org_app();
+        let master_key = test_master_key();
+
+        let org_id: String;
+        let project_id: String;
+        let product_id: String;
+        let api_key: String;
+
+        {
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let (_, _, key) =
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+
+            org_id = org.id;
+            project_id = project.id;
+            product_id = product.id;
+            api_key = key;
+        }
+
+        let body = json!({
+            "product_id": product_id,
+            "email": "test@example.com",
+            "count": 101
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/orgs/{}/projects/{}/licenses",
+                        org_id, project_id
+                    ))
+                    .header("content-type", "application/json")
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .body(Body::from(serde_json::to_string(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "count > 100 must be rejected"
+        );
+    }
+
+    /// Test that count=1 (boundary) works correctly.
+    #[tokio::test]
+    async fn test_create_license_with_count_one_succeeds() {
+        let (app, state) = org_app();
+        let master_key = test_master_key();
+
+        let org_id: String;
+        let project_id: String;
+        let product_id: String;
+        let api_key: String;
+
+        {
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let (_, _, key) =
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+
+            org_id = org.id;
+            project_id = project.id;
+            product_id = product.id;
+            api_key = key;
+        }
+
+        let body = json!({
+            "product_id": product_id,
+            "email": "test@example.com",
+            "count": 1
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/orgs/{}/projects/{}/licenses",
+                        org_id, project_id
+                    ))
+                    .header("content-type", "application/json")
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .body(Body::from(serde_json::to_string(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "count=1 (minimum valid) should succeed"
+        );
+
+        let json = body_json(response).await;
+        let items = json["items"].as_array().expect("Response should have items array");
+        assert_eq!(items.len(), 1, "Should create exactly 1 license");
+    }
+
+    /// Test that count=100 (boundary) works correctly.
+    #[tokio::test]
+    async fn test_create_license_with_count_hundred_succeeds() {
+        let (app, state) = org_app();
+        let master_key = test_master_key();
+
+        let org_id: String;
+        let project_id: String;
+        let product_id: String;
+        let api_key: String;
+
+        {
+            let mut conn = state.db.get().unwrap();
+            let org = create_test_org(&mut conn, "Test Org");
+            let (_, _, key) =
+                create_test_org_member(&mut conn, &org.id, "owner@test.com", OrgMemberRole::Owner);
+            let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+            let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+
+            org_id = org.id;
+            project_id = project.id;
+            product_id = product.id;
+            api_key = key;
+        }
+
+        let body = json!({
+            "product_id": product_id,
+            "email": "bulk@example.com",
+            "count": 100
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/orgs/{}/projects/{}/licenses",
+                        org_id, project_id
+                    ))
+                    .header("content-type", "application/json")
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .body(Body::from(serde_json::to_string(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "count=100 (maximum valid) should succeed"
+        );
+
+        let json = body_json(response).await;
+        let items = json["items"].as_array().expect("Response should have items array");
+        assert_eq!(items.len(), 100, "Should create exactly 100 licenses");
+    }
+}
+
+// ============================================================================
 // SPECIAL CHARACTER HANDLING TESTS
 // ============================================================================
 

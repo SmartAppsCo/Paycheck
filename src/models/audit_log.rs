@@ -85,6 +85,7 @@ pub enum AuditAction {
     ReceiveRenewalWebhook,
     ReceiveCancellationWebhook,
     ReceiveRefundWebhook,
+    ReceiveDisputeWebhook,
 
     // API key management
     CreateApiKey,

@@ -13,7 +13,14 @@ use crate::models::*;
 /// This provides graceful error handling instead of panicking when database
 /// contains invalid enum values (from corruption, migration errors, etc.).
 fn parse_enum<T: std::str::FromStr>(row: &Row, col: usize, col_name: &str) -> rusqlite::Result<T> {
-    row.get::<_, String>(col)?.parse::<T>().map_err(|_| {
+    let value = row.get::<_, String>(col)?;
+    value.parse::<T>().map_err(|_| {
+        tracing::error!(
+            "Invalid enum value '{}' in column '{}' (index {}). Database may be corrupted or needs migration.",
+            value,
+            col_name,
+            col
+        );
         rusqlite::Error::InvalidColumnType(col, col_name.to_string(), rusqlite::types::Type::Text)
     })
 }
@@ -84,7 +91,7 @@ pub const PROVIDER_LINK_COLS: &str = "id, product_id, provider, linked_id, creat
 pub const LICENSE_COLS: &str = "id, email_hash, project_id, product_id, customer_id, activation_count, revoked, created_at, expires_at, updates_expires_at, deleted_at, deleted_cascade_depth";
 
 /// Columns for transactions table (payment events)
-pub const TRANSACTION_COLS: &str = "id, license_id, project_id, product_id, org_id, payment_provider, provider_customer_id, provider_subscription_id, provider_order_id, currency, subtotal_cents, discount_cents, net_cents, tax_cents, total_cents, discount_code, tax_inclusive, customer_country, transaction_type, parent_transaction_id, is_subscription, test_mode, created_at";
+pub const TRANSACTION_COLS: &str = "id, license_id, project_id, product_id, org_id, payment_provider, provider_customer_id, provider_subscription_id, provider_order_id, currency, subtotal_cents, discount_cents, net_cents, tax_cents, total_cents, discount_code, tax_inclusive, customer_country, transaction_type, parent_transaction_id, is_subscription, source, metadata, test_mode, created_at";
 
 pub const DEVICE_COLS: &str =
     "id, license_id, device_id, device_type, name, jti, activated_at, last_seen_at";
@@ -357,8 +364,10 @@ impl FromRow for Transaction {
             transaction_type,
             parent_transaction_id: row.get(19)?,
             is_subscription: row.get::<_, i32>(20)? != 0,
-            test_mode: row.get::<_, i32>(21)? != 0,
-            created_at: row.get(22)?,
+            source: row.get(21)?,
+            metadata: row.get(22)?,
+            test_mode: row.get::<_, i32>(23)? != 0,
+            created_at: row.get(24)?,
         })
     }
 }

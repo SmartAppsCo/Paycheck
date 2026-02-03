@@ -211,7 +211,8 @@ fn validate_prefix(prefix: &str) -> Result<()> {
 /// - Must not target private IP ranges (10.x, 172.16-31.x, 192.168.x)
 /// - Must not target link-local addresses (169.254.x - includes cloud metadata)
 fn validate_webhook_url(url_str: &str, field_name: &str) -> Result<()> {
-    let url = Url::parse(url_str).map_err(|_| {
+    let url = Url::parse(url_str).map_err(|e| {
+        tracing::debug!("Invalid URL for {}: {} - {}", field_name, url_str, e);
         AppError::BadRequest(format!("{} must be a valid URL", field_name))
     })?;
 

@@ -232,15 +232,20 @@ fn try_operator_impersonation(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let conn = state
-        .db
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conn = state.db.get().map_err(|e| {
+        tracing::error!("Failed to get database connection for impersonation: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
-    // Load the target org member by user_id and org_id
+    // Load the target org member by user_id and org_id.
+    // Return FORBIDDEN (not NOT_FOUND) to avoid leaking org membership information.
+    // A 404 would reveal whether a user is a member of the org or not.
     let member = queries::get_org_member_with_user_by_user_and_org(&conn, target_user_id, org_id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .map_err(|e| {
+            tracing::error!("Failed to look up impersonation target member: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::FORBIDDEN)?;
 
     let impersonator = ImpersonatorInfo {
         user_id: user.id.clone(),
@@ -267,21 +272,25 @@ fn check_api_key_scope_for_org(
     org_id: &str,
     project_id: Option<&str>,
 ) -> Result<Option<AccessLevel>, StatusCode> {
-    let conn = state
-        .db
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conn = state.db.get().map_err(|e| {
+        tracing::error!("Failed to get database connection for API key scope check: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // Get the API key ID from the hash
     let hash = crate::crypto::hash_secret(api_key);
-    let key_id: Option<String> = conn
-        .query_row(
-            "SELECT id FROM api_keys WHERE key_hash = ?1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > unixepoch())",
-            rusqlite::params![&hash],
-            |row| row.get(0),
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
-        .ok();
+    let key_id: Option<String> = match conn.query_row(
+        "SELECT id FROM api_keys WHERE key_hash = ?1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > unixepoch())",
+        rusqlite::params![&hash],
+        |row| row.get(0),
+    ) {
+        Ok(id) => Some(id),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None, // Expected: key not found
+        Err(e) => {
+            tracing::error!("Database error looking up API key: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
 
     let key_id = match key_id {
         Some(id) => id,
@@ -289,8 +298,10 @@ fn check_api_key_scope_for_org(
     };
 
     // Check if the key has any scopes defined
-    let has_scopes = queries::api_key_has_scopes(&conn, &key_id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let has_scopes = queries::api_key_has_scopes(&conn, &key_id).map_err(|e| {
+        tracing::error!("Failed to check API key scopes: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     if !has_scopes {
         // No scopes = full access (based on membership)
@@ -300,12 +311,16 @@ fn check_api_key_scope_for_org(
     // Get access level based on whether this is org-level or project-level endpoint
     let access_level = if let Some(proj_id) = project_id {
         // Project-level endpoint: accept project-specific OR org-level scopes
-        queries::get_api_key_access_level(&conn, &key_id, org_id, Some(proj_id))
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        queries::get_api_key_access_level(&conn, &key_id, org_id, Some(proj_id)).map_err(|e| {
+            tracing::error!("Failed to get API key access level for project: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
     } else {
         // Org-level endpoint: ONLY accept org-level scopes (not project-specific)
-        queries::get_api_key_org_level_access(&conn, &key_id, org_id)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        queries::get_api_key_org_level_access(&conn, &key_id, org_id).map_err(|e| {
+            tracing::error!("Failed to get API key org-level access: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
     };
 
     match access_level {
@@ -328,14 +343,17 @@ async fn authenticate_user_jwt(
             StatusCode::UNAUTHORIZED
         })?;
 
-    let conn = state
-        .db
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conn = state.db.get().map_err(|e| {
+        tracing::error!("Failed to get database connection for JWT auth: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // Look up user by email
     let user = queries::get_user_by_email(&conn, &validated.claims.email)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(|e| {
+            tracing::error!("Failed to look up user by email: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let auth_method = AuthMethod::Jwt {
@@ -386,12 +404,15 @@ pub async fn org_member_auth(
         (user, auth_method, None)
     } else {
         // API key authentication
-        let conn = state
-            .db
-            .get()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let conn = state.db.get().map_err(|e| {
+            tracing::error!("Failed to get database connection for API key auth: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
         let (user, api_key_record) = queries::get_user_by_api_key(&conn, token)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .map_err(|e| {
+                tracing::error!("Failed to look up API key: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
             .ok_or(StatusCode::UNAUTHORIZED)?;
         let auth_method = AuthMethod::ApiKey {
             key_id: api_key_record.id.clone(),
@@ -400,10 +421,10 @@ pub async fn org_member_auth(
         (user, auth_method, Some(api_key_record))
     };
 
-    let conn = state
-        .db
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conn = state.db.get().map_err(|e| {
+        tracing::error!("Failed to get database connection for org member lookup: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // Try operator impersonation first
     if let Some((member, impersonator)) =
@@ -430,7 +451,10 @@ pub async fn org_member_auth(
 
     // Try normal org member authentication first
     let member = queries::get_org_member_with_user_by_user_and_org(&conn, &user.id, org_id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            tracing::error!("Failed to look up org member: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     if let Some(member) = member {
         // User is an org member
@@ -450,6 +474,19 @@ pub async fn org_member_auth(
         user.operator_role,
         Some(OperatorRole::Owner) | Some(OperatorRole::Admin)
     ) {
+        // Verify the org exists before granting synthetic access
+        // This prevents org ID enumeration and audit log pollution
+        let org_exists = queries::get_organization_by_id(&conn, org_id)
+            .map_err(|e| {
+                tracing::error!("Failed to check org existence: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
+            .is_some();
+
+        if !org_exists {
+            return Err(StatusCode::NOT_FOUND);
+        }
+
         // Operator with admin+ role gets synthetic owner access
         let synthetic_member = OrgMemberWithUser {
             id: format!("operator:{}", user.id),
@@ -530,12 +567,15 @@ pub async fn org_member_project_auth(
         (user, auth_method, false)
     } else {
         // API key authentication
-        let conn = state
-            .db
-            .get()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let conn = state.db.get().map_err(|e| {
+            tracing::error!("Failed to get database connection for API key auth: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
         let (user, api_key_record) = queries::get_user_by_api_key(&conn, token)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .map_err(|e| {
+                tracing::error!("Failed to look up API key: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
             .ok_or(StatusCode::UNAUTHORIZED)?;
         let auth_method = AuthMethod::ApiKey {
             key_id: api_key_record.id,
@@ -544,10 +584,10 @@ pub async fn org_member_project_auth(
         (user, auth_method, true)
     };
 
-    let conn = state
-        .db
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conn = state.db.get().map_err(|e| {
+        tracing::error!("Failed to get database connection for project auth: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // Try operator impersonation first
     let (member, impersonator, api_key_access) = if let Some((member, impersonator)) =
@@ -565,7 +605,10 @@ pub async fn org_member_project_auth(
 
         // Try normal org member authentication
         let member = queries::get_org_member_with_user_by_user_and_org(&conn, &user.id, org_id)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|e| {
+                tracing::error!("Failed to look up org member for project auth: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
         if let Some(member) = member {
             (member, None, api_key_access)
@@ -597,7 +640,10 @@ pub async fn org_member_project_auth(
 
     // Check project exists and belongs to org
     let project = queries::get_project_by_id(&conn, project_id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(|e| {
+            tracing::error!("Failed to look up project: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
         .ok_or(StatusCode::NOT_FOUND)?;
 
     if project.org_id != *org_id {
@@ -609,7 +655,10 @@ pub async fn org_member_project_auth(
         None // Owner/admin have implicit access, no need for project_members entry
     } else {
         queries::get_project_member(&conn, &member.id, project_id)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .map_err(|e| {
+                tracing::error!("Failed to look up project member: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
             .map(|pm| pm.role)
     };
 

@@ -46,8 +46,12 @@ pub fn router(rate_limit_config: RateLimitConfig) -> Router<AppState> {
     // Strict tier: external API calls + activation requests
     let strict_routes = Router::new()
         .route("/buy", post(initiate_buy))
-        .route("/activation/request-code", post(request_activation_code))
-        .layer(rate_limit::strict_layer(rate_limit_config.strict_rpm));
+        .route("/activation/request-code", post(request_activation_code));
+    let strict_routes = if let Some(layer) = rate_limit::strict_layer(rate_limit_config.strict_rpm) {
+        strict_routes.layer(layer)
+    } else {
+        strict_routes
+    };
 
     // Standard tier: crypto + DB operations
     let standard_routes = Router::new()
@@ -58,13 +62,21 @@ pub fn router(rate_limit_config: RateLimitConfig) -> Router<AppState> {
         .route("/license", get(get_license_info))
         .route("/devices/deactivate", post(deactivate_device))
         .route("/feedback", post(submit_feedback))
-        .route("/crash", post(report_crash))
-        .layer(rate_limit::standard_layer(rate_limit_config.standard_rpm));
+        .route("/crash", post(report_crash));
+    let standard_routes = if let Some(layer) = rate_limit::standard_layer(rate_limit_config.standard_rpm) {
+        standard_routes.layer(layer)
+    } else {
+        standard_routes
+    };
 
     // Relaxed tier: lightweight operations
     let relaxed_routes = Router::new()
-        .route("/health", get(health))
-        .layer(rate_limit::relaxed_layer(rate_limit_config.relaxed_rpm));
+        .route("/health", get(health));
+    let relaxed_routes = if let Some(layer) = rate_limit::relaxed_layer(rate_limit_config.relaxed_rpm) {
+        relaxed_routes.layer(layer)
+    } else {
+        relaxed_routes
+    };
 
     // CORS: Allow any origin since public endpoints are called from customer websites
     let cors = CorsLayer::new()

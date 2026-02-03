@@ -401,6 +401,8 @@ pub fn create_test_license_with_subscription(
         transaction_type: TransactionType::Purchase,
         parent_transaction_id: None,
         is_subscription: true,
+        source: "payment".to_string(),
+        metadata: None,
         test_mode: true,
     };
     queries::create_transaction(conn, &tx_input)
@@ -578,4 +580,45 @@ pub fn create_license_at_device_limit(
     }
 
     (license, devices)
+}
+
+/// Create a valid JWT token for a device.
+/// This is useful for testing endpoints that require JWT verification.
+///
+/// Returns the signed token string.
+pub fn create_test_token(
+    project: &Project,
+    product: &Product,
+    license: &License,
+    device: &Device,
+    master_key: &MasterKey,
+) -> String {
+    // Decrypt the private key
+    let private_key = master_key
+        .decrypt_private_key(&project.id, &project.private_key)
+        .expect("Failed to decrypt private key");
+
+    // Create claims
+    let claims = jwt::LicenseClaims {
+        license_exp: license.expires_at,
+        updates_exp: license.updates_expires_at,
+        tier: product.tier.clone(),
+        features: product.features.clone(),
+        device_id: device.device_id.clone(),
+        device_type: match device.device_type {
+            paycheck::models::DeviceType::Uuid => "uuid".to_string(),
+            paycheck::models::DeviceType::Machine => "machine".to_string(),
+        },
+        product_id: product.id.clone(),
+    };
+
+    // Sign with standard 1-hour expiration
+    sign_claims_with_exp_offset(
+        &claims,
+        &private_key,
+        &license.id,
+        &project.name,
+        &device.jti,
+        3600, // 1 hour from now
+    )
 }

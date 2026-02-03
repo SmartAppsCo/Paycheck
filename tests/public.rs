@@ -23,3 +23,6 @@ mod refresh;
 
 #[path = "public/feedback_metering.rs"]
 mod feedback_metering;
+
+#[path = "public/activation.rs"]
+mod activation;

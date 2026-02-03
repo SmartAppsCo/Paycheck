@@ -11,7 +11,8 @@ use crate::db::{AppState, queries};
 use crate::models::{Organization, Project};
 use crate::payments::{
     LemonSqueezyClient, LemonSqueezyOrderAttributes, LemonSqueezyRefundAttributes,
-    LemonSqueezySubscriptionInvoiceAttributes, LemonSqueezyWebhookEvent,
+    LemonSqueezySubscriptionInvoiceAttributes, LemonSqueezySubscriptionInvoiceRefundAttributes,
+    LemonSqueezyWebhookEvent,
 };
 
 use super::common::{
@@ -33,7 +34,10 @@ impl WebhookProvider for LemonSqueezyWebhookProvider {
             .ok_or((StatusCode::BAD_REQUEST, "Missing x-signature header"))?
             .to_str()
             .map(|s| s.to_string())
-            .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid signature header"))
+            .map_err(|e| {
+                tracing::debug!("Invalid UTF-8 in LemonSqueezy signature header: {}", e);
+                (StatusCode::BAD_REQUEST, "Invalid signature header")
+            })
     }
 
     fn verify_signature(
@@ -87,6 +91,7 @@ impl WebhookProvider for LemonSqueezyWebhookProvider {
             "subscription_payment_success" => parse_subscription_payment(&event),
             "subscription_cancelled" => parse_subscription_cancelled(&event),
             "order_refunded" => parse_order_refunded(&event),
+            "subscription_payment_refunded" => parse_subscription_payment_refunded(&event),
             _ => Ok(WebhookEvent::Ignored),
         }
     }
@@ -155,6 +160,7 @@ fn parse_order_created(event: &LemonSqueezyWebhookEvent) -> Result<WebhookEvent,
         customer_email: order.user_email,
         subscription_id,
         order_id: Some(event.data.id.clone()),
+        enricher_session_id: None, // LemonSqueezy doesn't need API enrichment
         transaction,
     }))
 }
@@ -172,12 +178,13 @@ fn parse_subscription_payment(
     let transaction = match (invoice.currency.as_ref(), invoice.total) {
         (Some(currency), Some(total)) => {
             let subtotal = invoice.subtotal.unwrap_or(total);
+            let discount = invoice.discount_total.unwrap_or(0);
             let tax = invoice.tax.unwrap_or(0);
 
             Some(CheckoutTransactionData {
                 currency: currency.to_lowercase(),
                 subtotal_cents: subtotal,
-                discount_cents: 0, // Renewals don't have discounts in LemonSqueezy
+                discount_cents: discount,
                 tax_cents: tax,
                 total_cents: total,
                 tax_inclusive: None,
@@ -197,6 +204,8 @@ fn parse_subscription_payment(
         is_paid: invoice.status == "paid",
         // Use invoice ID (data.id) as unique event identifier for replay prevention
         event_id: Some(event.data.id.clone()),
+        // LemonSqueezy uses order_id for refund linkage, not payment_intent
+        payment_intent: None,
         // Use LemonSqueezy's billing period end for accurate expiration
         period_end: invoice.period_end_timestamp(),
         transaction,
@@ -224,6 +233,8 @@ fn parse_order_refunded(
         currency: refund.currency.to_lowercase(),
         amount_cents: refund.amount,
         test_mode: refund.test_mode.unwrap_or(false),
+        source: "refund".to_string(),
+        metadata: None,
     }))
 }
 
@@ -233,6 +244,45 @@ fn parse_subscription_cancelled(
     // For subscription events, the subscription ID is in data.id
     Ok(WebhookEvent::SubscriptionCancelled(CancellationData {
         subscription_id: event.data.id.clone(),
+    }))
+}
+
+/// Parse subscription_payment_refunded event.
+///
+/// LemonSqueezy sends this when a subscription invoice payment is refunded.
+/// The data.id is the subscription invoice ID, which matches the ID stored
+/// from subscription_payment_success (used as provider_order_id in transactions).
+fn parse_subscription_payment_refunded(
+    event: &LemonSqueezyWebhookEvent,
+) -> Result<WebhookEvent, WebhookResult> {
+    let invoice: LemonSqueezySubscriptionInvoiceRefundAttributes =
+        serde_json::from_value(event.data.attributes.clone()).map_err(|e| {
+            tracing::error!("Failed to parse subscription invoice refund attributes: {}", e);
+            (StatusCode::BAD_REQUEST, "Invalid subscription invoice refund attributes")
+        })?;
+
+    // Only process completed refunds
+    if invoice.status != "refunded" {
+        return Ok(WebhookEvent::Ignored);
+    }
+
+    // Use invoice ID (data.id) as order_id for transaction lookup.
+    // This matches how subscription_payment_success stores the invoice ID.
+    let amount = invoice.total.unwrap_or(0);
+    let currency = invoice.currency.as_deref().unwrap_or("usd").to_lowercase();
+
+    Ok(WebhookEvent::Refunded(RefundData {
+        license_id: None, // Will be looked up via invoice_id (order_id)
+        refund_id: event.data.id.clone(), // Invoice ID as unique refund identifier
+        order_id: event.data.id.clone(),  // Invoice ID for transaction lookup
+        currency,
+        amount_cents: amount,
+        test_mode: invoice.test_mode.unwrap_or(false),
+        source: "refund".to_string(),
+        metadata: Some(serde_json::json!({
+            "subscription_id": invoice.subscription_id.to_string(),
+            "event_type": "subscription_payment_refunded"
+        }).to_string()),
     }))
 }
 

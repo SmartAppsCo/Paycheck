@@ -143,8 +143,10 @@ pub async fn create_service_config(
     }
 
     // Parse provider
-    let provider: ServiceProvider = input.provider.parse()
-        .map_err(|_| AppError::BadRequest(msg::INVALID_PROVIDER.into()))?;
+    let provider: ServiceProvider = input.provider.parse().map_err(|_| {
+        tracing::debug!("Invalid service provider '{}'", input.provider);
+        AppError::BadRequest(msg::INVALID_PROVIDER.into())
+    })?;
 
     // Get the config payload based on provider
     let encrypted = match provider {
@@ -197,12 +199,16 @@ pub async fn list_service_configs(
     let conn = state.db.get()?;
 
     let configs = if let Some(ref category_str) = query.category {
-        let category: ServiceCategory = category_str.parse()
-            .map_err(|_| AppError::BadRequest("Invalid category".into()))?;
+        let category: ServiceCategory = category_str.parse().map_err(|_| {
+            tracing::debug!("Invalid service category '{}'", category_str);
+            AppError::BadRequest("Invalid category".into())
+        })?;
         queries::list_service_configs_for_org_by_category(&conn, &org_id, category)?
     } else if let Some(ref provider_str) = query.provider {
-        let provider: ServiceProvider = provider_str.parse()
-            .map_err(|_| AppError::BadRequest(msg::INVALID_PROVIDER.into()))?;
+        let provider: ServiceProvider = provider_str.parse().map_err(|_| {
+            tracing::debug!("Invalid service provider '{}'", provider_str);
+            AppError::BadRequest(msg::INVALID_PROVIDER.into())
+        })?;
         queries::list_service_configs_for_org_by_provider(&conn, &org_id, provider)?
     } else {
         queries::list_service_configs_for_org(&conn, &org_id)?
@@ -315,7 +321,7 @@ pub async fn delete_service_config(
 ) -> Result<Json<serde_json::Value>> {
     ctx.require_admin()?;
 
-    let conn = state.db.get()?;
+    let mut conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     // Get existing config
@@ -328,7 +334,7 @@ pub async fn delete_service_config(
     }
 
     // Soft delete (will fail if still in use)
-    queries::soft_delete_service_config(&conn, &path.config_id)?;
+    queries::soft_delete_service_config(&mut conn, &path.config_id)?;
 
     AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
         .actor(ActorType::User, Some(&ctx.member.user_id))

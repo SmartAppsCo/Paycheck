@@ -37,6 +37,13 @@ pub struct Transaction {
     pub parent_transaction_id: Option<String>,
     pub is_subscription: bool,
 
+    /// Source distinguishes voluntary refunds from disputes.
+    /// Values: "payment", "refund", "dispute", "dispute_reversal"
+    pub source: String,
+    /// Flexible metadata for provider-specific data (JSON).
+    /// For disputes: {"dispute_id": "dp_xxx", "reason": "fraudulent"}
+    pub metadata: Option<String>,
+
     pub test_mode: bool,
     pub created_at: i64,
 }
@@ -68,6 +75,12 @@ pub struct CreateTransaction {
     pub transaction_type: TransactionType,
     pub parent_transaction_id: Option<String>,
     pub is_subscription: bool,
+
+    /// Source distinguishes voluntary refunds from disputes.
+    /// Values: "payment", "refund", "dispute", "dispute_reversal"
+    pub source: String,
+    /// Flexible metadata for provider-specific data (JSON).
+    pub metadata: Option<String>,
 
     pub test_mode: bool,
 }
@@ -119,9 +132,11 @@ pub struct TransactionFilters {
     pub test_mode: Option<bool>,
 }
 
-/// Aggregate statistics for transactions
+/// Revenue statistics for a single currency
 #[derive(Debug, Clone, Serialize)]
-pub struct TransactionStats {
+pub struct CurrencyStats {
+    /// ISO 4217 currency code (lowercase, e.g., "usd", "eur")
+    pub currency: String,
     /// Total gross revenue (sum of net_cents for purchases + renewals)
     pub gross_revenue_cents: i64,
     /// Total refunded (absolute value of refund net_cents)
@@ -132,10 +147,17 @@ pub struct TransactionStats {
     pub total_discount_cents: i64,
     /// Total tax collected
     pub total_tax_cents: i64,
-    /// Number of purchase transactions
+}
+
+/// Aggregate statistics for transactions, grouped by currency
+#[derive(Debug, Clone, Serialize)]
+pub struct TransactionStats {
+    /// Revenue breakdown by currency (amounts cannot be summed across currencies)
+    pub by_currency: Vec<CurrencyStats>,
+    /// Total number of purchase transactions (across all currencies)
     pub purchase_count: i64,
-    /// Number of renewal transactions
+    /// Total number of renewal transactions (across all currencies)
     pub renewal_count: i64,
-    /// Number of refund transactions
+    /// Total number of refund transactions (across all currencies)
     pub refund_count: i64,
 }

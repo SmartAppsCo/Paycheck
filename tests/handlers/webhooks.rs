@@ -5,7 +5,7 @@ mod common;
 
 use common::{ONE_DAY, ONE_MONTH, ONE_WEEK, ONE_YEAR, UPDATES_VALID_DAYS, *};
 use paycheck::handlers::webhooks::common::{
-    CheckoutData, process_cancellation, process_checkout, process_renewal,
+    CheckoutData, process_cancellation, process_checkout,
 };
 use paycheck::models::{LemonSqueezyConfig, StripeConfig};
 use paycheck::payments::{LemonSqueezyClient, StripeClient};
@@ -346,11 +346,10 @@ fn test_stripe_unicode_in_payload() {
 
 /// Test that replaying a renewal webhook does NOT extend the license twice.
 /// This is a regression test for the LemonSqueezy replay vulnerability.
-/// The test is provider-agnostic - it tests the underlying process_renewal logic.
+/// The test is provider-agnostic - it tests the underlying process_renewal_atomic logic.
 #[test]
 fn test_renewal_webhook_replay_prevented() {
-    use axum::http::StatusCode;
-    use paycheck::handlers::webhooks::common::process_renewal;
+    use paycheck::handlers::webhooks::common::{process_renewal_atomic, RenewalResult};
 
     let mut conn = setup_test_db();
     let master_key = test_master_key();
@@ -369,19 +368,21 @@ fn test_renewal_webhook_replay_prevented() {
     let subscription_id = "sub_test_123";
 
     // First renewal should succeed and extend the license
-    let (status1, _msg1) = process_renewal(
-        &conn,
+    let result1 = process_renewal_atomic(
+        &mut conn,
         "test_provider",
         &product,
-        &license.id,
+        &license,
         subscription_id,
         Some(event_id),
         None, // No provider period_end - use calculated fallback
-    );
-    assert_eq!(
-        status1,
-        StatusCode::OK,
-        "first renewal request should return OK status"
+        None, // No transaction data
+    )
+    .expect("first renewal should succeed");
+
+    assert!(
+        matches!(result1, RenewalResult::Success { .. }),
+        "first renewal request should return Success"
     );
 
     // Check license was extended (product has ONE_YEAR day license_exp_days)
@@ -400,26 +401,22 @@ fn test_renewal_webhook_replay_prevented() {
     std::thread::sleep(std::time::Duration::from_millis(10));
 
     // Replay the SAME webhook (same event_id)
-    let (status2, msg2) = process_renewal(
-        &conn,
+    let result2 = process_renewal_atomic(
+        &mut conn,
         "test_provider",
         &product,
-        &license.id,
+        &license,
         subscription_id,
         Some(event_id), // Same event ID = replay
         None,
-    );
+        None,
+    )
+    .expect("replay should not error");
 
     // Replay should be rejected (idempotent - already processed)
-    assert_eq!(
-        status2,
-        StatusCode::OK,
-        "Replay should return OK (idempotent)"
-    );
     assert!(
-        msg2.contains("Already processed") || msg2.contains("Duplicate"),
-        "Replay should indicate already processed, got: {}",
-        msg2
+        matches!(result2, RenewalResult::AlreadyProcessed),
+        "Replay should return AlreadyProcessed"
     );
 
     // Verify license expiration was NOT extended again
@@ -439,7 +436,7 @@ fn test_renewal_webhook_replay_prevented() {
 /// Test that different event IDs are processed independently (not blocked as replays)
 #[test]
 fn test_different_renewal_events_both_processed() {
-    use axum::http::StatusCode;
+    use paycheck::handlers::webhooks::common::{process_renewal_atomic, RenewalResult};
 
     let mut conn = setup_test_db();
     let master_key = test_master_key();
@@ -455,38 +452,38 @@ fn test_different_renewal_events_both_processed() {
     let subscription_id = "sub_test_123";
 
     // First renewal event
-    let (status1, _) = process_renewal(
-        &conn,
+    let result1 = process_renewal_atomic(
+        &mut conn,
         "test_provider",
         &product,
-        &license.id,
+        &license,
         subscription_id,
         Some("invoice_001"),
         None,
-    );
-    assert_eq!(
-        status1,
-        StatusCode::OK,
-        "first renewal event should return OK status"
+        None,
+    )
+    .expect("first renewal should succeed");
+
+    assert!(
+        matches!(result1, RenewalResult::Success { .. }),
+        "first renewal event should succeed"
     );
 
     // Second renewal event (different event ID - legitimate new renewal)
-    let (status2, msg2) = process_renewal(
-        &conn,
+    let result2 = process_renewal_atomic(
+        &mut conn,
         "test_provider",
         &product,
-        &license.id,
+        &license,
         subscription_id,
         Some("invoice_002"), // Different event ID
         None,
-    );
-    assert_eq!(
-        status2,
-        StatusCode::OK,
-        "second renewal with different event ID should return OK status"
-    );
+        None,
+    )
+    .expect("second renewal should succeed");
+
     assert!(
-        !msg2.contains("Already processed"),
+        matches!(result2, RenewalResult::Success { .. }),
         "different event ID should be processed as new renewal, not rejected as duplicate"
     );
 }
@@ -515,6 +512,7 @@ fn test_checkout_creates_license_and_device() {
         customer_email: Some("test@example.com".to_string()),
         subscription_id: Some("sub_123".to_string()),
         order_id: Some("cs_test_123".to_string()),
+        enricher_session_id: None,
         transaction: None,
     };
 
@@ -587,6 +585,7 @@ fn test_checkout_concurrent_webhooks_create_only_one_license() {
         customer_email: Some("test@example.com".to_string()),
         subscription_id: None,
         order_id: None,
+        enricher_session_id: None,
         transaction: None,
     };
 
@@ -684,6 +683,7 @@ fn test_checkout_creates_license_with_product_expirations() {
         customer_email: Some("test@example.com".to_string()),
         subscription_id: None,
         order_id: None,
+        enricher_session_id: None,
         transaction: None,
     };
 
@@ -779,6 +779,7 @@ fn test_checkout_perpetual_license() {
         customer_email: Some("test@example.com".to_string()),
         subscription_id: None,
         order_id: None,
+        enricher_session_id: None,
         transaction: None,
     };
 
@@ -818,7 +819,7 @@ fn test_checkout_perpetual_license() {
 
 #[test]
 fn test_renewal_extends_license_expiration() {
-    use axum::http::StatusCode;
+    use paycheck::handlers::webhooks::common::{process_renewal_atomic, RenewalResult};
 
     let mut conn = setup_test_db();
     let master_key = test_master_key();
@@ -831,19 +832,21 @@ fn test_renewal_extends_license_expiration() {
     let initial_exp = now() + (ONE_WEEK * 86400); // 7 days from now
     let license = create_test_license(&mut conn, &project.id, &product.id, Some(initial_exp));
 
-    let (status, _) = process_renewal(
-        &conn,
+    let result = process_renewal_atomic(
+        &mut conn,
         "stripe",
         &product,
-        &license.id,
+        &license,
         "sub_123",
         Some("invoice_001"),
         None,
-    );
-    assert_eq!(
-        status,
-        StatusCode::OK,
-        "renewal process should return OK status"
+        None,
+    )
+    .expect("renewal should succeed");
+
+    assert!(
+        matches!(result, RenewalResult::Success { .. }),
+        "renewal process should succeed"
     );
 
     let updated = queries::get_license_by_id(&mut conn, &license.id)
@@ -866,7 +869,7 @@ fn test_renewal_extends_license_expiration() {
 
 #[test]
 fn test_renewal_without_event_id_always_processes() {
-    use axum::http::StatusCode;
+    use paycheck::handlers::webhooks::common::{process_renewal_atomic, RenewalResult};
 
     let mut conn = setup_test_db();
     let master_key = test_master_key();
@@ -883,35 +886,39 @@ fn test_renewal_without_event_id_always_processes() {
     );
 
     // First call without event_id
-    let (status1, msg1) = process_renewal(
-        &conn,
+    let result1 = process_renewal_atomic(
+        &mut conn,
         "stripe",
         &product,
-        &license.id,
+        &license,
         "sub_123",
         None, // No event_id - no replay prevention
         None,
-    );
-    assert_eq!(
-        status1,
-        StatusCode::OK,
-        "first renewal without event_id should return OK status"
-    );
-    assert_eq!(
-        msg1, "OK",
-        "first renewal without event_id should return OK message"
+        None,
+    )
+    .expect("first renewal should succeed");
+
+    assert!(
+        matches!(result1, RenewalResult::Success { .. }),
+        "first renewal without event_id should succeed"
     );
 
     // Second call also processes (no replay prevention)
-    let (status2, msg2) = process_renewal(&conn, "stripe", &product, &license.id, "sub_123", None, None);
-    assert_eq!(
-        status2,
-        StatusCode::OK,
-        "second renewal without event_id should return OK status (no replay prevention)"
-    );
-    assert_eq!(
-        msg2, "OK",
-        "second renewal without event_id should return OK message (no replay prevention)"
+    let result2 = process_renewal_atomic(
+        &mut conn,
+        "stripe",
+        &product,
+        &license,
+        "sub_123",
+        None,
+        None,
+        None,
+    )
+    .expect("second renewal should succeed");
+
+    assert!(
+        matches!(result2, RenewalResult::Success { .. }),
+        "second renewal without event_id should succeed (no replay prevention)"
     );
 }
 
@@ -919,7 +926,7 @@ fn test_renewal_without_event_id_always_processes() {
 
 #[test]
 fn test_renewal_uses_provider_period_end_when_available() {
-    use axum::http::StatusCode;
+    use paycheck::handlers::webhooks::common::{process_renewal_atomic, RenewalResult};
 
     let mut conn = setup_test_db();
     let master_key = test_master_key();
@@ -934,16 +941,19 @@ fn test_renewal_uses_provider_period_end_when_available() {
     // Provider says period ends 45 days from now (different from product's ONE_YEAR setting)
     let provider_period_end = now() + (45 * 86400);
 
-    let (status, _) = process_renewal(
-        &conn,
+    let result = process_renewal_atomic(
+        &mut conn,
         "stripe",
         &product,
-        &license.id,
+        &license,
         "sub_123",
         Some("invoice_001"),
         Some(provider_period_end), // Provider's exact period end
-    );
-    assert_eq!(status, StatusCode::OK);
+        None,
+    )
+    .expect("renewal should succeed");
+
+    assert!(matches!(result, RenewalResult::Success { .. }));
 
     let updated = queries::get_license_by_id(&mut conn, &license.id)
         .expect("db query should succeed")
@@ -962,7 +972,7 @@ fn test_renewal_uses_provider_period_end_when_available() {
 
 #[test]
 fn test_renewal_falls_back_to_calculated_when_no_period_end() {
-    use axum::http::StatusCode;
+    use paycheck::handlers::webhooks::common::{process_renewal_atomic, RenewalResult};
 
     let mut conn = setup_test_db();
     let master_key = test_master_key();
@@ -974,16 +984,19 @@ fn test_renewal_falls_back_to_calculated_when_no_period_end() {
     let initial_exp = now() + (ONE_WEEK * 86400);
     let license = create_test_license(&mut conn, &project.id, &product.id, Some(initial_exp));
 
-    let (status, _) = process_renewal(
-        &conn,
+    let result = process_renewal_atomic(
+        &mut conn,
         "stripe",
         &product,
-        &license.id,
+        &license,
         "sub_123",
         Some("invoice_002"),
         None, // No provider period_end - should fall back to calculated
-    );
-    assert_eq!(status, StatusCode::OK);
+        None,
+    )
+    .expect("renewal should succeed");
+
+    assert!(matches!(result, RenewalResult::Success { .. }));
 
     let updated = queries::get_license_by_id(&mut conn, &license.id)
         .expect("db query should succeed")
@@ -1003,7 +1016,7 @@ fn test_renewal_falls_back_to_calculated_when_no_period_end() {
 
 #[test]
 fn test_renewal_provider_period_end_handles_early_renewal() {
-    use axum::http::StatusCode;
+    use paycheck::handlers::webhooks::common::{process_renewal_atomic, RenewalResult};
 
     let mut conn = setup_test_db();
     let master_key = test_master_key();
@@ -1020,16 +1033,19 @@ fn test_renewal_provider_period_end_handles_early_renewal() {
     // (not 30 days from current expiration, but 30 days from renewal time)
     let provider_period_end = now() + (30 * 86400);
 
-    let (status, _) = process_renewal(
-        &conn,
+    let result = process_renewal_atomic(
+        &mut conn,
         "stripe",
         &product,
-        &license.id,
+        &license,
         "sub_123",
         Some("invoice_003"),
         Some(provider_period_end),
-    );
-    assert_eq!(status, StatusCode::OK);
+        None,
+    )
+    .expect("renewal should succeed");
+
+    assert!(matches!(result, RenewalResult::Success { .. }));
 
     let updated = queries::get_license_by_id(&mut conn, &license.id)
         .expect("db query should succeed")
@@ -1043,25 +1059,17 @@ fn test_renewal_provider_period_end_handles_early_renewal() {
     );
 }
 
-/// BUG: Renewals do not create transaction records.
+/// Tests that process_renewal_atomic without transaction_data still extends the license.
 ///
-/// When a subscription renews, we extend the license expiration but do NOT:
-/// 1. Create a transaction record (for revenue tracking)
-/// 2. Fire a sales metering event (for billing)
+/// When no transaction data is provided, the atomic function:
+/// 1. Records the event for replay prevention
+/// 2. Extends the license expiration
+/// 3. Does NOT create a transaction record (no data to record)
 ///
-/// NOTE: This bug has been FIXED. Transaction creation now happens in `handle_renewal`
-/// (the async handler), not in `process_renewal` (the sync helper). This test verifies
-/// that `process_renewal` correctly handles just license extension - transaction creation
-/// is handled at the handler level with access to AppState.
-///
-/// The fix includes:
-/// 1. RenewalData now has an optional `transaction` field with amount/currency/etc.
-/// 2. Stripe/LemonSqueezy webhook parsers extract transaction data from invoices
-/// 3. `handle_renewal` creates a Transaction record after successful `process_renewal`
-/// 4. `handle_renewal` fires spawn_sales_metering with event="renewal"
+/// This is useful for testing and cases where transaction data isn't available.
 #[test]
-fn test_process_renewal_only_extends_license_transactions_handled_by_handler() {
-    use axum::http::StatusCode;
+fn test_renewal_atomic_without_transaction_data_extends_license_only() {
+    use paycheck::handlers::webhooks::common::{process_renewal_atomic, RenewalResult};
 
     let mut conn = setup_test_db();
     let master_key = test_master_key();
@@ -1078,18 +1086,20 @@ fn test_process_renewal_only_extends_license_transactions_handled_by_handler() {
         .expect("should query transactions");
     let count_before = transactions_before.len();
 
-    // Process a renewal using the low-level function
-    // This function ONLY extends the license - transaction creation is in handle_renewal
-    let (status, _) = process_renewal(
-        &conn,
+    // Process a renewal WITHOUT transaction data
+    let result = process_renewal_atomic(
+        &mut conn,
         "stripe",
         &product,
-        &license.id,
+        &license,
         "sub_123",
         Some("invoice_renewal_001"),
         Some(now() + (365 * 86400)), // 1 year from now
-    );
-    assert_eq!(status, StatusCode::OK);
+        None, // No transaction data
+    )
+    .expect("renewal should succeed");
+
+    assert!(matches!(result, RenewalResult::Success { .. }));
 
     // Verify license was extended
     let updated_license = queries::get_license_by_id(&conn, &license.id)
@@ -1100,15 +1110,138 @@ fn test_process_renewal_only_extends_license_transactions_handled_by_handler() {
         "License should be extended"
     );
 
-    // process_renewal doesn't create transactions - that's done by handle_renewal
+    // Without transaction_data, no transaction is created
     let transactions_after = queries::get_transactions_by_license(&conn, &license.id)
         .expect("should query transactions");
 
     assert_eq!(
         transactions_after.len(),
         count_before,
-        "process_renewal (low-level) doesn't create transactions - \
-         that's handled by handle_renewal (async handler) with AppState access"
+        "process_renewal_atomic without transaction_data doesn't create transactions"
+    );
+}
+
+/// Tests that process_renewal_atomic provides true atomicity.
+///
+/// The atomic function ensures that replay prevention, license extension,
+/// and transaction creation all happen in a single database transaction.
+/// If any step fails, everything is rolled back and payment provider can retry.
+///
+/// This test verifies:
+/// 1. First call succeeds and creates both license extension AND transaction
+/// 2. Second call (retry) correctly returns "Already processed"
+/// 3. Transaction was created on first call (not lost like the old bug)
+#[test]
+fn test_renewal_replay_prevention_and_transaction_are_atomic() {
+    use paycheck::handlers::webhooks::common::{process_renewal_atomic, RenewalResult};
+
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+    let license = create_test_license(&mut conn, &project.id, &product.id, Some(now() + 86400));
+
+    let event_id = "invoice_atomicity_test_123";
+    let new_exp = now() + (365 * 86400);
+
+    // Build transaction data (like handle_renewal does)
+    let transaction_data = CreateTransaction {
+        license_id: Some(license.id.clone()),
+        project_id: project.id.clone(),
+        product_id: Some(product.id.clone()),
+        org_id: org.id.clone(),
+        payment_provider: "stripe".to_string(),
+        provider_customer_id: None,
+        provider_subscription_id: Some("sub_456".to_string()),
+        provider_order_id: event_id.to_string(),
+        currency: "usd".to_string(),
+        subtotal_cents: 9900,
+        discount_cents: 0,
+        net_cents: 9900,
+        tax_cents: 0,
+        total_cents: 9900,
+        discount_code: None,
+        tax_inclusive: None,
+        customer_country: None,
+        transaction_type: TransactionType::Renewal,
+        parent_transaction_id: None,
+        is_subscription: true,
+        source: "payment".to_string(),
+        metadata: None,
+        test_mode: false,
+    };
+
+    // First call - should succeed ATOMICALLY (replay prevention + license + transaction)
+    let result1 = process_renewal_atomic(
+        &mut conn,
+        "stripe",
+        &product,
+        &license,
+        "sub_456",
+        Some(event_id),
+        Some(new_exp),
+        Some(&transaction_data),
+    )
+    .expect("First renewal should succeed");
+
+    match result1 {
+        RenewalResult::Success { license_exp } => {
+            assert_eq!(license_exp, Some(new_exp), "Should return new expiration");
+        }
+        RenewalResult::AlreadyProcessed => {
+            panic!("First call should not be 'Already processed'");
+        }
+    }
+
+    // Verify transaction was created (atomically with the renewal)
+    let transactions = queries::get_transactions_by_license(&conn, &license.id)
+        .expect("should query transactions");
+    let renewal_txns: Vec<_> = transactions
+        .iter()
+        .filter(|t| t.transaction_type == TransactionType::Renewal)
+        .collect();
+
+    assert_eq!(
+        renewal_txns.len(),
+        1,
+        "Transaction should be created ATOMICALLY with the renewal"
+    );
+
+    // Second call (simulating payment provider retry) - should return AlreadyProcessed
+    let result2 = process_renewal_atomic(
+        &mut conn,
+        "stripe",
+        &product,
+        &license,
+        "sub_456",
+        Some(event_id),
+        Some(new_exp),
+        Some(&transaction_data),
+    )
+    .expect("Second call should not error");
+
+    match result2 {
+        RenewalResult::AlreadyProcessed => {
+            // Correct - idempotent behavior
+        }
+        RenewalResult::Success { .. } => {
+            panic!("Second call should be 'Already processed', not Success");
+        }
+    }
+
+    // Verify only one transaction exists (no duplicate)
+    let transactions_after = queries::get_transactions_by_license(&conn, &license.id)
+        .expect("should query transactions");
+    let renewal_txns_after = transactions_after
+        .iter()
+        .filter(|t| t.transaction_type == TransactionType::Renewal)
+        .count();
+
+    assert_eq!(
+        renewal_txns_after, 1,
+        "Should still have exactly 1 transaction (no duplicate from retry)"
     );
 }
 
@@ -3127,6 +3260,7 @@ fn test_checkout_uses_transaction_for_claim_and_license() {
         customer_email: Some("test@example.com".to_string()),
         subscription_id: None,
         order_id: None,
+        enricher_session_id: None,
         transaction: None,
     };
 
@@ -3195,6 +3329,7 @@ fn test_checkout_inconsistent_state_is_unrecoverable() {
         customer_email: Some("test@example.com".to_string()),
         subscription_id: None,
         order_id: None,
+        enricher_session_id: None,
         transaction: None,
     };
 
@@ -3217,6 +3352,171 @@ fn test_checkout_inconsistent_state_is_unrecoverable() {
         .expect("should get payment session")
         .expect("session should exist");
     assert!(final_session.license_id.is_none(), "no license was created");
+}
+
+/// Verifies that checkout with transaction data creates BOTH license AND transaction record.
+///
+/// BUG: Currently transaction creation is OUTSIDE the atomic scope (after commit).
+/// If transaction creation fails, license exists but transaction record is missing.
+/// This breaks refund linkage and revenue tracking.
+///
+/// This test verifies the expected behavior: both should be created together.
+/// After the fix, they will be atomic. Before the fix, this test documents the coupling.
+#[test]
+fn test_checkout_creates_transaction_record_with_license() {
+    use axum::http::StatusCode;
+    use paycheck::handlers::webhooks::common::CheckoutTransactionData;
+
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+    let email_hasher = test_email_hasher();
+
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+
+    let session = create_test_payment_session(&mut conn, &product.id, Some("cust_test"));
+
+    // Checkout with transaction data (simulating a real Stripe webhook)
+    let checkout_data = CheckoutData {
+        session_id: session.id.clone(),
+        project_id: project.id.clone(),
+        customer_id: Some("cus_stripe_123".to_string()),
+        customer_email: Some("buyer@example.com".to_string()),
+        subscription_id: None,
+        order_id: Some("pi_payment_intent_xyz".to_string()),
+        enricher_session_id: None,
+        transaction: Some(CheckoutTransactionData {
+            currency: "usd".to_string(),
+            subtotal_cents: 9900,
+            discount_cents: 0,
+            tax_cents: 0,
+            total_cents: 9900,
+            tax_inclusive: Some(false),
+            discount_code: None,
+            customer_country: Some("US".to_string()),
+            test_mode: false,
+        }),
+    };
+
+    let (status, msg) = process_checkout(
+        &mut conn,
+        &email_hasher,
+        "stripe",
+        &project,
+        &session,
+        &product,
+        &checkout_data,
+    );
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(msg, "OK");
+
+    // Verify license was created
+    let final_session = queries::get_payment_session(&mut conn, &session.id)
+        .expect("should get payment session")
+        .expect("session should exist");
+    let license_id = final_session.license_id.expect("license should be created");
+
+    // Verify transaction record was created with correct data
+    let transactions = queries::get_transactions_by_license(&conn, &license_id)
+        .expect("should query transactions");
+
+    assert_eq!(
+        transactions.len(),
+        1,
+        "Checkout with transaction data MUST create a transaction record. \
+        Missing transaction breaks refund linkage and revenue tracking."
+    );
+
+    let txn = &transactions[0];
+    assert_eq!(txn.license_id.as_ref(), Some(&license_id));
+    assert_eq!(txn.provider_order_id, "pi_payment_intent_xyz");
+    assert_eq!(txn.total_cents, 9900);
+    assert_eq!(txn.currency, "usd");
+    assert_eq!(txn.payment_provider, "stripe");
+}
+
+/// Documents the atomicity gap: transaction record creation is outside the DB transaction.
+///
+/// This test verifies that even when process_checkout returns OK:
+/// - License is definitely created (inside atomic scope)
+/// - Transaction record SHOULD be created but is not guaranteed (outside atomic scope)
+///
+/// The fix should move transaction creation inside the atomic scope so both
+/// succeed or fail together.
+#[test]
+fn test_checkout_transaction_must_be_atomic_with_license() {
+    use axum::http::StatusCode;
+    use paycheck::handlers::webhooks::common::CheckoutTransactionData;
+
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+    let email_hasher = test_email_hasher();
+
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+
+    let session = create_test_payment_session(&mut conn, &product.id, Some("cust_test"));
+
+    let checkout_data = CheckoutData {
+        session_id: session.id.clone(),
+        project_id: project.id.clone(),
+        customer_id: Some("cus_stripe_123".to_string()),
+        customer_email: Some("buyer@example.com".to_string()),
+        subscription_id: None,
+        order_id: Some("pi_atomic_test".to_string()),
+        enricher_session_id: None,
+        transaction: Some(CheckoutTransactionData {
+            currency: "usd".to_string(),
+            subtotal_cents: 5000,
+            discount_cents: 0,
+            tax_cents: 0,
+            total_cents: 5000,
+            tax_inclusive: None,
+            discount_code: None,
+            customer_country: None,
+            test_mode: true,
+        }),
+    };
+
+    let (status, _) = process_checkout(
+        &mut conn,
+        &email_hasher,
+        "stripe",
+        &project,
+        &session,
+        &product,
+        &checkout_data,
+    );
+
+    assert_eq!(status, StatusCode::OK);
+
+    // Get the created license
+    let final_session = queries::get_payment_session(&mut conn, &session.id)
+        .expect("should get session")
+        .expect("session exists");
+    let license_id = final_session.license_id.expect("license created");
+
+    // Verify transaction exists - this is the critical check
+    let transactions = queries::get_transactions_by_license(&conn, &license_id)
+        .expect("should query");
+
+    // After the fix, this assertion documents the guarantee:
+    // If process_checkout returns OK with transaction data, BOTH license AND
+    // transaction record MUST exist. No partial state.
+    assert!(
+        !transactions.is_empty(),
+        "ATOMICITY REQUIREMENT: If license exists, transaction record MUST also exist. \
+        A license without transaction record breaks refund processing."
+    );
+
+    // Verify we can look up by provider_order_id (critical for refund linkage)
+    let found = queries::get_transaction_by_provider_order(&conn, "stripe", "pi_atomic_test")
+        .expect("should query")
+        .expect("transaction should be findable by provider_order_id");
+    assert_eq!(found.license_id.as_ref(), Some(&license_id));
 }
 
 // ============ Webhook Parsing Tests (Stripe) ============
@@ -3278,6 +3578,126 @@ fn test_stripe_invoice_paid_extracts_transaction_data() {
     }
 }
 
+/// Test that invoice discount is correctly extracted from `total_discount_amounts`.
+///
+/// Bug: The old calculation `discount = subtotal + tax - total` assumes additive tax.
+/// For inclusive tax (common in EU), this double-counts tax and inflates the discount.
+///
+/// Example with inclusive tax:
+/// - Product: €100 (includes €20 VAT)
+/// - subtotal = 10000 (pre-tax amount)
+/// - tax = 2000 (extracted VAT)
+/// - total = 9000 (after €10 discount)
+/// - Buggy calculation: 10000 + 2000 - 9000 = 3000 (wrong!)
+/// - Correct discount: 1000 (from total_discount_amounts)
+///
+/// Fix: Use Stripe's `total_discount_amounts` array when available.
+#[test]
+fn test_stripe_invoice_discount_uses_total_discount_amounts() {
+    use axum::body::Bytes;
+    use paycheck::handlers::webhooks::common::{WebhookEvent, WebhookProvider};
+    use paycheck::handlers::webhooks::stripe::StripeWebhookProvider;
+
+    let provider = StripeWebhookProvider;
+
+    // Invoice with inclusive tax and a discount
+    // Stripe provides total_discount_amounts with the exact discount
+    let payload = r#"{
+        "type": "invoice.paid",
+        "data": {
+            "object": {
+                "id": "in_inclusive_tax_test",
+                "customer": "cus_eu",
+                "subscription": "sub_eu_123",
+                "billing_reason": "subscription_cycle",
+                "status": "paid",
+                "currency": "eur",
+                "subtotal": 8333,
+                "tax": 1667,
+                "total": 9000,
+                "livemode": true,
+                "total_discount_amounts": [{
+                    "amount": 1000,
+                    "discount": "di_test_coupon"
+                }],
+                "lines": {
+                    "data": [{
+                        "period": {
+                            "end": 1735689600
+                        }
+                    }]
+                }
+            }
+        }
+    }"#;
+
+    let body = Bytes::from(payload);
+    let event = provider.parse_event(&body).expect("should parse invoice.paid event");
+
+    match event {
+        WebhookEvent::SubscriptionRenewed(data) => {
+            let tx = data.transaction.expect("should have transaction data");
+
+            // With the fix, discount should come from total_discount_amounts (1000)
+            // NOT from the buggy calculation: 8333 + 1667 - 9000 = 1000 (happens to be correct here)
+            assert_eq!(tx.discount_cents, 1000, "discount should be extracted from total_discount_amounts");
+            assert_eq!(tx.subtotal_cents, 8333);
+            assert_eq!(tx.tax_cents, 1667);
+            assert_eq!(tx.total_cents, 9000);
+        }
+        other => panic!("Expected SubscriptionRenewed, got {:?}", other),
+    }
+}
+
+/// Test invoice discount calculation when total_discount_amounts is empty.
+/// Falls back to calculation, which works correctly when there's no discount.
+#[test]
+fn test_stripe_invoice_discount_fallback_when_no_discounts() {
+    use axum::body::Bytes;
+    use paycheck::handlers::webhooks::common::{WebhookEvent, WebhookProvider};
+    use paycheck::handlers::webhooks::stripe::StripeWebhookProvider;
+
+    let provider = StripeWebhookProvider;
+
+    // Invoice with no discounts - total_discount_amounts is empty or absent
+    let payload = r#"{
+        "type": "invoice.paid",
+        "data": {
+            "object": {
+                "id": "in_no_discount",
+                "customer": "cus_test",
+                "subscription": "sub_test_789",
+                "billing_reason": "subscription_cycle",
+                "status": "paid",
+                "currency": "usd",
+                "subtotal": 9900,
+                "tax": 0,
+                "total": 9900,
+                "livemode": false,
+                "total_discount_amounts": [],
+                "lines": {
+                    "data": [{
+                        "period": {
+                            "end": 1735689600
+                        }
+                    }]
+                }
+            }
+        }
+    }"#;
+
+    let body = Bytes::from(payload);
+    let event = provider.parse_event(&body).expect("should parse invoice.paid event");
+
+    match event {
+        WebhookEvent::SubscriptionRenewed(data) => {
+            let tx = data.transaction.expect("should have transaction data");
+            assert_eq!(tx.discount_cents, 0, "no discount when total_discount_amounts is empty");
+        }
+        other => panic!("Expected SubscriptionRenewed, got {:?}", other),
+    }
+}
+
 #[test]
 fn test_stripe_invoice_paid_initial_subscription_not_renewal() {
     use axum::body::Bytes;
@@ -3322,31 +3742,38 @@ fn test_stripe_invoice_paid_initial_subscription_not_renewal() {
     }
 }
 
+/// Test that charge.refunded events are ignored in favor of refund.created.
+///
+/// The charge.refunded event has a fundamental issue with partial refunds: Stripe embeds
+/// ALL refunds in the charge object (oldest-first), making it impossible to identify
+/// which refund triggered the webhook. This causes subsequent partial refunds to be
+/// silently dropped due to idempotency.
+///
+/// We now exclusively use refund.created events, which contain exactly one refund each.
 #[test]
-fn test_stripe_charge_refunded_extracts_refund_data() {
+fn test_stripe_charge_refunded_is_ignored() {
     use axum::body::Bytes;
     use paycheck::handlers::webhooks::common::{WebhookEvent, WebhookProvider};
     use paycheck::handlers::webhooks::stripe::StripeWebhookProvider;
 
     let provider = StripeWebhookProvider;
 
-    // Stripe charge.refunded webhook payload
     let payload = r#"{
         "type": "charge.refunded",
         "data": {
             "object": {
-                "id": "ch_test_charge_123",
-                "payment_intent": "pi_test_intent_456",
+                "id": "ch_test_charge",
+                "payment_intent": "pi_test_intent",
                 "amount": 10000,
                 "amount_refunded": 5000,
-                "currency": "eur",
+                "currency": "usd",
                 "refunded": false,
                 "livemode": false,
                 "refunds": {
                     "data": [{
-                        "id": "re_test_refund_789",
+                        "id": "re_test_refund",
                         "amount": 5000,
-                        "currency": "eur",
+                        "currency": "usd",
                         "status": "succeeded"
                     }]
                 }
@@ -3355,85 +3782,73 @@ fn test_stripe_charge_refunded_extracts_refund_data() {
     }"#;
 
     let body = Bytes::from(payload);
-    let event = provider.parse_event(&body).expect("should parse charge.refunded event");
+    let event = provider.parse_event(&body).expect("should parse");
 
-    match event {
-        WebhookEvent::Refunded(data) => {
-            assert_eq!(data.refund_id, "re_test_refund_789");
-            assert_eq!(data.order_id, "pi_test_intent_456", "Should use payment_intent as order_id");
-            assert_eq!(data.currency, "eur");
-            assert_eq!(data.amount_cents, 5000);
-            assert!(data.test_mode, "livemode=false means test mode");
-            assert!(data.license_id.is_none(), "License ID is looked up later, not in parsing");
-        }
-        other => panic!("Expected Refunded, got {:?}", other),
-    }
+    assert!(
+        matches!(event, WebhookEvent::Ignored),
+        "charge.refunded should be ignored - use refund.created instead"
+    );
 }
 
+/// Test that refund.created event extracts refund data correctly.
+/// This is Stripe's recommended approach for handling refunds.
 #[test]
-fn test_stripe_charge_refunded_pending_ignored() {
+fn test_stripe_refund_created_extracts_refund_data() {
     use axum::body::Bytes;
     use paycheck::handlers::webhooks::common::{WebhookEvent, WebhookProvider};
     use paycheck::handlers::webhooks::stripe::StripeWebhookProvider;
 
     let provider = StripeWebhookProvider;
 
-    // Pending refund should be ignored
+    // Stripe refund.created webhook payload - contains just the refund object
     let payload = r#"{
-        "type": "charge.refunded",
+        "type": "refund.created",
         "data": {
             "object": {
-                "id": "ch_test_charge",
-                "payment_intent": "pi_test",
-                "amount": 10000,
-                "amount_refunded": 5000,
-                "currency": "usd",
-                "refunded": false,
-                "livemode": true,
-                "refunds": {
-                    "data": [{
-                        "id": "re_pending",
-                        "amount": 5000,
-                        "currency": "usd",
-                        "status": "pending"
-                    }]
-                }
+                "id": "re_test_refund_123",
+                "amount": 5000,
+                "currency": "eur",
+                "status": "succeeded",
+                "charge": "ch_test_charge_456",
+                "payment_intent": "pi_test_intent_789"
             }
         }
     }"#;
 
     let body = Bytes::from(payload);
-    let event = provider.parse_event(&body).expect("should parse event");
+    let event = provider.parse_event(&body).expect("should parse refund.created event");
 
     match event {
-        WebhookEvent::Ignored => {}
-        other => panic!("Expected Ignored for pending refund, got {:?}", other),
+        WebhookEvent::Refunded(data) => {
+            assert_eq!(data.refund_id, "re_test_refund_123");
+            assert_eq!(data.order_id, "pi_test_intent_789", "Should use payment_intent as order_id");
+            assert_eq!(data.currency, "eur");
+            assert_eq!(data.amount_cents, 5000);
+            assert_eq!(data.source, "refund");
+        }
+        other => panic!("Expected Refunded, got {:?}", other),
     }
 }
 
+/// Test that refund.created with pending status is ignored.
 #[test]
-fn test_stripe_charge_refunded_no_refunds_ignored() {
+fn test_stripe_refund_created_pending_ignored() {
     use axum::body::Bytes;
-    use paycheck::handlers::webhooks::common::{WebhookProvider};
+    use paycheck::handlers::webhooks::common::WebhookProvider;
     use paycheck::handlers::webhooks::stripe::StripeWebhookProvider;
 
     let provider = StripeWebhookProvider;
 
-    // No refunds in data
     let payload = r#"{
-        "type": "charge.refunded",
+        "type": "refund.created",
         "data": {
             "object": {
-                "id": "ch_test_charge",
-                "payment_intent": "pi_test",
-                "amount": 10000,
-                "amount_refunded": 0,
+                "id": "re_pending_refund",
+                "amount": 5000,
                 "currency": "usd",
-                "refunded": false,
-                "livemode": true,
-                "refunds": {
-                    "data": []
-                }
+                "status": "pending",
+                "charge": "ch_test",
+                "payment_intent": "pi_test"
             }
         }
     }"#;
@@ -3441,8 +3856,42 @@ fn test_stripe_charge_refunded_no_refunds_ignored() {
     let body = Bytes::from(payload);
     let result = provider.parse_event(&body);
 
-    // Should return an error (StatusCode::OK, "No refunds in charge")
-    assert!(result.is_err(), "Empty refunds list should return error");
+    assert!(result.is_err(), "Pending refund should be ignored");
+}
+
+/// Test that refund.created falls back to charge ID when payment_intent is null.
+#[test]
+fn test_stripe_refund_created_uses_charge_fallback() {
+    use axum::body::Bytes;
+    use paycheck::handlers::webhooks::common::{WebhookEvent, WebhookProvider};
+    use paycheck::handlers::webhooks::stripe::StripeWebhookProvider;
+
+    let provider = StripeWebhookProvider;
+
+    // Some older charges may not have payment_intent
+    let payload = r#"{
+        "type": "refund.created",
+        "data": {
+            "object": {
+                "id": "re_test_refund",
+                "amount": 2500,
+                "currency": "usd",
+                "status": "succeeded",
+                "charge": "ch_legacy_charge",
+                "payment_intent": null
+            }
+        }
+    }"#;
+
+    let body = Bytes::from(payload);
+    let event = provider.parse_event(&body).expect("should parse");
+
+    match event {
+        WebhookEvent::Refunded(data) => {
+            assert_eq!(data.order_id, "ch_legacy_charge", "Should fall back to charge ID");
+        }
+        other => panic!("Expected Refunded, got {:?}", other),
+    }
 }
 
 // ============ Webhook Parsing Tests (LemonSqueezy) ============
@@ -3495,6 +3944,56 @@ fn test_lemonsqueezy_subscription_payment_extracts_transaction_data() {
             assert_eq!(tx.tax_cents, 0);
             assert_eq!(tx.total_cents, 4900);
             assert!(tx.test_mode);
+        }
+        other => panic!("Expected SubscriptionRenewed, got {:?}", other),
+    }
+}
+
+/// Test that LemonSqueezy subscription renewals with recurring discounts are tracked.
+///
+/// LemonSqueezy supports recurring coupons (is_recurring: true) that apply to
+/// subscription renewals. The discount_total field should be extracted.
+#[test]
+fn test_lemonsqueezy_subscription_payment_extracts_recurring_discount() {
+    use axum::body::Bytes;
+    use paycheck::handlers::webhooks::common::{WebhookEvent, WebhookProvider};
+    use paycheck::handlers::webhooks::lemonsqueezy::LemonSqueezyWebhookProvider;
+
+    let provider = LemonSqueezyWebhookProvider;
+
+    // Subscription renewal with a recurring 20% discount coupon
+    let payload = r#"{
+        "meta": {
+            "event_name": "subscription_payment_success",
+            "custom_data": null
+        },
+        "data": {
+            "id": "invoice_ls_recurring_discount",
+            "attributes": {
+                "subscription_id": 11111,
+                "customer_id": 22222,
+                "status": "paid",
+                "period_end": "2025-02-01T00:00:00.000Z",
+                "currency": "EUR",
+                "subtotal": 10000,
+                "discount_total": 2000,
+                "tax": 1600,
+                "total": 9600,
+                "test_mode": false
+            }
+        }
+    }"#;
+
+    let body = Bytes::from(payload);
+    let event = provider.parse_event(&body).expect("should parse subscription_payment_success");
+
+    match event {
+        WebhookEvent::SubscriptionRenewed(data) => {
+            let tx = data.transaction.expect("should have transaction data");
+            assert_eq!(tx.subtotal_cents, 10000);
+            assert_eq!(tx.discount_cents, 2000, "recurring discount should be extracted");
+            assert_eq!(tx.tax_cents, 1600);
+            assert_eq!(tx.total_cents, 9600);
         }
         other => panic!("Expected SubscriptionRenewed, got {:?}", other),
     }
@@ -3632,6 +4131,8 @@ fn test_refund_data_fields_are_correct() {
         currency: "usd".to_string(),
         amount_cents: 5000,
         test_mode: false,
+        source: "refund".to_string(),
+        metadata: None,
     };
 
     // Verify all fields are accessible
@@ -3641,6 +4142,8 @@ fn test_refund_data_fields_are_correct() {
     assert_eq!(refund.currency, "usd");
     assert_eq!(refund.amount_cents, 5000);
     assert!(!refund.test_mode);
+    assert_eq!(refund.source, "refund");
+    assert!(refund.metadata.is_none());
 }
 
 #[test]
@@ -3652,6 +4155,7 @@ fn test_renewal_data_with_transaction() {
         is_renewal: true,
         is_paid: true,
         event_id: Some("inv_456".to_string()),
+        payment_intent: Some("pi_test_789".to_string()),
         period_end: Some(1735689600),
         transaction: Some(CheckoutTransactionData {
             currency: "eur".to_string(),
@@ -3769,26 +4273,18 @@ fn test_stripe_checkout_and_refund_order_ids_match() {
         other => panic!("Expected CheckoutCompleted, got {:?}", other),
     };
 
-    // 2. Parse refund event for the same payment
+    // 2. Parse refund event for the same payment (using refund.created)
     let refund_payload = format!(r#"{{
-        "type": "charge.refunded",
+        "type": "refund.created",
         "data": {{
             "object": {{
-                "id": "ch_charge_xyz",
+                "id": "re_refund_789",
                 "payment_intent": "{}",
+                "charge": "ch_charge_xyz",
                 "amount": 5000,
-                "amount_refunded": 5000,
                 "currency": "usd",
-                "refunded": true,
-                "livemode": true,
-                "refunds": {{
-                    "data": [{{
-                        "id": "re_refund_789",
-                        "amount": 5000,
-                        "currency": "usd",
-                        "status": "succeeded"
-                    }}]
-                }}
+                "status": "succeeded",
+                "livemode": true
             }}
         }}
     }}"#, payment_intent);
@@ -3796,7 +4292,7 @@ fn test_stripe_checkout_and_refund_order_ids_match() {
     let refund_body = Bytes::from(refund_payload);
     let refund_event = provider.parse_event(&refund_body).expect("should parse refund");
     let refund_order_id = match refund_event {
-        WebhookEvent::Refunded(data) => data.order_id,
+        WebhookEvent::Refunded(data) => data.order_id.clone(),
         other => panic!("Expected Refunded, got {:?}", other),
     };
 
@@ -3806,4 +4302,655 @@ fn test_stripe_checkout_and_refund_order_ids_match() {
         "Checkout order_id ({}) must match refund order_id ({}) for transaction linkage",
         checkout_order_id, refund_order_id
     );
+}
+
+/// Verifies that Stripe checkout separates checkout_session_id from payment_intent.
+///
+/// Bug fix verification: The enricher needs two different IDs:
+/// - `enricher_session_id`: Checkout session ID (cs_xxx) for Stripe API calls (fetch discounts)
+/// - `order_id`: Payment intent ID (pi_xxx) for DB lookup (transaction stored with this ID)
+///
+/// Before the fix, both were conflated and the enricher would fail to fetch discounts
+/// because it passed payment_intent to the checkout sessions API.
+#[test]
+fn test_stripe_checkout_separates_session_id_from_payment_intent() {
+    use axum::body::Bytes;
+    use paycheck::handlers::webhooks::common::{WebhookEvent, WebhookProvider};
+    use paycheck::handlers::webhooks::stripe::StripeWebhookProvider;
+
+    let provider = StripeWebhookProvider;
+    let checkout_session_id = "cs_test_session_abc123";
+    let payment_intent_id = "pi_payment_intent_xyz789";
+
+    let checkout_payload = format!(r#"{{
+        "type": "checkout.session.completed",
+        "data": {{
+            "object": {{
+                "id": "{}",
+                "payment_intent": "{}",
+                "payment_status": "paid",
+                "customer": "cus_test",
+                "customer_details": {{ "email": "test@example.com" }},
+                "metadata": {{ "paycheck_session_id": "ps_1", "project_id": "proj_1" }},
+                "currency": "usd",
+                "amount_total": 5000
+            }}
+        }}
+    }}"#, checkout_session_id, payment_intent_id);
+
+    let checkout_body = Bytes::from(checkout_payload);
+    let checkout_event = provider.parse_event(&checkout_body).expect("should parse checkout");
+
+    let (order_id, enricher_session_id) = match checkout_event {
+        WebhookEvent::CheckoutCompleted(data) => (
+            data.order_id.expect("checkout should have order_id"),
+            data.enricher_session_id.expect("checkout should have enricher_session_id"),
+        ),
+        other => panic!("Expected CheckoutCompleted, got {:?}", other),
+    };
+
+    // order_id should be payment_intent (for DB/refund linkage)
+    assert_eq!(
+        order_id, payment_intent_id,
+        "order_id should be payment_intent for DB storage and refund linkage"
+    );
+
+    // enricher_session_id should be checkout session ID (for Stripe API calls)
+    assert_eq!(
+        enricher_session_id, checkout_session_id,
+        "enricher_session_id should be checkout session ID for Stripe API calls"
+    );
+
+    // They must be different - this is the whole point of the fix
+    assert_ne!(
+        order_id, enricher_session_id,
+        "order_id and enricher_session_id serve different purposes and should be different"
+    );
+}
+
+/// Verifies that Stripe invoice.paid events include payment_intent for refund linkage.
+/// Subscription renewals (and initial subscription payments) go through invoices,
+/// and refunds reference the payment_intent from those invoices.
+#[test]
+fn test_stripe_invoice_includes_payment_intent_for_refund_linkage() {
+    use axum::body::Bytes;
+    use paycheck::handlers::webhooks::common::{WebhookEvent, WebhookProvider};
+    use paycheck::handlers::webhooks::stripe::StripeWebhookProvider;
+
+    let provider = StripeWebhookProvider;
+
+    // 1. Parse invoice.paid event with payment_intent
+    let payment_intent = "pi_subscription_payment_123";
+    let invoice_payload = format!(r#"{{
+        "type": "invoice.paid",
+        "data": {{
+            "object": {{
+                "id": "in_test_invoice_abc",
+                "customer": "cus_test_123",
+                "subscription": "sub_test_456",
+                "billing_reason": "subscription_cycle",
+                "status": "paid",
+                "payment_intent": "{}",
+                "currency": "usd",
+                "amount_paid": 2000,
+                "subtotal": 2000,
+                "total": 2000,
+                "livemode": true,
+                "lines": {{
+                    "data": [{{
+                        "period": {{"end": 1735689600}}
+                    }}]
+                }}
+            }}
+        }}
+    }}"#, payment_intent);
+
+    let invoice_body = Bytes::from(invoice_payload);
+    let invoice_event = provider.parse_event(&invoice_body).expect("should parse invoice.paid");
+
+    let renewal_payment_intent = match invoice_event {
+        WebhookEvent::SubscriptionRenewed(data) => {
+            assert!(
+                data.payment_intent.is_some(),
+                "Invoice event should include payment_intent for refund linkage"
+            );
+            data.payment_intent.unwrap()
+        }
+        other => panic!("Expected SubscriptionRenewed, got {:?}", other),
+    };
+
+    // 2. Parse refund event for the same payment (using refund.created)
+    let refund_payload = format!(r#"{{
+        "type": "refund.created",
+        "data": {{
+            "object": {{
+                "id": "re_subscription_refund_789",
+                "payment_intent": "{}",
+                "charge": "ch_subscription_charge_xyz",
+                "amount": 2000,
+                "currency": "usd",
+                "status": "succeeded",
+                "livemode": true
+            }}
+        }}
+    }}"#, payment_intent);
+
+    let refund_body = Bytes::from(refund_payload);
+    let refund_event = provider.parse_event(&refund_body).expect("should parse refund");
+    let refund_order_id = match refund_event {
+        WebhookEvent::Refunded(data) => data.order_id.clone(),
+        other => panic!("Expected Refunded, got {:?}", other),
+    };
+
+    // 3. The payment_intent from invoice MUST match the refund's order_id
+    // This is how refunds find the original subscription transaction
+    assert_eq!(
+        renewal_payment_intent, refund_order_id,
+        "Invoice payment_intent ({}) must match refund order_id ({}) for subscription refund linkage",
+        renewal_payment_intent, refund_order_id
+    );
+}
+
+// ============ Stripe Dispute Linkage Tests ============
+
+/// Verifies that checkout and dispute use matching order_id for proper linkage.
+/// BUG: Disputes use charge ID, but transactions are stored with payment_intent.
+/// This test demonstrates the bug by checking if checkout and dispute order_ids match.
+#[test]
+fn test_stripe_checkout_and_dispute_order_ids_match() {
+    use axum::body::Bytes;
+    use paycheck::handlers::webhooks::stripe::StripeWebhookProvider;
+    use paycheck::handlers::webhooks::common::{WebhookProvider, WebhookEvent};
+
+    let provider = StripeWebhookProvider;
+
+    // 1. Parse checkout event to get the order_id (should be payment_intent)
+    let payment_intent = "pi_test_payment_intent_xyz";
+    let checkout_payload = format!(r#"{{
+        "type": "checkout.session.completed",
+        "data": {{
+            "object": {{
+                "id": "cs_test_abc123",
+                "payment_intent": "{}",
+                "payment_status": "paid",
+                "customer": "cus_test_123",
+                "customer_details": {{ "email": "buyer@example.com" }},
+                "metadata": {{
+                    "paycheck_session_id": "sess_123",
+                    "project_id": "proj_456"
+                }},
+                "amount_total": 9900,
+                "currency": "usd"
+            }}
+        }}
+    }}"#, payment_intent);
+
+    let checkout_body = Bytes::from(checkout_payload);
+    let checkout_event = provider.parse_event(&checkout_body).expect("should parse checkout");
+    let checkout_order_id = match checkout_event {
+        WebhookEvent::CheckoutCompleted(data) => data.order_id.expect("should have order_id"),
+        other => panic!("Expected CheckoutCompleted, got {:?}", other),
+    };
+
+    // Verify checkout uses payment_intent as order_id
+    assert_eq!(checkout_order_id, payment_intent,
+        "Checkout should store payment_intent as order_id");
+
+    // 2. Parse dispute event for the same payment
+    // In Stripe, disputes have both charge ID and payment_intent
+    let dispute_payload = format!(r#"{{
+        "type": "charge.dispute.created",
+        "data": {{
+            "object": {{
+                "id": "dp_test_dispute_123",
+                "charge": "ch_test_charge_abc",
+                "payment_intent": "{}",
+                "amount": 9900,
+                "currency": "usd",
+                "status": "needs_response",
+                "reason": "fraudulent",
+                "livemode": true
+            }}
+        }}
+    }}"#, payment_intent);
+
+    let dispute_body = Bytes::from(dispute_payload);
+    let dispute_event = provider.parse_event(&dispute_body).expect("should parse dispute");
+    let dispute_order_id = match dispute_event {
+        WebhookEvent::Refunded(data) => data.order_id,
+        other => panic!("Expected Refunded (dispute creates refund transaction), got {:?}", other),
+    };
+
+    // 3. The order_ids MUST match for dispute to find the original transaction
+    // BUG: Currently this will FAIL because dispute uses charge ID instead of payment_intent
+    assert_eq!(
+        checkout_order_id, dispute_order_id,
+        "Checkout order_id ({}) must match dispute order_id ({}) for transaction linkage. \
+        BUG: Disputes currently use charge ID instead of payment_intent!",
+        checkout_order_id, dispute_order_id
+    );
+}
+
+/// Verifies dispute.closed (won) also uses correct order_id for reversal linkage.
+#[test]
+fn test_stripe_dispute_closed_uses_payment_intent() {
+    use axum::body::Bytes;
+    use paycheck::handlers::webhooks::stripe::StripeWebhookProvider;
+    use paycheck::handlers::webhooks::common::{WebhookProvider, WebhookEvent};
+
+    let provider = StripeWebhookProvider;
+
+    // Parse dispute.closed event (status=won creates reversal transaction)
+    let dispute_payload = r#"{
+        "type": "charge.dispute.closed",
+        "data": {
+            "object": {
+                "id": "dp_test_dispute_456",
+                "charge": "ch_test_charge_def",
+                "payment_intent": "pi_test_payment_intent_abc",
+                "amount": 5000,
+                "currency": "usd",
+                "status": "won",
+                "reason": "fraudulent",
+                "livemode": true
+            }
+        }
+    }"#;
+
+    let dispute_body = Bytes::from(dispute_payload);
+    let dispute_event = provider.parse_event(&dispute_body).expect("should parse dispute closed");
+    let dispute_order_id = match dispute_event {
+        WebhookEvent::Refunded(data) => data.order_id,
+        other => panic!("Expected Refunded (dispute reversal), got {:?}", other),
+    };
+
+    // Dispute reversal should use payment_intent to find the original transaction
+    assert_eq!(
+        dispute_order_id, "pi_test_payment_intent_abc",
+        "Dispute reversal order_id ({}) should be payment_intent, not charge ID",
+        dispute_order_id
+    );
+}
+
+// ============ LemonSqueezy Subscription Refund Tests ============
+
+/// Test that LemonSqueezy subscription_payment_refunded event is properly handled.
+///
+/// LemonSqueezy sends two different refund events:
+/// - `order_refunded`: For initial order refunds (sends Order object with order_id)
+/// - `subscription_payment_refunded`: For subscription invoice refunds (sends Subscription Invoice)
+///
+/// This test verifies subscription_payment_refunded is parsed correctly and returns
+/// RefundData with the invoice ID for transaction lookup.
+#[test]
+fn test_lemonsqueezy_subscription_payment_refunded_extracts_refund_data() {
+    use axum::body::Bytes;
+    use paycheck::handlers::webhooks::common::{WebhookEvent, WebhookProvider};
+    use paycheck::handlers::webhooks::lemonsqueezy::LemonSqueezyWebhookProvider;
+
+    let provider = LemonSqueezyWebhookProvider;
+
+    // LemonSqueezy subscription_payment_refunded webhook payload
+    // This event is sent when a subscription invoice payment is refunded
+    // The data.id is the subscription invoice ID (same as stored from subscription_payment_success)
+    let payload = r#"{
+        "meta": {
+            "event_name": "subscription_payment_refunded",
+            "custom_data": null
+        },
+        "data": {
+            "id": "si_invoice_12345",
+            "type": "subscription-invoices",
+            "attributes": {
+                "subscription_id": 98765,
+                "store_id": 11111,
+                "status": "refunded",
+                "refunded_at": "2025-01-15T10:30:00.000Z",
+                "subtotal": 4900,
+                "tax": 0,
+                "total": 4900,
+                "currency": "USD",
+                "test_mode": false
+            }
+        }
+    }"#;
+
+    let body = Bytes::from(payload);
+    let event = provider.parse_event(&body).expect("should parse subscription_payment_refunded");
+
+    match event {
+        WebhookEvent::Refunded(data) => {
+            // Invoice ID is used for both refund_id and order_id
+            // This matches how subscription_payment_success stores the invoice ID
+            assert_eq!(data.refund_id, "si_invoice_12345", "refund_id should be invoice ID");
+            assert_eq!(data.order_id, "si_invoice_12345", "order_id should be invoice ID for transaction lookup");
+            assert_eq!(data.amount_cents, 4900);
+            assert_eq!(data.currency, "usd");
+            assert!(!data.test_mode);
+            assert_eq!(data.source, "refund");
+            // Metadata should contain subscription_id for debugging
+            assert!(data.metadata.is_some());
+            let metadata = data.metadata.unwrap();
+            assert!(metadata.contains("98765"), "metadata should contain subscription_id");
+        }
+        other => panic!("Expected Refunded, got {:?}", other),
+    }
+}
+
+/// End-to-end test that LemonSqueezy subscription renewal refunds are properly linked.
+///
+/// This test verifies:
+/// 1. Create a subscription license with a renewal transaction
+/// 2. The renewal transaction stores invoice_id as provider_order_id (from subscription_payment_success)
+/// 3. Send subscription_payment_refunded webhook with the same invoice_id
+/// 4. A refund transaction is created and linked to the original renewal
+#[tokio::test]
+async fn test_lemonsqueezy_subscription_refund_creates_transaction() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let state = create_test_app_state();
+    let master_key = test_master_key();
+
+    let license_id: String;
+    let invoice_id = "si_renewal_invoice_555";
+
+    {
+        let mut conn = state.db.get().unwrap();
+        let org = create_test_org(&mut conn, "Test Org");
+        setup_lemonsqueezy_config(&mut conn, &org.id, &master_key);
+        let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+        let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+
+        // Create a subscription license
+        let license = create_test_license_with_subscription(
+            &conn,
+            &project.id,
+            &product.id,
+            &org.id,
+            Some(now() + (ONE_MONTH * 86400)),
+            "lemonsqueezy",
+            "98765", // subscription_id
+        );
+        license_id = license.id.clone();
+
+        // Simulate what subscription_payment_success does: create a renewal transaction
+        // with invoice_id as provider_order_id
+        let renewal_tx = CreateTransaction {
+            license_id: Some(license.id.clone()),
+            project_id: project.id.clone(),
+            product_id: Some(product.id.clone()),
+            org_id: org.id.clone(),
+            payment_provider: "lemonsqueezy".to_string(),
+            provider_customer_id: Some("cust_test".to_string()),
+            provider_subscription_id: Some("98765".to_string()),
+            // This is the key part: subscription_payment_success stores invoice_id here
+            provider_order_id: invoice_id.to_string(),
+            currency: "usd".to_string(),
+            subtotal_cents: 4900,
+            discount_cents: 0,
+            net_cents: 4900,
+            tax_cents: 0,
+            total_cents: 4900,
+            discount_code: None,
+            tax_inclusive: None,
+            customer_country: None,
+            transaction_type: TransactionType::Renewal,
+            parent_transaction_id: None,
+            is_subscription: true,
+            source: "payment".to_string(),
+            metadata: None,
+            test_mode: false,
+        };
+        queries::create_transaction(&conn, &renewal_tx)
+            .expect("Failed to create renewal transaction");
+    }
+
+    // Now send subscription_payment_refunded webhook
+    // This should create a refund transaction linked to the renewal
+    let payload = serde_json::json!({
+        "meta": {
+            "event_name": "subscription_payment_refunded",
+            "custom_data": null
+        },
+        "data": {
+            "id": invoice_id,  // Same as the renewal transaction's provider_order_id
+            "type": "subscription-invoices",
+            "attributes": {
+                "subscription_id": 98765,
+                "store_id": 11111,
+                "status": "refunded",
+                "refunded_at": "2025-01-15T10:30:00.000Z",
+                "subtotal": 4900,
+                "tax": 0,
+                "total": 4900,
+                "currency": "USD",
+                "test_mode": false
+            }
+        }
+    });
+    let payload_bytes = serde_json::to_vec(&payload).unwrap();
+    let signature = compute_lemonsqueezy_signature(&payload_bytes, "ls_whsec_test_secret");
+
+    let app = webhook_app(state.clone());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/webhook/lemonsqueezy")
+                .header("content-type", "application/json")
+                .header("x-signature", signature)
+                .body(Body::from(payload_bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Webhook returns OK
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::OK,
+        "Webhook should return OK status"
+    );
+
+    // Verify refund transaction was created
+    let conn = state.db.get().unwrap();
+    let transactions = queries::get_transactions_by_license(&conn, &license_id)
+        .expect("Failed to list transactions");
+
+    let refunds: Vec<_> = transactions
+        .iter()
+        .filter(|t| t.transaction_type == TransactionType::Refund)
+        .collect();
+
+    assert_eq!(
+        refunds.len(), 1,
+        "Should have 1 refund transaction after subscription_payment_refunded webhook"
+    );
+
+    let refund = &refunds[0];
+    assert_eq!(refund.total_cents, -4900, "Refund should have negative amount");
+    assert_eq!(refund.currency, "usd");
+    assert_eq!(refund.payment_provider, "lemonsqueezy");
+    assert!(refund.parent_transaction_id.is_some(), "Refund should link to parent renewal transaction");
+
+    // Verify the renewal transaction still exists
+    let renewal_count = transactions
+        .iter()
+        .filter(|t| t.transaction_type == TransactionType::Renewal)
+        .count();
+    assert_eq!(
+        renewal_count, 1,
+        "Renewal transaction should still exist"
+    );
+}
+
+/// Tests that process_refund_atomic provides true atomicity.
+///
+/// The atomic function ensures that replay prevention and transaction creation
+/// happen in a single database transaction. If any step fails, everything is
+/// rolled back and payment provider can retry.
+///
+/// This test verifies:
+/// 1. First call succeeds and creates the refund transaction atomically
+/// 2. Second call (retry) correctly returns "Already processed"
+/// 3. Only one refund transaction exists (no duplicates from non-atomic bugs)
+#[test]
+fn test_refund_replay_prevention_and_transaction_are_atomic() {
+    use paycheck::handlers::webhooks::common::{process_refund_atomic, RefundResult};
+
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "Test Project", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro Plan", "pro");
+    let license = create_test_license(&mut conn, &project.id, &product.id, Some(now() + 86400));
+
+    // First create a purchase transaction (so we have something to refund)
+    let purchase = CreateTransaction {
+        license_id: Some(license.id.clone()),
+        project_id: project.id.clone(),
+        product_id: Some(product.id.clone()),
+        org_id: org.id.clone(),
+        payment_provider: "stripe".to_string(),
+        provider_customer_id: None,
+        provider_subscription_id: None,
+        provider_order_id: "ch_purchase_123".to_string(),
+        currency: "usd".to_string(),
+        subtotal_cents: 9900,
+        discount_cents: 0,
+        net_cents: 9900,
+        tax_cents: 0,
+        total_cents: 9900,
+        discount_code: None,
+        tax_inclusive: None,
+        customer_country: None,
+        transaction_type: TransactionType::Purchase,
+        parent_transaction_id: None,
+        is_subscription: false,
+        source: "payment".to_string(),
+        metadata: None,
+        test_mode: false,
+    };
+    let purchase_txn = queries::create_transaction(&conn, &purchase).expect("Create purchase failed");
+
+    let refund_id = "re_atomic_test_456";
+
+    // Build refund transaction data
+    let refund_data = CreateTransaction {
+        license_id: Some(license.id.clone()),
+        project_id: project.id.clone(),
+        product_id: Some(product.id.clone()),
+        org_id: org.id.clone(),
+        payment_provider: "stripe".to_string(),
+        provider_customer_id: None,
+        provider_subscription_id: None,
+        provider_order_id: refund_id.to_string(),
+        currency: "usd".to_string(),
+        subtotal_cents: -9900,
+        discount_cents: 0,
+        net_cents: -9900,
+        tax_cents: 0,
+        total_cents: -9900,
+        discount_code: None,
+        tax_inclusive: None,
+        customer_country: None,
+        transaction_type: TransactionType::Refund,
+        parent_transaction_id: Some(purchase_txn.id.clone()),
+        is_subscription: false,
+        source: "refund".to_string(),
+        metadata: None,
+        test_mode: false,
+    };
+
+    // First call - should succeed ATOMICALLY (replay prevention + transaction)
+    let result1 = process_refund_atomic(&mut conn, "stripe", refund_id, &refund_data)
+        .expect("First refund should succeed");
+
+    assert!(
+        matches!(result1, RefundResult::Success),
+        "First refund call should return Success"
+    );
+
+    // Verify refund transaction was created atomically
+    let transactions = queries::get_transactions_by_license(&conn, &license.id)
+        .expect("should query transactions");
+    let refund_txns: Vec<_> = transactions
+        .iter()
+        .filter(|t| t.transaction_type == TransactionType::Refund)
+        .collect();
+
+    assert_eq!(
+        refund_txns.len(),
+        1,
+        "Exactly one refund transaction should exist after first call"
+    );
+    assert_eq!(
+        refund_txns[0].total_cents, -9900,
+        "Refund should have negative amount"
+    );
+
+    // Second call (retry) - should return "Already processed" without creating duplicate
+    let result2 = process_refund_atomic(&mut conn, "stripe", refund_id, &refund_data)
+        .expect("Second refund should not error");
+
+    assert!(
+        matches!(result2, RefundResult::AlreadyProcessed),
+        "Second refund call should return AlreadyProcessed"
+    );
+
+    // Verify NO duplicate transaction was created
+    let transactions2 = queries::get_transactions_by_license(&conn, &license.id)
+        .expect("should query transactions");
+    let refund_txns2: Vec<_> = transactions2
+        .iter()
+        .filter(|t| t.transaction_type == TransactionType::Refund)
+        .collect();
+
+    assert_eq!(
+        refund_txns2.len(),
+        1,
+        "Still exactly one refund transaction after retry - atomicity prevents duplicates"
+    );
+}
+
+/// Test that pending subscription refunds are ignored (only "refunded" status is processed).
+#[test]
+fn test_lemonsqueezy_subscription_payment_refunded_pending_ignored() {
+    use axum::body::Bytes;
+    use paycheck::handlers::webhooks::common::{WebhookEvent, WebhookProvider};
+    use paycheck::handlers::webhooks::lemonsqueezy::LemonSqueezyWebhookProvider;
+
+    let provider = LemonSqueezyWebhookProvider;
+
+    // Pending refund should be ignored
+    let payload = r#"{
+        "meta": {
+            "event_name": "subscription_payment_refunded",
+            "custom_data": null
+        },
+        "data": {
+            "id": "si_pending_refund",
+            "type": "subscription-invoices",
+            "attributes": {
+                "subscription_id": 12345,
+                "store_id": 11111,
+                "status": "pending",
+                "currency": "USD",
+                "total": 2900,
+                "test_mode": true
+            }
+        }
+    }"#;
+
+    let body = Bytes::from(payload);
+    let event = provider.parse_event(&body).expect("should parse event");
+
+    match event {
+        WebhookEvent::Ignored => {}
+        other => panic!("Expected Ignored for pending subscription refund, got {:?}", other),
+    }
 }

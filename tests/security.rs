@@ -56,3 +56,9 @@ mod ssrf_prevention;
 
 #[path = "security/service_config_permissions.rs"]
 mod service_config_permissions;
+
+#[path = "security/body_size_limit.rs"]
+mod body_size_limit;
+
+#[path = "security/error_logging_audit.rs"]
+mod error_logging_audit;

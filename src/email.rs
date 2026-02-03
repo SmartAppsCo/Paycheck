@@ -204,7 +204,10 @@ impl EmailService {
         Self {
             system_api_key,
             default_from_email,
-            http_client: Client::new(),
+            http_client: Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .expect("failed to build HTTP client"),
         }
     }
 

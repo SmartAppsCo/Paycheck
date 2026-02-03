@@ -116,5 +116,5 @@ pub use device::{generate_uuid, get_machine_id};
 // JWT utilities
 pub use jwt::{
     covers_version, decode_token, has_feature, is_jwt_expired, is_license_expired,
-    verify_and_decode_token, verify_token,
+    validate_issuer, verify_and_decode_token, verify_token, EXPECTED_ISSUER,
 };

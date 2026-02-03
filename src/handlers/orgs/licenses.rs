@@ -8,7 +8,7 @@ use crate::db::{AppState, queries};
 use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path, RestoreRequest};
 use crate::middleware::OrgMemberContext;
-use crate::models::{ActorType, AuditAction, CreateLicense, Device, LicenseWithProduct};
+use crate::models::{ActorType, AuditAction, CreateLicense, Device, LicenseWithProduct, UpdateLicense};
 use crate::pagination::Paginated;
 use crate::util::{AuditLogBuilder, LicenseExpirations};
 
@@ -192,7 +192,7 @@ pub async fn create_license(
         ));
     }
 
-    let conn = state.db.get()?;
+    let mut conn = state.db.get()?;
     let audit_conn = state.audit.get()?;
 
     // Verify product exists and belongs to this project
@@ -218,11 +218,15 @@ pub async fn create_license(
     let updates_exp_days = body.updates_exp_days.unwrap_or(product.updates_exp_days);
     let exps = LicenseExpirations::from_days(license_exp_days, updates_exp_days, now);
 
+    // Use a transaction to ensure atomicity - all licenses created or none
+    // This prevents orphaned data if a failure occurs mid-creation
+    let tx = conn.transaction()?;
+
     let mut created_licenses = Vec::with_capacity(body.count as usize);
 
     for _ in 0..body.count {
         let license = queries::create_license(
-            &conn,
+            &tx,
             &project.id,
             &body.product_id,
             &CreateLicense {
@@ -235,7 +239,10 @@ pub async fn create_license(
 
         // Generate activation code for immediate use
         let code =
-            queries::create_activation_code(&conn, &license.id, &project.license_key_prefix)?;
+            queries::create_activation_code(&tx, &license.id, &project.license_key_prefix)?;
+
+        // Clone ID before moving license into the struct
+        let license_id = license.id.clone();
 
         created_licenses.push(CreatedLicenseWithDetails {
             license: LicenseWithProduct {
@@ -246,11 +253,11 @@ pub async fn create_license(
             activation_code_expires_at: code.expires_at,
         });
 
-        // Audit log for each license
+        // Audit log for each license (separate DB, not part of transaction)
         AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
             .actor(ActorType::User, Some(&ctx.member.user_id))
             .action(AuditAction::CreateLicense)
-            .resource("license", &created_licenses.last().unwrap().license.license.id)
+            .resource("license", &license_id)
             .details(&serde_json::json!({
                 "product_id": body.product_id,
                 "expires_at": exps.license_exp,
@@ -263,6 +270,9 @@ pub async fn create_license(
             .auth_method(&ctx.auth_method)
             .save()?;
     }
+
+    // Commit the transaction - all licenses created successfully
+    tx.commit()?;
 
     tracing::info!(
         "Created {} license(s) for product {} (project: {})",
@@ -378,14 +388,14 @@ pub async fn update_license(
 
     // Only update if there are changes
     if !changes.is_empty() {
-        queries::update_license(
-            &conn,
-            &license.id,
-            license.email_hash.as_deref(),
-            license.customer_id.as_deref(),
-            license.expires_at,
-            license.updates_expires_at,
-        )?;
+        // Build the update with only the changed fields
+        let update = UpdateLicense {
+            email_hash: body.email.as_ref().map(|e| state.email_hasher.hash(e)),
+            customer_id: body.customer_id.clone(),
+            expires_at: body.expires_at,
+            updates_expires_at: body.updates_expires_at,
+        };
+        queries::update_license(&conn, &license.id, &update)?;
 
         changes.insert(
             "impersonator".to_string(),

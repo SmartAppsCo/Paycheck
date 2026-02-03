@@ -128,6 +128,19 @@ export function hasFeature(claims: LicenseClaims, feature: string): boolean {
   return claims.features.includes(feature);
 }
 
+/** Expected issuer for Paycheck JWTs */
+export const EXPECTED_ISSUER = 'paycheck';
+
+/**
+ * Validates the JWT issuer claim.
+ *
+ * Returns true if the issuer is "paycheck", false otherwise.
+ * This should be called after decoding to ensure the JWT was issued by Paycheck.
+ */
+export function validateIssuer(claims: LicenseClaims): boolean {
+  return claims.iss === EXPECTED_ISSUER;
+}
+
 /**
  * Verifies a JWT signature using Ed25519.
  * Returns true if the signature is valid, false otherwise.

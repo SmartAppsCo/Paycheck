@@ -10,8 +10,8 @@ use crate::crypto::MasterKey;
 use crate::db::{AppState, queries};
 use crate::models::{Organization, Project};
 use crate::payments::{
-    StripeCharge, StripeCheckoutSession, StripeClient, StripeInvoice, StripeSubscription,
-    StripeWebhookEvent,
+    StripeCheckoutSession, StripeClient, StripeDispute, StripeInvoice, StripeRefundEvent,
+    StripeSubscription, StripeWebhookEvent,
 };
 
 use super::common::{
@@ -21,11 +21,15 @@ use super::common::{
 
 /// Enrich a Stripe transaction with data that requires API calls.
 /// This runs as a background task after the webhook handler returns.
+///
+/// - `checkout_session_id`: Stripe checkout session ID (cs_xxx) for API calls
+/// - `provider_order_id`: Payment intent ID (pi_xxx) for DB lookup
 async fn enrich_stripe_transaction(
     state: &AppState,
     project_id: &str,
     org_id: &str,
     checkout_session_id: &str,
+    provider_order_id: &str,
 ) {
     // Get DB connection
     let conn = match state.db.get() {
@@ -88,16 +92,18 @@ async fn enrich_stripe_transaction(
         }
     };
 
-    // Update the transaction with the discount code
-    if let Err(e) = queries::update_transaction_discount_code(&conn, checkout_session_id, &discount_code) {
+    // Update the transaction with the discount code.
+    // Uses provider_order_id (payment_intent) since that's how transactions are stored.
+    if let Err(e) = queries::update_transaction_discount_code(&conn, provider_order_id, &discount_code) {
         tracing::warn!("Stripe enricher: failed to update transaction: {}", e);
         return;
     }
 
     tracing::info!(
-        "Stripe enricher: updated transaction {} with discount code {}",
-        checkout_session_id,
-        discount_code
+        "Stripe enricher: updated transaction {} with discount code {} (session: {})",
+        provider_order_id,
+        discount_code,
+        checkout_session_id
     );
 }
 
@@ -115,7 +121,10 @@ impl WebhookProvider for StripeWebhookProvider {
             .ok_or((StatusCode::BAD_REQUEST, "Missing stripe-signature header"))?
             .to_str()
             .map(|s| s.to_string())
-            .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid signature header"))
+            .map_err(|e| {
+                tracing::debug!("Invalid UTF-8 in Stripe signature header: {}", e);
+                (StatusCode::BAD_REQUEST, "Invalid signature header")
+            })
     }
 
     fn verify_signature(
@@ -163,7 +172,9 @@ impl WebhookProvider for StripeWebhookProvider {
             "checkout.session.completed" => parse_checkout_completed(&event),
             "invoice.paid" => parse_invoice_paid(&event),
             "customer.subscription.deleted" => parse_subscription_deleted(&event),
-            "charge.refunded" => parse_charge_refunded(&event),
+            "refund.created" => parse_refund_created(&event),
+            "charge.dispute.created" => parse_dispute_created(&event),
+            "charge.dispute.closed" => parse_dispute_closed(&event),
             _ => Ok(WebhookEvent::Ignored),
         }
     }
@@ -174,9 +185,29 @@ impl WebhookProvider for StripeWebhookProvider {
         project_id: String,
         org_id: String,
         provider_order_id: String,
+        enricher_session_id: Option<String>,
     ) {
+        // enricher_session_id is the checkout session ID (cs_xxx) for Stripe API calls.
+        // provider_order_id is the payment_intent (pi_xxx) for DB lookup.
+        let checkout_session_id = match enricher_session_id {
+            Some(id) => id,
+            None => {
+                tracing::warn!(
+                    "Stripe enricher called without checkout_session_id, skipping enrichment"
+                );
+                return;
+            }
+        };
+
         tokio::spawn(async move {
-            enrich_stripe_transaction(&state, &project_id, &org_id, &provider_order_id).await;
+            enrich_stripe_transaction(
+                &state,
+                &project_id,
+                &org_id,
+                &checkout_session_id,  // For Stripe API call
+                &provider_order_id,    // For DB lookup
+            )
+            .await;
         });
     }
 }
@@ -242,6 +273,10 @@ fn parse_checkout_completed(event: &StripeWebhookEvent) -> Result<WebhookEvent, 
         _ => None,
     };
 
+    // Capture checkout session ID for enricher API calls (e.g., fetching discount codes).
+    // This must be extracted before session.id is potentially consumed by order_id fallback.
+    let enricher_session_id = Some(session.id.clone());
+
     // Use payment_intent as order_id for refund linkage.
     // Refunds come with payment_intent ID, so we need to store that at checkout.
     // For subscription mode (no payment_intent), fall back to session.id.
@@ -254,6 +289,7 @@ fn parse_checkout_completed(event: &StripeWebhookEvent) -> Result<WebhookEvent, 
         customer_email,
         subscription_id: session.subscription,
         order_id,
+        enricher_session_id,
         transaction,
     }))
 }
@@ -285,9 +321,10 @@ fn parse_invoice_paid(event: &StripeWebhookEvent) -> Result<WebhookEvent, Webhoo
         (Some(currency), Some(total)) => {
             let subtotal = invoice.subtotal.unwrap_or(total);
             let tax = invoice.tax.unwrap_or(0);
-            // Invoices don't have discount breakdown like checkout sessions
-            // discount = subtotal + tax - total (if tax is additive)
-            let discount = (subtotal + tax).saturating_sub(total).max(0);
+            // Use total_discount_amounts from Stripe instead of calculating.
+            // The old calculation (subtotal + tax - total) assumed additive tax,
+            // which breaks for inclusive tax (common in EU) - it double-counts tax.
+            let discount = invoice.total_discount();
 
             Some(CheckoutTransactionData {
                 currency: currency.to_lowercase(),
@@ -310,37 +347,110 @@ fn parse_invoice_paid(event: &StripeWebhookEvent) -> Result<WebhookEvent, Webhoo
         is_paid: invoice.status == "paid",
         // Use invoice ID as unique event identifier for replay prevention
         event_id: Some(invoice.id),
+        // Use payment_intent for refund linkage - refunds reference this ID
+        payment_intent: invoice.payment_intent,
         // Use Stripe's billing period end for accurate expiration
         period_end,
         transaction,
     }))
 }
 
-fn parse_charge_refunded(event: &StripeWebhookEvent) -> Result<WebhookEvent, WebhookResult> {
-    let charge: StripeCharge = serde_json::from_value(event.data.object.clone()).map_err(|e| {
-        tracing::error!("Failed to parse charge: {}", e);
-        (StatusCode::BAD_REQUEST, "Invalid charge")
+/// Parse refund.created event - Stripe's recommended way to handle refunds.
+/// Each refund.created event contains exactly one refund, making it ideal for
+/// tracking partial refunds correctly.
+fn parse_refund_created(event: &StripeWebhookEvent) -> Result<WebhookEvent, WebhookResult> {
+    let refund: StripeRefundEvent =
+        serde_json::from_value(event.data.object.clone()).map_err(|e| {
+            tracing::error!("Failed to parse refund: {}", e);
+            (StatusCode::BAD_REQUEST, "Invalid refund")
+        })?;
+
+    // Only process succeeded refunds
+    if refund.status != "succeeded" {
+        return Err((StatusCode::OK, "Refund not succeeded"));
+    }
+
+    // Prefer payment_intent for order linkage, fall back to charge ID
+    let order_id = refund
+        .payment_intent
+        .or(refund.charge)
+        .ok_or_else(|| {
+            tracing::error!("Refund {} has no payment_intent or charge", refund.id);
+            (StatusCode::BAD_REQUEST, "Refund missing payment reference")
+        })?;
+
+    Ok(WebhookEvent::Refunded(RefundData {
+        license_id: None, // Will be looked up via order_id
+        refund_id: refund.id,
+        order_id,
+        currency: refund.currency.to_lowercase(),
+        amount_cents: refund.amount,
+        test_mode: !refund.livemode,
+        source: "refund".to_string(),
+        metadata: None,
+    }))
+}
+
+fn parse_dispute_created(event: &StripeWebhookEvent) -> Result<WebhookEvent, WebhookResult> {
+    let dispute: StripeDispute = serde_json::from_value(event.data.object.clone()).map_err(|e| {
+        tracing::error!("Failed to parse dispute: {}", e);
+        (StatusCode::BAD_REQUEST, "Invalid dispute")
     })?;
 
-    // Get the most recent refund from the refunds list
-    let refund = charge
-        .refunds
-        .as_ref()
-        .and_then(|r| r.data.first())
-        .ok_or((StatusCode::OK, "No refunds in charge"))?;
+    // Build metadata JSON with dispute details
+    let metadata = serde_json::json!({
+        "dispute_id": dispute.id,
+        "reason": dispute.reason,
+    });
 
-    // Only process successful refunds
-    if refund.status != "succeeded" {
+    Ok(WebhookEvent::Refunded(RefundData {
+        license_id: None, // Will be looked up via payment_intent
+        refund_id: dispute.id.clone(), // Use dispute ID for idempotency
+        order_id: dispute.payment_intent.unwrap_or_else(|| dispute.charge.clone()),
+        currency: dispute.currency.to_lowercase(),
+        amount_cents: dispute.amount,
+        test_mode: !dispute.livemode,
+        source: "dispute".to_string(),
+        metadata: Some(metadata.to_string()),
+    }))
+}
+
+fn parse_dispute_closed(event: &StripeWebhookEvent) -> Result<WebhookEvent, WebhookResult> {
+    let dispute: StripeDispute = serde_json::from_value(event.data.object.clone()).map_err(|e| {
+        tracing::error!("Failed to parse dispute: {}", e);
+        (StatusCode::BAD_REQUEST, "Invalid dispute")
+    })?;
+
+    // Only create a reversal transaction if the dispute was won
+    if dispute.status != "won" {
+        // Lost disputes: audit log only, no financial reversal needed
+        // (The original dispute debit already took the money)
+        tracing::info!(
+            "Stripe dispute closed with status '{}': dispute_id={}, amount={}",
+            dispute.status,
+            dispute.id,
+            dispute.amount
+        );
         return Ok(WebhookEvent::Ignored);
     }
 
+    // Dispute won - create a positive reversal transaction
+    let metadata = serde_json::json!({
+        "dispute_id": dispute.id,
+    });
+
+    // Use a different ID for the reversal to avoid idempotency collision with the original dispute
+    let reversal_id = format!("{}_reversal", dispute.id);
+
     Ok(WebhookEvent::Refunded(RefundData {
-        license_id: None, // Will be looked up via payment_intent → checkout session
-        refund_id: refund.id.clone(),
-        order_id: charge.payment_intent.unwrap_or_else(|| charge.id.clone()),
-        currency: charge.currency.to_lowercase(),
-        amount_cents: refund.amount,
-        test_mode: !charge.livemode,
+        license_id: None,
+        refund_id: reversal_id,
+        order_id: dispute.payment_intent.unwrap_or_else(|| dispute.charge.clone()),
+        currency: dispute.currency.to_lowercase(),
+        amount_cents: -(dispute.amount), // Negative to create positive transaction (reversal)
+        test_mode: !dispute.livemode,
+        source: "dispute_reversal".to_string(),
+        metadata: Some(metadata.to_string()),
     }))
 }
 

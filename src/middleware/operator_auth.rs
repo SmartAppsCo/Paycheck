@@ -45,10 +45,10 @@ fn authenticate_operator_api_key(
     headers: &HeaderMap,
 ) -> Result<(User, AuthMethod), StatusCode> {
     let token = extract_bearer_token(headers).ok_or(StatusCode::UNAUTHORIZED)?;
-    let conn = state
-        .db
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conn = state.db.get().map_err(|e| {
+        tracing::error!("Failed to get database connection: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // Determine auth method based on token format
     if token.starts_with("eyJ") {
@@ -57,8 +57,10 @@ fn authenticate_operator_api_key(
     }
 
     // API key path (default)
-    let (user, api_key_record) = queries::get_user_by_api_key(&conn, token)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    let (user, api_key_record) = queries::get_user_by_api_key(&conn, token).map_err(|e| {
+        tracing::error!("Failed to look up API key: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Check if user is an operator
@@ -88,14 +90,16 @@ async fn authenticate_operator_jwt(
             StatusCode::UNAUTHORIZED
         })?;
 
-    let conn = state
-        .db
-        .get()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conn = state.db.get().map_err(|e| {
+        tracing::error!("Failed to get database connection: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // Look up user by email
-    let user = queries::get_user_by_email(&conn, &validated.claims.email)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    let user = queries::get_user_by_email(&conn, &validated.claims.email).map_err(|e| {
+        tracing::error!("Failed to look up user by email: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Check if user is an operator

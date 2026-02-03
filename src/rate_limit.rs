@@ -30,11 +30,15 @@ pub type RateLimitLayer = GovernorLayer<
 
 /// Creates a rate limiter layer with the specified requests per minute.
 ///
+/// Returns `None` if `requests_per_minute` is 0 (rate limiting disabled).
+///
 /// Uses millisecond-precision periods to correctly handle high RPM values.
 /// For 3000 RPM, period = 20ms (50 requests/second sustained).
 /// For 10 RPM, period = 6000ms (1 request every 6 seconds).
-fn create_layer(requests_per_minute: u32) -> RateLimitLayer {
-    assert!(requests_per_minute > 0, "Rate limit must be greater than 0");
+fn create_layer(requests_per_minute: u32) -> Option<RateLimitLayer> {
+    if requests_per_minute == 0 {
+        return None;
+    }
 
     // Use milliseconds for sub-second precision with high RPM values.
     // Old formula (60 / rpm) gave 0 for rpm > 60, breaking high-rate limits.
@@ -45,29 +49,30 @@ fn create_layer(requests_per_minute: u32) -> RateLimitLayer {
         .finish()
         .expect("Failed to build rate limiter config");
 
-    GovernorLayer::new(Arc::new(config))
+    Some(GovernorLayer::new(Arc::new(config)))
 }
 
 /// Creates a rate limiter layer with the specified requests per minute.
+/// Returns `None` if `requests_per_minute` is 0 (rate limiting disabled).
 ///
 /// Tier documentation (for reference):
 /// - Strict (10 RPM default): External API calls like /buy, /activation/request-code
 /// - Standard (30 RPM default): Crypto/DB operations like /redeem, /validate
 /// - Relaxed (60 RPM default): Lightweight endpoints like /health
 /// - Org ops (3000 RPM default): Authenticated /orgs/* endpoints
-pub fn strict_layer(requests_per_minute: u32) -> RateLimitLayer {
+pub fn strict_layer(requests_per_minute: u32) -> Option<RateLimitLayer> {
     create_layer(requests_per_minute)
 }
 
-pub fn standard_layer(requests_per_minute: u32) -> RateLimitLayer {
+pub fn standard_layer(requests_per_minute: u32) -> Option<RateLimitLayer> {
     create_layer(requests_per_minute)
 }
 
-pub fn relaxed_layer(requests_per_minute: u32) -> RateLimitLayer {
+pub fn relaxed_layer(requests_per_minute: u32) -> Option<RateLimitLayer> {
     create_layer(requests_per_minute)
 }
 
-pub fn org_ops_layer(requests_per_minute: u32) -> RateLimitLayer {
+pub fn org_ops_layer(requests_per_minute: u32) -> Option<RateLimitLayer> {
     create_layer(requests_per_minute)
 }
 
@@ -110,8 +115,14 @@ impl ActivationRateLimiter {
 
     /// Check if a request is allowed for the given email hash.
     /// Returns Ok(()) if allowed, Err with message if rate limited.
+    ///
+    /// Note: This method recovers from mutex poisoning to prevent cascading failures.
+    /// If a thread panics while holding the lock, subsequent calls will still work.
     pub fn check(&self, email_hash: &str) -> Result<(), &'static str> {
-        let mut map = self.requests.lock().unwrap();
+        let mut map = self
+            .requests
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let now = Instant::now();
         let cutoff = now - std::time::Duration::from_secs(self.window_secs);
 
@@ -140,8 +151,13 @@ impl ActivationRateLimiter {
 
     /// Clean up expired entries to prevent memory growth.
     /// Call periodically (e.g., every few minutes).
+    ///
+    /// Note: This method recovers from mutex poisoning to prevent cascading failures.
     pub fn cleanup(&self) {
-        let mut map = self.requests.lock().unwrap();
+        let mut map = self
+            .requests
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let now = Instant::now();
         let cutoff = now - std::time::Duration::from_secs(self.window_secs);
 
@@ -153,8 +169,13 @@ impl ActivationRateLimiter {
 
     /// Returns the number of unique keys (email hashes) currently tracked.
     /// Useful for monitoring memory usage and testing cleanup behavior.
+    ///
+    /// Note: This method recovers from mutex poisoning to prevent cascading failures.
     pub fn entry_count(&self) -> usize {
-        self.requests.lock().unwrap().len()
+        self.requests
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len()
     }
 }
 
