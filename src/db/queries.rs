@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::crypto::{MasterKey, hash_secret};
 use crate::error::{AppError, Result};
+use crate::id::EntityType;
 use crate::models::*;
 
 use super::from_row::{
@@ -15,10 +16,6 @@ use super::from_row::{
 
 fn now() -> i64 {
     Utc::now().timestamp()
-}
-
-fn gen_id() -> String {
-    Uuid::new_v4().to_string()
 }
 
 /// Builder for dynamic UPDATE statements with optional fields.
@@ -143,7 +140,7 @@ impl UpdateBuilder {
 
 /// Create a user.
 pub fn create_user(conn: &Connection, input: &CreateUser) -> Result<User> {
-    let id = gen_id();
+    let id = EntityType::User.gen_id();
     let now = now();
     let email = input.email.trim().to_lowercase();
 
@@ -699,7 +696,7 @@ pub fn create_api_key(
         }
     }
 
-    let id = gen_id();
+    let id = EntityType::ApiKey.gen_id();
     let now = now();
     let key = generate_api_key();
     let prefix = &key[..12];
@@ -715,7 +712,7 @@ pub fn create_api_key(
     // Insert scopes (already validated above, within same transaction)
     if let Some(scopes) = scopes {
         for scope in scopes {
-            let scope_id = gen_id();
+            let scope_id = EntityType::ApiKeyScope.gen_id();
             tx.execute(
                 "INSERT INTO api_key_scopes (id, api_key_id, org_id, project_id, access)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -997,7 +994,7 @@ pub fn create_audit_log(
     auth_type: Option<&str>,
     auth_credential: Option<&str>,
 ) -> Result<AuditLog> {
-    let id = gen_id();
+    let id = EntityType::AuditLog.gen_id();
     let timestamp = now();
 
     // Skip database insert if audit logging is disabled
@@ -1212,7 +1209,7 @@ pub fn query_audit_logs(conn: &Connection, query: &AuditLogQuery) -> Result<(Vec
 // ============ Organizations ============
 
 pub fn create_organization(conn: &Connection, input: &CreateOrganization) -> Result<Organization> {
-    let id = gen_id();
+    let id = EntityType::Organization.gen_id();
     let now = now();
 
     conn.execute(
@@ -1311,7 +1308,7 @@ pub fn create_service_config(
     provider: ServiceProvider,
     encrypted_config: &[u8],
 ) -> Result<ServiceConfig> {
-    let id = gen_id();
+    let id = EntityType::ServiceConfig.gen_id();
     let now = now();
     let category = provider.category();
 
@@ -1857,7 +1854,7 @@ pub fn create_org_member(
     org_id: &str,
     input: &CreateOrgMember,
 ) -> Result<OrgMember> {
-    let id = gen_id();
+    let id = EntityType::OrgMember.gen_id();
     let now = now();
 
     conn.execute(
@@ -2235,7 +2232,7 @@ pub fn create_project(
     public_key: &str,
     master_key: &MasterKey,
 ) -> Result<Project> {
-    let id = gen_id();
+    let id = EntityType::Project.gen_id();
     let now = now();
     let encrypted_private_key = master_key.encrypt_private_key(&id, private_key)?;
 
@@ -2475,7 +2472,7 @@ pub fn create_project_member(
     project_id: &str,
     role: ProjectMemberRole,
 ) -> Result<ProjectMember> {
-    let id = gen_id();
+    let id = EntityType::ProjectMember.gen_id();
     let now = now();
 
     conn.execute(
@@ -2634,7 +2631,7 @@ pub fn create_product(
     project_id: &str,
     input: &CreateProduct,
 ) -> Result<Product> {
-    let id = gen_id();
+    let id = EntityType::Product.gen_id();
     let now = now();
     let features_json = serde_json::to_string(&input.features)?;
 
@@ -2838,7 +2835,7 @@ pub fn create_provider_link(
     product_id: &str,
     input: &CreateProviderLink,
 ) -> Result<ProductProviderLink> {
-    let id = gen_id();
+    let id = EntityType::ProductProviderLink.gen_id();
     let now = now();
 
     conn.execute(
@@ -3089,7 +3086,7 @@ pub fn create_license(
         ));
     }
 
-    let id = gen_id();
+    let id = EntityType::License.gen_id();
     let now = now();
 
     conn.execute(
@@ -3738,7 +3735,7 @@ pub fn acquire_device_atomic(
     }
 
     // All checks passed - create device and increment activation count
-    let id = gen_id();
+    let id = EntityType::Device.gen_id();
     let now = now();
 
     tx.execute(
@@ -3774,7 +3771,7 @@ pub fn create_device(
     jti: &str,
     name: Option<&str>,
 ) -> Result<Device> {
-    let id = gen_id();
+    let id = EntityType::Device.gen_id();
     let now = now();
 
     conn.execute(
@@ -3898,7 +3895,7 @@ pub fn create_payment_session(
     conn: &Connection,
     input: &CreatePaymentSession,
 ) -> Result<PaymentSession> {
-    let id = gen_id();
+    let id = EntityType::PaymentSession.gen_id();
     let now = now();
 
     conn.execute(
@@ -4095,7 +4092,7 @@ pub fn set_system_config(conn: &Connection, key: &str, value: &[u8]) -> Result<(
 
 /// Create a new transaction record (payment event).
 pub fn create_transaction(conn: &Connection, input: &CreateTransaction) -> Result<Transaction> {
-    let id = gen_id();
+    let id = EntityType::Transaction.gen_id();
     let now = now();
 
     conn.execute(

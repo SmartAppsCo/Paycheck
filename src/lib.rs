@@ -11,6 +11,7 @@ pub mod error;
 pub mod extractors;
 pub mod feedback;
 pub mod handlers;
+pub mod id;
 pub mod jwt;
 pub mod metering;
 pub mod middleware;

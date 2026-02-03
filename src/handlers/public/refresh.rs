@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::db::{AppState, queries};
 use crate::error::{AppError, Result};
 use crate::extractors::Json;
+use crate::id::is_valid_prefixed_id;
 use crate::jwt::{self, LicenseClaims};
 use crate::models::{ActorType, AuditAction, AuditLogNames};
 use crate::util::{AuditLogBuilder, extract_bearer_token};
@@ -41,7 +42,7 @@ pub async fn refresh_token(
     let unverified_claims = jwt::decode_unverified(token)?;
 
     // Validate product_id format before DB lookup (cheap DDoS protection)
-    if !is_valid_uuid(&unverified_claims.product_id) {
+    if !is_valid_prefixed_id(&unverified_claims.product_id) {
         return Err(AppError::Unauthorized);
     }
 
