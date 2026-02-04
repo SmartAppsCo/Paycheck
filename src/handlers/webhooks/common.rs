@@ -708,6 +708,7 @@ async fn handle_checkout<P: WebhookProvider>(
                     amount_cents: tx_data.total_cents,
                     currency: tx_data.currency.clone(),
                     timestamp: chrono::Utc::now().timestamp(),
+                    test_mode: tx_data.test_mode,
                 },
             );
         }
@@ -832,6 +833,7 @@ async fn handle_renewal<P: WebhookProvider>(
                 amount_cents: tx_data.total_cents,
                 currency: tx_data.currency.clone(),
                 timestamp: chrono::Utc::now().timestamp(),
+                test_mode: tx_data.test_mode,
             },
         );
     }
@@ -1113,6 +1115,7 @@ async fn handle_refund<P: WebhookProvider>(
             amount_cents: -(data.amount_cents), // Negative for refunds/disputes
             currency: data.currency.clone(),
             timestamp: chrono::Utc::now().timestamp(),
+            test_mode: data.test_mode,
         },
     );
 
@@ -1239,6 +1242,7 @@ fn process_refund_no_license<P: WebhookProvider>(
             amount_cents: -(data.amount_cents),
             currency: data.currency.clone(),
             timestamp: chrono::Utc::now().timestamp(),
+            test_mode: data.test_mode,
         },
     );
 

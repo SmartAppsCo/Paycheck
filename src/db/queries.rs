@@ -1,6 +1,5 @@
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, ToSql, params, types::Value};
-use uuid::Uuid;
 
 use crate::crypto::{MasterKey, hash_secret};
 use crate::error::{AppError, Result};
@@ -573,9 +572,9 @@ pub fn count_operators(conn: &Connection) -> Result<i64> {
 
 // ============ API Keys (Unified) ============
 
-/// Generate an API key with pc_ prefix
+/// Generate an API key with the standard ApiKey prefix
 pub fn generate_api_key() -> String {
-    format!("pc_{}", Uuid::new_v4().to_string().replace("-", ""))
+    EntityType::ApiKey.gen_id()
 }
 
 /// Get user by API key. Returns the user and key info if found and valid.

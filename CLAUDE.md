@@ -557,23 +557,6 @@ POST /orgs/{org_id}/projects
 3. Code delivered via a configured method (Resend email, webhook, or admin API)
 4. User activates: `POST /redeem` with code, device_id, device_type in JSON body
 
-## Usage Metering (Optional)
-
-When configured, Paycheck emits usage events to an external webhook for platform billing purposes. Optional for self-hosted deployments.
-
-**Configuration:**
-```bash
-export PAYCHECK_METERING_WEBHOOK_URL=http://metering:8080/events
-```
-
-**Events emitted:**
-- **Email events**: `activation_sent`, `feedback_sent`, `crash_sent` with `delivery_method` ("system_key", "org_key", "webhook")
-- **Sales events**: `purchase`, `renewal`, `refund` with transaction details
-
-**Billing logic:**
-- Only emails sent via `system_key` (Paycheck's Resend key) are billable
-- Sales events track transaction volume
-
 ## Transaction Tracking
 
 Transactions are recorded separately from licenses for revenue analytics. Created automatically from Stripe/LemonSqueezy webhooks.

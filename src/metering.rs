@@ -79,6 +79,8 @@ pub struct SalesMeteringEvent {
     pub currency: String,
     /// Unix timestamp
     pub timestamp: i64,
+    /// Whether this is a test/sandbox transaction
+    pub test_mode: bool,
 }
 
 /// Spawn a fire-and-forget email metering event.
@@ -275,11 +277,13 @@ mod tests {
             amount_cents: 9900,
             currency: "usd".to_string(),
             timestamp: 1234567890,
+            test_mode: false,
         };
 
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"event\":\"purchase\""));
         assert!(json.contains("\"amount_cents\":9900"));
         assert!(json.contains("\"payment_provider\":\"stripe\""));
+        assert!(json.contains("\"test_mode\":false"));
     }
 }
