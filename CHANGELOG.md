@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [0.7.0] - 2026-02-04
+
+### Added
+
+- **Prefixed entity IDs**: All IDs now use `pc_{entity}_{32_hex_chars}` format (e.g., `pc_usr_`, `pc_org_`, `pc_lic_`)
+  - Instant entity type identification in logs and support tickets
+  - Collision avoidance with payment provider IDs (Stripe's `prod_`, `cus_`, `sub_`)
+  - New `src/id.rs` module with `EntityType` enum for 15 entity types
+- **Transaction tracking**: Revenue analytics decoupled from licenses
+  - `GET /orgs/{org_id}/transactions[/stats]` — org-level revenue
+  - `GET /orgs/{org_id}/projects/{project_id}/transactions[/stats]` — project-level revenue
+  - `GET /orgs/{org_id}/projects/{project_id}/licenses/{license_id}/transactions` — license history
+  - Filters: `product_id`, `transaction_type`, `date_range`, `test_mode`
+  - Stats: `total_revenue`, `net_revenue`, `transactions_by_type`
+- **Feedback and crash reporting**: Passthrough to dev-configured endpoints (no PII storage)
+  - `POST /feedback` and `POST /crash` endpoints (JWT auth required)
+  - Webhook (primary) + email (fallback) delivery with exponential backoff
+  - Project config: `feedback_webhook_url`, `feedback_email`, `crash_webhook_url`, `crash_email`
+  - SDK methods: `submitFeedback()`, `reportCrash()`, `reportError()` with stack trace sanitization
+- **Usage metering webhook**: Optional billing events for hosted deployments
+  - Email events: `activation_sent`, `feedback_sent`, `crash_sent` with `delivery_method`
+  - Sales events: `purchase`, `renewal`, `refund` with transaction details
+  - Configure via `PAYCHECK_METERING_WEBHOOK_URL`
+- **Refund handling**: Stripe and LemonSqueezy refund webhooks create `refund` transactions
+- **Subscription renewal transactions**: Renewal webhooks now create transaction records
+- **3-level email config lookup**: Product → Project → Org inheritance for `email_config_id`
+- **Configurable request body size**: `PAYCHECK_MAX_BODY_SIZE` env var (default: 1MB)
+- **Docusaurus documentation site**: Comprehensive docs at docs.paycheck.dev
+- **SDK issuer validation**: Rust and TypeScript SDKs reject JWTs not issued by Paycheck
+
+### Changed
+
+- **Breaking**: `/validate` endpoint now accepts full JWT token instead of just `jti`
+- README simplified to point to hosted documentation
+- SDK package metadata updated with correct license (Elastic-2.0) and repository URL
+- Use `OsRng` instead of `thread_rng()` for all cryptographic operations
+- Memory limits added to activation rate limiter (DoS prevention)
+
+### Fixed
+
+- **Project restore endpoint unreachable**: Moved to `org_routes` layer (middleware was rejecting soft-deleted projects)
+- **Service config deletion**: Now uses TOCTOU-safe transaction
+- **Soft delete restore cascades**: `project_members` now properly restored with parent
+- **Queries excluding soft-deleted entities**: Joined entity lookups now filter `deleted_at`
+- **CORS headers**: Added `x-on-behalf-of` to allowed headers
+- **Feedback billing fairness**: Metering correctly reports `org_key` vs `system_key` for all email types
+
+
 ## [0.6.2] - 2026-02-01
 
 ### Fixed
