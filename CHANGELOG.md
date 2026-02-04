@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [0.7.1] - 2026-02-04
+
+### Fixed
+
+- **API key prefix consistency**: New API keys now use `pc_key_` prefix via `EntityType::ApiKey.gen_id()` (existing keys unaffected - lookup is by hash)
+- Docs site logo now navigates in same window instead of opening new tab
+
+
 ## [0.7.0] - 2026-02-04
 
 ### Added
