@@ -112,7 +112,7 @@ export interface ActivationResult {
  * - `updates_exp`: Version access expiration. Controls which versions the user can use.
  *   Compare against your app's build timestamp. Can be `null` for lifetime updates.
  *
- * @see https://github.com/anthropics/paycheck/blob/main/sdk/CORE.md for full documentation
+ * @see https://github.com/SmartAppsCo/paycheck/blob/main/sdk/CORE.md for full documentation
  */
 export interface LicenseClaims {
   // Standard JWT claims

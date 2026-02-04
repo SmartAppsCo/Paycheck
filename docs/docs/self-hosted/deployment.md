@@ -1,4 +1,9 @@
-# Production Deployment Guide
+---
+sidebar_position: 1
+sidebar_label: Deployment
+---
+
+# Deployment Guide
 
 This guide covers deploying Paycheck to a production Linux server.
 
@@ -37,7 +42,7 @@ docker compose logs paycheck | grep "BOOTSTRAP OPERATOR"
 services:
   paycheck:
     build: .
-    # Or use pre-built: image: ghcr.io/CallMeGwei/Paycheck:latest
+    # Or use pre-built: image: ghcr.io/SmartAppsCo/Paycheck:latest
     container_name: paycheck
     restart: unless-stopped
     ports:
@@ -90,7 +95,7 @@ On your build machine:
 
 ```bash
 # Clone and build release binary
-git clone https://github.com/CallMeGwei/Paycheck.git
+git clone https://github.com/SmartAppsCo/Paycheck.git
 cd paycheck
 cargo build --release
 

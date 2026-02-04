@@ -1,0 +1,89 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Fraunces:wght@400;500;600;700&display=swap');
+
+:root {
+  --ifm-color-primary: #e85a4f;
+  --ifm-color-primary-dark: #d44d42;
+  --ifm-color-primary-darker: #c9453a;
+  --ifm-color-primary-darkest: #a53830;
+  --ifm-color-primary-light: #eb6b61;
+  --ifm-color-primary-lighter: #ed7a71;
+  --ifm-color-primary-lightest: #f19d96;
+
+  --ifm-font-family-base: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --ifm-heading-font-family: 'Fraunces', Georgia, serif;
+  --ifm-font-family-monospace: 'DM Mono', SFMono-Regular, Menlo, Monaco, monospace;
+
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #e85a4f;
+  --ifm-color-primary-dark: #d44d42;
+  --ifm-color-primary-darker: #c9453a;
+  --ifm-color-primary-darkest: #a53830;
+  --ifm-color-primary-light: #eb6b61;
+  --ifm-color-primary-lighter: #ed7a71;
+  --ifm-color-primary-lightest: #f19d96;
+
+  --ifm-background-color: #08080c;
+  --ifm-background-surface-color: #0f0f15;
+  --ifm-navbar-background-color: rgba(8, 8, 12, 0.85);
+  --ifm-footer-background-color: #0f0f15;
+  --ifm-card-background-color: #111118;
+
+  --ifm-font-color-base: #f5f1e8;
+  --ifm-font-color-secondary: #9d9a94;
+
+  --ifm-code-background: #0a0a0f;
+  --docusaurus-highlighted-code-line-bg: rgba(255, 255, 255, 0.1);
+}
+
+/* Headings use Fraunces */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--ifm-heading-font-family);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+/* Navbar styling */
+.navbar {
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.navbar__title {
+  font-family: 'Fraunces', serif;
+  font-weight: 600;
+}
+
+/* Footer styling - match marketing site */
+.footer {
+  border-top: 1px solid var(--ifm-toc-border-color) !important;
+  padding: 2.5rem 0;
+  margin-top: 4rem;
+}
+
+.footer.footer--dark {
+  background-color: var(--ifm-background-color);
+}
+
+.footer__copyright {
+  color: #5c5955;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+/* Links */
+[data-theme='dark'] a {
+  color: var(--ifm-color-primary-light);
+}
+
+[data-theme='dark'] a:hover {
+  color: var(--ifm-color-primary-lighter);
+}
+
+/* Code blocks */
+[data-theme='dark'] .prism-code {
+  background-color: #0a0a0f;
+}
