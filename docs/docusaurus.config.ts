@@ -48,6 +48,7 @@ const config: Config = {
         alt: 'Paycheck',
         src: 'img/logo.png',
         href: 'https://paycheck.dev',
+        target: '_self',
         height: 28,
       },
       items: [
