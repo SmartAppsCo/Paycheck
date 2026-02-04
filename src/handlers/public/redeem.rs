@@ -4,12 +4,12 @@ use axum::{
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::crypto::MasterKey;
 use crate::db::{AppState, queries};
 use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::Json;
+use crate::id::EntityType;
 use crate::jwt::{self, LicenseClaims};
 use crate::models::{ActorType, AuditAction, AuditLogNames, DeviceType};
 use crate::util::{AuditLogBuilder, LicenseExpirations};
@@ -228,7 +228,7 @@ fn redeem_license_internal(
         .ok_or_else(|| AppError::Internal(msg::PROJECT_NOT_FOUND.into()))?;
 
     // Generate JTI for the new token
-    let jti = Uuid::new_v4().to_string();
+    let jti = EntityType::Jti.gen_id();
     let now = Utc::now().timestamp();
 
     // Atomically acquire device (handles limit checks + creation in a transaction)

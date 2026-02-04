@@ -24,6 +24,7 @@ const ALL_PREFIXES: &[&str] = &[
     "pc_ppl_",
     "pc_aks_",
     "pc_key_",
+    "pc_jti_",
 ];
 
 /// Validate that a string is a valid Paycheck prefixed ID.
@@ -61,6 +62,8 @@ pub enum EntityType {
     ProductProviderLink,
     ApiKeyScope,
     ApiKey,
+    /// JWT ID - identifies individual JWT tokens for revocation tracking
+    Jti,
 }
 
 impl EntityType {
@@ -82,6 +85,7 @@ impl EntityType {
             Self::ProductProviderLink => "pc_ppl",
             Self::ApiKeyScope => "pc_aks",
             Self::ApiKey => "pc_key",
+            Self::Jti => "pc_jti",
         }
     }
 
@@ -121,6 +125,7 @@ mod tests {
             EntityType::ProductProviderLink.prefix(),
             EntityType::ApiKeyScope.prefix(),
             EntityType::ApiKey.prefix(),
+            EntityType::Jti.prefix(),
         ];
 
         let mut seen = std::collections::HashSet::new();
