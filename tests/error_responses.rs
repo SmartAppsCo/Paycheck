@@ -59,8 +59,6 @@ fn test_app() -> Router {
             None,
             "test@example.com".to_string(),
         )),
-        jwks_cache: std::sync::Arc::new(paycheck::jwt::JwksCache::new()),
-        trusted_issuers: vec![],
         http_client: reqwest::Client::new(),
         metering_webhook_url: None,
         disable_checkout_tag: None,

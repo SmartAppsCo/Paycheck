@@ -58,8 +58,6 @@ fn create_app_state_with_tags(
             None,
             "test@example.com".to_string(),
         )),
-        jwks_cache: Arc::new(JwksCache::new()),
-        trusted_issuers: vec![],
         http_client: reqwest::Client::new(),
         metering_webhook_url: None,
         disable_checkout_tag,

@@ -4,18 +4,6 @@ use std::path::Path;
 
 use crate::crypto::MasterKey;
 
-/// Configuration for a trusted JWT issuer (e.g., Console, mobile app).
-/// JWTs from these issuers can authenticate to the API alongside API keys.
-#[derive(Clone, Debug)]
-pub struct TrustedIssuer {
-    /// Issuer URL (must match `iss` claim in JWT)
-    pub issuer: String,
-    /// JWKS endpoint URL for fetching public keys
-    pub jwks_url: String,
-    /// Expected audience (must match `aud` claim in JWT)
-    pub audience: String,
-}
-
 /// Rate limiting configuration for API endpoints
 #[derive(Clone, Copy, Debug)]
 pub struct RateLimitConfig {
@@ -105,9 +93,6 @@ pub struct Config {
     /// Set via PAYCHECK_DEFAULT_FROM_EMAIL.
     /// Projects can override with their own email_from setting.
     pub default_from_email: String,
-    /// Trusted JWT issuers for first-party app authentication.
-    /// Set via PAYCHECK_TRUSTED_ISSUERS (JSON array).
-    pub trusted_issuers: Vec<TrustedIssuer>,
     /// Number of database migration backups to keep.
     /// Set via MIGRATION_BACKUP_COUNT. Default: 3. -1 = keep all. 0 = no backups.
     pub migration_backup_count: i32,
@@ -309,36 +294,6 @@ impl Config {
         let default_from_email = env::var("PAYCHECK_DEFAULT_FROM_EMAIL")
             .unwrap_or_else(|_| "noreply@paycheck.dev".to_string());
 
-        // Trusted JWT issuers for first-party app authentication
-        // Format: JSON array of {issuer, jwks_url, audience} objects
-        let trusted_issuers: Vec<TrustedIssuer> = env::var("PAYCHECK_TRUSTED_ISSUERS")
-            .ok()
-            .and_then(|json| {
-                #[derive(serde::Deserialize)]
-                struct IssuerConfig {
-                    issuer: String,
-                    jwks_url: String,
-                    audience: String,
-                }
-                serde_json::from_str::<Vec<IssuerConfig>>(&json)
-                    .map_err(|e| {
-                        eprintln!("WARNING: Failed to parse PAYCHECK_TRUSTED_ISSUERS: {}", e);
-                        e
-                    })
-                    .ok()
-            })
-            .map(|configs| {
-                configs
-                    .into_iter()
-                    .map(|c| TrustedIssuer {
-                        issuer: c.issuer,
-                        jwks_url: c.jwks_url,
-                        audience: c.audience,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
         // Migration backup count (how many backups to keep)
         // -1 = keep all backups, 0 = no backups, n = keep n backups
         let migration_backup_count: i32 = env::var("MIGRATION_BACKUP_COUNT")
@@ -379,7 +334,6 @@ impl Config {
             console_origins,
             resend_api_key,
             default_from_email,
-            trusted_issuers,
             migration_backup_count,
             metering_webhook_url,
             max_body_size,

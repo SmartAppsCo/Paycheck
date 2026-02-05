@@ -102,7 +102,6 @@ use axum::{
 };
 
 use crate::db::{AppState, queries};
-use crate::jwt::validate_first_party_token;
 use crate::models::{
     AccessLevel, AuditLogNames, OperatorRole, OrgMemberRole, OrgMemberWithUser, ProjectMemberRole,
     User,
@@ -124,9 +123,9 @@ pub struct OrgMemberContext {
     pub project_role: Option<ProjectMemberRole>,
     /// If set, this request is being made by an operator on behalf of the member
     pub impersonator: Option<ImpersonatorInfo>,
-    /// How the request was authenticated (API key or JWT)
+    /// How the request was authenticated
     pub auth_method: AuthMethod,
-    /// API key access level (None for JWT auth, Some for scoped API key auth)
+    /// API key access level (None for unscoped keys, Some for scoped API key auth)
     pub api_key_access: Option<AccessLevel>,
 }
 
@@ -329,40 +328,6 @@ fn check_api_key_scope_for_org(
     }
 }
 
-/// Authenticate user from JWT token.
-/// Returns (User, AuthMethod) if authentication succeeds.
-async fn authenticate_user_jwt(
-    state: &AppState,
-    token: &str,
-) -> Result<(User, AuthMethod), StatusCode> {
-    // Validate the JWT
-    let validated = validate_first_party_token(token, &state.trusted_issuers, &state.jwks_cache)
-        .await
-        .map_err(|e| {
-            tracing::debug!("JWT validation failed: {}", e);
-            StatusCode::UNAUTHORIZED
-        })?;
-
-    let conn = state.db.get().map_err(|e| {
-        tracing::error!("Failed to get database connection for JWT auth: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    // Look up user by email
-    let user = queries::get_user_by_email(&conn, &validated.claims.email)
-        .map_err(|e| {
-            tracing::error!("Failed to look up user by email: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    let auth_method = AuthMethod::Jwt {
-        issuer: validated.issuer,
-    };
-
-    Ok((user, auth_method))
-}
-
 /// Middleware for org-level endpoints (`/orgs/{org_id}/*`).
 ///
 /// Implements the three-path authentication system documented at module level.
@@ -371,7 +336,7 @@ async fn authenticate_user_jwt(
 /// # Authentication Flow
 ///
 /// 1. Extract bearer token and optional `X-On-Behalf-Of` header
-/// 2. Authenticate user via JWT or API key
+/// 2. Authenticate user via API key
 /// 3. **Path 1:** Try operator impersonation (if header present)
 /// 4. **Path 2:** Try normal org member authentication
 /// 5. **Path 3:** Try synthetic operator access (admin+ operators)
@@ -397,28 +362,22 @@ pub async fn org_member_auth(
         .get(ON_BEHALF_OF_HEADER)
         .and_then(|v| v.to_str().ok());
 
-    // Authenticate user - either via JWT or API key
-    let (user, auth_method, api_key_record) = if token.starts_with("eyJ") {
-        // JWT authentication
-        let (user, auth_method) = authenticate_user_jwt(&state, token).await?;
-        (user, auth_method, None)
-    } else {
-        // API key authentication
-        let conn = state.db.get().map_err(|e| {
-            tracing::error!("Failed to get database connection for API key auth: {}", e);
+    // Authenticate user via API key
+    let conn = state.db.get().map_err(|e| {
+        tracing::error!("Failed to get database connection for API key auth: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let (user, api_key_record) = queries::get_user_by_api_key(&conn, token)
+        .map_err(|e| {
+            tracing::error!("Failed to look up API key: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-        let (user, api_key_record) = queries::get_user_by_api_key(&conn, token)
-            .map_err(|e| {
-                tracing::error!("Failed to look up API key: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?
-            .ok_or(StatusCode::UNAUTHORIZED)?;
-        let auth_method = AuthMethod::ApiKey {
-            key_id: api_key_record.id.clone(),
-            key_prefix: api_key_record.prefix.clone(),
-        };
-        (user, auth_method, Some(api_key_record))
+        })?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let auth_method = AuthMethod {
+        key_id: api_key_record.id.clone(),
+        key_prefix: api_key_record.prefix.clone(),
     };
 
     let conn = state.db.get().map_err(|e| {
@@ -441,13 +400,9 @@ pub async fn org_member_auth(
         return Ok(next.run(request).await);
     }
 
-    // Check API key scopes (if any) - only for API key auth
+    // Check API key scopes (if any)
     // For org-level endpoints, only org-level scopes are accepted (project-scoped keys are rejected)
-    let api_key_access = if api_key_record.is_some() {
-        check_api_key_scope_for_org(&state, token, org_id, None)?
-    } else {
-        None
-    };
+    let api_key_access = check_api_key_scope_for_org(&state, token, org_id, None)?;
 
     // Try normal org member authentication first
     let member = queries::get_org_member_with_user_by_user_and_org(&conn, &user.id, org_id)
@@ -560,28 +515,22 @@ pub async fn org_member_project_auth(
         .get(ON_BEHALF_OF_HEADER)
         .and_then(|v| v.to_str().ok());
 
-    // Authenticate user - either via JWT or API key
-    let (user, auth_method, is_api_key) = if token.starts_with("eyJ") {
-        // JWT authentication
-        let (user, auth_method) = authenticate_user_jwt(&state, token).await?;
-        (user, auth_method, false)
-    } else {
-        // API key authentication
-        let conn = state.db.get().map_err(|e| {
-            tracing::error!("Failed to get database connection for API key auth: {}", e);
+    // Authenticate user via API key
+    let conn = state.db.get().map_err(|e| {
+        tracing::error!("Failed to get database connection for API key auth: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let (user, api_key_record) = queries::get_user_by_api_key(&conn, token)
+        .map_err(|e| {
+            tracing::error!("Failed to look up API key: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-        let (user, api_key_record) = queries::get_user_by_api_key(&conn, token)
-            .map_err(|e| {
-                tracing::error!("Failed to look up API key: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?
-            .ok_or(StatusCode::UNAUTHORIZED)?;
-        let auth_method = AuthMethod::ApiKey {
-            key_id: api_key_record.id,
-            key_prefix: api_key_record.prefix,
-        };
-        (user, auth_method, true)
+        })?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let auth_method = AuthMethod {
+        key_id: api_key_record.id.clone(),
+        key_prefix: api_key_record.prefix.clone(),
     };
 
     let conn = state.db.get().map_err(|e| {
@@ -595,13 +544,9 @@ pub async fn org_member_project_auth(
     {
         (member, Some(impersonator), None) // Operators bypass scope checks
     } else {
-        // Check API key scopes (if any) - only for API key auth
+        // Check API key scopes (if any)
         // For project-level endpoints, pass project_id to enforce project-level scope checking
-        let api_key_access = if is_api_key {
-            check_api_key_scope_for_org(&state, token, org_id, Some(project_id))?
-        } else {
-            None
-        };
+        let api_key_access = check_api_key_scope_for_org(&state, token, org_id, Some(project_id))?;
 
         // Try normal org member authentication
         let member = queries::get_org_member_with_user_by_user_and_org(&conn, &user.id, org_id)

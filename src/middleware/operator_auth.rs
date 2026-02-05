@@ -6,7 +6,6 @@ use axum::{
 };
 
 use crate::db::{AppState, queries};
-use crate::jwt::validate_first_party_token;
 use crate::models::{AuditLogNames, OperatorRole, User};
 use crate::util::extract_bearer_token;
 
@@ -15,7 +14,7 @@ use super::AuthMethod;
 #[derive(Clone)]
 pub struct OperatorContext {
     pub user: User,
-    /// How the request was authenticated (API key or JWT)
+    /// How the request was authenticated
     pub auth_method: AuthMethod,
 }
 
@@ -40,7 +39,7 @@ impl OperatorContext {
 
 /// Authenticate operator from bearer token (API key).
 /// Returns (User, AuthMethod) if authentication succeeds.
-fn authenticate_operator_api_key(
+fn authenticate_operator(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<(User, AuthMethod), StatusCode> {
@@ -50,17 +49,11 @@ fn authenticate_operator_api_key(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // Determine auth method based on token format
-    if token.starts_with("eyJ") {
-        // JWT token - handled by async function
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-
-    // API key path (default)
-    let (user, api_key_record) = queries::get_user_by_api_key(&conn, token).map_err(|e| {
-        tracing::error!("Failed to look up API key: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
+    let (user, api_key_record) = queries::get_user_by_api_key(&conn, token)
+        .map_err(|e| {
+            tracing::error!("Failed to look up API key: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Check if user is an operator
@@ -68,7 +61,7 @@ fn authenticate_operator_api_key(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let auth_method = AuthMethod::ApiKey {
+    let auth_method = AuthMethod {
         key_id: api_key_record.id,
         key_prefix: api_key_record.prefix,
     };
@@ -76,64 +69,12 @@ fn authenticate_operator_api_key(
     Ok((user, auth_method))
 }
 
-/// Authenticate operator from JWT token.
-/// Returns (User, AuthMethod) if authentication succeeds.
-async fn authenticate_operator_jwt(
-    state: &AppState,
-    token: &str,
-) -> Result<(User, AuthMethod), StatusCode> {
-    // Validate the JWT
-    let validated = validate_first_party_token(token, &state.trusted_issuers, &state.jwks_cache)
-        .await
-        .map_err(|e| {
-            tracing::debug!("JWT validation failed: {}", e);
-            StatusCode::UNAUTHORIZED
-        })?;
-
-    let conn = state.db.get().map_err(|e| {
-        tracing::error!("Failed to get database connection: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    // Look up user by email
-    let user = queries::get_user_by_email(&conn, &validated.claims.email).map_err(|e| {
-        tracing::error!("Failed to look up user by email: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    // Check if user is an operator
-    if user.operator_role.is_none() {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-
-    let auth_method = AuthMethod::Jwt {
-        issuer: validated.issuer,
-    };
-
-    Ok((user, auth_method))
-}
-
-/// Authenticate operator from request headers (API key or JWT).
-async fn authenticate_from_request(
-    state: &AppState,
-    headers: &HeaderMap,
-) -> Result<(User, AuthMethod), StatusCode> {
-    let token = extract_bearer_token(headers).ok_or(StatusCode::UNAUTHORIZED)?;
-
-    if token.starts_with("eyJ") {
-        authenticate_operator_jwt(state, token).await
-    } else {
-        authenticate_operator_api_key(state, headers)
-    }
-}
-
 pub async fn operator_auth(
     State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let (user, auth_method) = authenticate_from_request(&state, request.headers()).await?;
+    let (user, auth_method) = authenticate_operator(&state, request.headers())?;
 
     request
         .extensions_mut()
@@ -146,7 +87,7 @@ pub async fn require_owner_role(
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let (user, auth_method) = authenticate_from_request(&state, request.headers()).await?;
+    let (user, auth_method) = authenticate_operator(&state, request.headers())?;
 
     if !matches!(user.operator_role, Some(OperatorRole::Owner)) {
         return Err(StatusCode::FORBIDDEN);
@@ -163,7 +104,7 @@ pub async fn require_admin_role(
     mut request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let (user, auth_method) = authenticate_from_request(&state, request.headers()).await?;
+    let (user, auth_method) = authenticate_operator(&state, request.headers())?;
 
     if !matches!(
         user.operator_role,

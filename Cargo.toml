@@ -63,4 +63,3 @@ unicode-normalization = "0.1"
 [dev-dependencies]
 tempfile = "3.24.0"
 tokio-test = "0.4"
-rsa = "0.9"  # For RSA key generation in tests

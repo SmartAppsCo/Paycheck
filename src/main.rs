@@ -13,7 +13,7 @@ use paycheck::db::{AppState, MigrationTarget, create_pool, init_audit_db, init_d
 use paycheck::email::EmailService;
 use paycheck::feedback::DeliveryService;
 use paycheck::handlers;
-use paycheck::jwt::{self, JwksCache};
+use paycheck::jwt;
 use paycheck::models::{
     self, ActorType, AuditAction, AuditLogNames, CreateOrgMember, CreateProduct, CreateProject,
     CreateProviderLink, CreateUser, OperatorRole, OrgMemberRole,
@@ -778,21 +778,6 @@ async fn main() {
         config.default_from_email.clone(),
     );
 
-    // Initialize JWKS cache for first-party JWT authentication
-    let jwks_cache = Arc::new(JwksCache::new());
-
-    // Log trusted issuers if any are configured
-    if !config.trusted_issuers.is_empty() {
-        tracing::info!(
-            "Trusted JWT issuers configured: {:?}",
-            config
-                .trusted_issuers
-                .iter()
-                .map(|i| &i.issuer)
-                .collect::<Vec<_>>()
-        );
-    }
-
     // Initialize email hasher (stable HMAC key stored encrypted in DB)
     let email_hasher = {
         let conn = db_pool
@@ -856,8 +841,6 @@ async fn main() {
         )),
         email_service: Arc::new(email_service),
         delivery_service: Arc::new(delivery_service),
-        jwks_cache,
-        trusted_issuers: config.trusted_issuers.clone(),
         http_client: reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
             .build()
