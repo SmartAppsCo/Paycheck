@@ -54,6 +54,10 @@ pub struct AppState {
     pub http_client: Client,
     /// Optional webhook URL for usage metering
     pub metering_webhook_url: Option<String>,
+    /// Tag name that disables checkout for an organization (if set)
+    pub disable_checkout_tag: Option<String>,
+    /// Tag name that disables public API for an organization (if set)
+    pub disable_public_api_tag: Option<String>,
 }
 
 pub fn create_pool(database_path: &str) -> Result<DbPool, r2d2::Error> {

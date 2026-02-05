@@ -13,7 +13,7 @@ use crate::db::{AppState, queries};
 use crate::email::{
     EmailSendConfig, EmailSendResult, EmailTrigger, LicenseCodeInfo, MultiLicenseEmailConfig,
 };
-use crate::error::Result;
+use crate::error::{AppError, Result};
 use crate::extractors::Json;
 use crate::metering::{generate_email_idempotency_key, spawn_email_metering, EmailMeteringEvent};
 use crate::models::{ActorType, AuditAction, AuditLogNames};
@@ -71,6 +71,17 @@ pub async fn request_activation_code(
             }));
         }
     };
+
+    // Check if org is disabled
+    if let Some(ref tag) = state.disable_public_api_tag {
+        if let Some(org) = queries::get_organization_by_id(&conn, &project.org_id)? {
+            if org.tags.contains(tag) {
+                return Err(AppError::ServiceUnavailable(
+                    "Organization is currently unavailable".into(),
+                ));
+            }
+        }
+    }
 
     // Look up active licenses by email hash and project (user may have multiple).
     // The query filters out revoked, deleted, and expired licenses - only active

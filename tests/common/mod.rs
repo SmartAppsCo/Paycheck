@@ -275,6 +275,8 @@ pub fn create_test_app_state() -> AppState {
         trusted_issuers: vec![],
         http_client: reqwest::Client::new(),
         metering_webhook_url: None,
+        disable_checkout_tag: None,
+        disable_public_api_tag: None,
     }
 }
 

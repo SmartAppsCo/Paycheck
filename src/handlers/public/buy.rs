@@ -61,6 +61,24 @@ pub async fn initiate_buy(
     let org = queries::get_organization_by_id(&conn, &project.org_id)?
         .or_not_found(msg::ORG_NOT_FOUND)?;
 
+    // Check if org is disabled (full public API block)
+    if let Some(ref tag) = state.disable_public_api_tag {
+        if org.tags.contains(tag) {
+            return Err(AppError::ServiceUnavailable(
+                "Organization is currently unavailable".into(),
+            ));
+        }
+    }
+
+    // Check if checkout is disabled (just new purchases blocked)
+    if let Some(ref tag) = state.disable_checkout_tag {
+        if org.tags.contains(tag) {
+            return Err(AppError::ServiceUnavailable(
+                "Checkout is currently unavailable".into(),
+            ));
+        }
+    }
+
     // Determine payment provider
     let provider = if let Some(ref p) = request.provider {
         // Explicit provider specified

@@ -63,6 +63,8 @@ fn test_app() -> Router {
         trusted_issuers: vec![],
         http_client: reqwest::Client::new(),
         metering_webhook_url: None,
+        disable_checkout_tag: None,
+        disable_public_api_tag: None,
     };
 
     Router::new()

@@ -863,6 +863,8 @@ async fn main() {
             .build()
             .expect("failed to build HTTP client"),
         metering_webhook_url: config.metering_webhook_url.clone(),
+        disable_checkout_tag: config.disable_checkout_tag.clone(),
+        disable_public_api_tag: config.disable_public_api_tag.clone(),
     };
 
     // Purge old public audit logs on startup (0 = never purge)

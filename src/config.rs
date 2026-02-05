@@ -119,6 +119,15 @@ pub struct Config {
     /// Protects against memory exhaustion from large payloads.
     /// Set via PAYCHECK_MAX_BODY_SIZE. Default: 1MB.
     pub max_body_size: usize,
+    /// Tag name that disables checkout (`POST /buy`) for an organization.
+    /// When an org has this tag, `/buy` returns 402 Payment Required.
+    /// Set via PAYCHECK_DISABLE_CHECKOUT_TAG. If not set, no checking.
+    pub disable_checkout_tag: Option<String>,
+    /// Tag name that disables public API for an organization.
+    /// When an org has this tag, `/validate`, `/activation/request-code`,
+    /// `/refresh`, and `/buy` return 503 Service Unavailable.
+    /// Set via PAYCHECK_DISABLE_PUBLIC_API_TAG. If not set, no checking.
+    pub disable_public_api_tag: Option<String>,
 }
 
 /// Check that a file has secure permissions (owner read-only, no write, no group/other access).
@@ -346,6 +355,10 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(1024 * 1024); // 1MB default
 
+        // Tag-based access control for orgs (optional - if not set, no checking)
+        let disable_checkout_tag = env::var("PAYCHECK_DISABLE_CHECKOUT_TAG").ok();
+        let disable_public_api_tag = env::var("PAYCHECK_DISABLE_PUBLIC_API_TAG").ok();
+
         Self {
             host,
             port,
@@ -370,6 +383,8 @@ impl Config {
             migration_backup_count,
             metering_webhook_url,
             max_body_size,
+            disable_checkout_tag,
+            disable_public_api_tag,
         }
     }
 

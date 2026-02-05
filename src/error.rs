@@ -25,6 +25,9 @@ pub enum AppError {
     #[error("Conflict: {0}")]
     Conflict(String),
 
+    #[error("Service unavailable: {0}")]
+    ServiceUnavailable(String),
+
     #[error("Database error: {0}")]
     Database(#[from] rusqlite::Error),
 
@@ -94,6 +97,9 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized", None),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, "Forbidden", Some(msg.clone())),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, "Conflict", Some(msg.clone())),
+            AppError::ServiceUnavailable(msg) => {
+                (StatusCode::SERVICE_UNAVAILABLE, "Service unavailable", Some(msg.clone()))
+            }
             AppError::Database(e) => {
                 tracing::error!("Database error: {}", e);
                 (

@@ -115,6 +115,8 @@ fn setup_refresh_test() -> (Router, String, String, String, String) {
         trusted_issuers: vec![],
         http_client: reqwest::Client::new(),
         metering_webhook_url: None,
+        disable_checkout_tag: None,
+        disable_public_api_tag: None,
     };
 
     let app = Router::new()
@@ -294,6 +296,8 @@ async fn test_refresh_rejects_non_uuid_product_id() {
         trusted_issuers: vec![],
         http_client: reqwest::Client::new(),
         metering_webhook_url: None,
+        disable_checkout_tag: None,
+        disable_public_api_tag: None,
     };
 
     let app = Router::new()
@@ -406,6 +410,8 @@ async fn test_refresh_with_revoked_license_fails() {
         trusted_issuers: vec![],
         http_client: reqwest::Client::new(),
         metering_webhook_url: None,
+        disable_checkout_tag: None,
+        disable_public_api_tag: None,
     };
 
     let app = Router::new()
@@ -512,6 +518,8 @@ async fn test_refresh_with_revoked_jti_fails() {
         trusted_issuers: vec![],
         http_client: reqwest::Client::new(),
         metering_webhook_url: None,
+        disable_checkout_tag: None,
+        disable_public_api_tag: None,
     };
 
     let app = Router::new()
@@ -621,6 +629,8 @@ async fn test_refresh_with_expired_jwt_succeeds() {
         trusted_issuers: vec![],
         http_client: reqwest::Client::new(),
         metering_webhook_url: None,
+        disable_checkout_tag: None,
+        disable_public_api_tag: None,
     };
 
     let app = Router::new()
@@ -744,6 +754,8 @@ async fn test_refresh_with_expired_license_fails() {
         trusted_issuers: vec![],
         http_client: reqwest::Client::new(),
         metering_webhook_url: None,
+        disable_checkout_tag: None,
+        disable_public_api_tag: None,
     };
 
     let app = Router::new()
@@ -898,6 +910,8 @@ async fn test_refresh_renewed_subscription_uses_stored_expiration() {
         trusted_issuers: vec![],
         http_client: reqwest::Client::new(),
         metering_webhook_url: None,
+        disable_checkout_tag: None,
+        disable_public_api_tag: None,
     };
 
     let app = Router::new()
@@ -1061,6 +1075,8 @@ async fn test_refresh_perpetual_license_ignores_product_exp_days() {
         trusted_issuers: vec![],
         http_client: reqwest::Client::new(),
         metering_webhook_url: None,
+        disable_checkout_tag: None,
+        disable_public_api_tag: None,
     };
 
     let app = Router::new()

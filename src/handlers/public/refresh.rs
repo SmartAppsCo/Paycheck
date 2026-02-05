@@ -53,6 +53,17 @@ pub async fn refresh_token(
     let project =
         queries::get_project_by_id(&conn, &product.project_id)?.ok_or(AppError::Unauthorized)?;
 
+    // Check if org is disabled
+    if let Some(ref tag) = state.disable_public_api_tag {
+        if let Some(org) = queries::get_organization_by_id(&conn, &project.org_id)? {
+            if org.tags.contains(tag) {
+                return Err(AppError::ServiceUnavailable(
+                    "Organization is currently unavailable".into(),
+                ));
+            }
+        }
+    }
+
     // Now verify the token signature (allowing expired tokens)
     let verified = jwt::verify_token_allow_expired(token, &project.public_key).map_err(|e| {
         tracing::debug!("JWT signature verification failed during refresh: {}", e);

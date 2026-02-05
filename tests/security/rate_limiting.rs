@@ -87,6 +87,8 @@ fn public_app_with_rate_limits_and_ip(
         trusted_issuers: vec![],
         http_client: reqwest::Client::new(),
         metering_webhook_url: None,
+        disable_checkout_tag: None,
+        disable_public_api_tag: None,
     };
 
     // Use axum::Extension to directly inject ConnectInfo for PeerIpKeyExtractor
@@ -141,6 +143,8 @@ fn public_app_with_activation_limiter(
         trusted_issuers: vec![],
         http_client: reqwest::Client::new(),
         metering_webhook_url: None,
+        disable_checkout_tag: None,
+        disable_public_api_tag: None,
     };
 
     // Use axum::Extension to directly inject ConnectInfo for PeerIpKeyExtractor

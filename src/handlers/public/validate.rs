@@ -3,7 +3,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::db::{AppState, queries};
-use crate::error::Result;
+use crate::error::{AppError, Result};
 use crate::extractors::Json;
 use crate::jwt::verify_token_allow_expired;
 
@@ -47,6 +47,17 @@ pub async fn validate_license(
         None => return Ok(invalid_response()),
     };
     let project_id = project.id.clone();
+
+    // Check if org is disabled
+    if let Some(ref tag) = state.disable_public_api_tag {
+        if let Some(org) = queries::get_organization_by_id(&conn, &project.org_id)? {
+            if org.tags.contains(tag) {
+                return Err(AppError::ServiceUnavailable(
+                    "Organization is currently unavailable".into(),
+                ));
+            }
+        }
+    }
 
     // Verify the JWT signature and extract claims
     // Uses allow_expired because the JWT's `exp` is a short freshness window,
