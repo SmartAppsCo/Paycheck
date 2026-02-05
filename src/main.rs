@@ -1019,8 +1019,17 @@ async fn main() {
 }
 
 async fn shutdown_signal() {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("Failed to install Ctrl+C handler");
-    tracing::info!("Shutdown signal received, stopping server...");
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
+    let mut sigint = signal(SignalKind::interrupt()).expect("Failed to install SIGINT handler");
+
+    tokio::select! {
+        _ = sigterm.recv() => {
+            tracing::info!("SIGTERM received, shutting down gracefully...");
+        }
+        _ = sigint.recv() => {
+            tracing::info!("SIGINT received, shutting down gracefully...");
+        }
+    }
 }
