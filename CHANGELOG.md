@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [0.8.0] - 2026-02-05
+
+### Added
+
+- **Tagging system for users and organizations**: Flexible tagging with add/remove semantics where remove takes precedence over add
+  - Tags stored as JSON arrays in the database
+  - New `PATCH /operators/users/{id}/tags` endpoint for user tags (admin+ required)
+  - New `PATCH /operators/organizations/{id}/tags` endpoint for org tags (admin+ required)
+  - Request body: `{"add": ["tag1", "tag2"], "remove": ["tag3"]}` — remove takes precedence
+- **Org tag enforcement for public API endpoints**: Configurable tag-based blocking for organizations
+  - `PAYCHECK_DISABLE_CHECKOUT_TAG`: Blocks `POST /buy` when org has matching tag
+  - `PAYCHECK_DISABLE_PUBLIC_API_TAG`: Blocks `/buy`, `/validate`, `/activation/request-code`, and `/refresh`
+  - Returns 503 Service Unavailable when org has the matching tag
+  - No blocking when env vars are not set (self-hosted friendly)
+
+### Fixed
+
+- **Unnecessary backup on fresh databases**: Migration system now skips backup for version 0 databases (nothing to backup)
+
+
 ## [0.7.2] - 2026-02-04
 
 ### Fixed
