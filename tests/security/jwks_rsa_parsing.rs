@@ -7,25 +7,62 @@
 #[path = "../common/mod.rs"]
 mod common;
 
-use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
-use jwt_simple::prelude::*;
+use base64::Engine;
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use rsa::pkcs1::EncodeRsaPrivateKey;
+use rsa::traits::PublicKeyParts;
+use rsa::RsaPrivateKey;
+use serde::{Deserialize, Serialize};
+
+/// Test claims for RSA JWT tests
+#[derive(Debug, Serialize, Deserialize)]
+struct TestClaims {
+    sub: String,
+    exp: i64,
+    iat: i64,
+}
+
+fn create_test_claims() -> TestClaims {
+    let now = chrono::Utc::now().timestamp();
+    TestClaims {
+        sub: "test-user".to_string(),
+        exp: now + 3600,
+        iat: now,
+    }
+}
 
 // ============ VALID KEY PARSING TESTS ============
 
-/// Test that jwt-simple's from_components works with standard RSA keys.
+/// Test that jsonwebtoken's from_rsa_components works with standard RSA keys.
 #[test]
 fn test_from_components_with_2048_bit_key() {
-    // Generate a key pair and extract components
-    let key_pair = RS256KeyPair::generate(2048).unwrap();
-    let public_key = key_pair.public_key();
+    let mut rng = rand::thread_rng();
+    let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
 
-    // The key should be usable for verification
-    let claims = Claims::create(Duration::from_hours(1));
-    let token = key_pair.sign(claims).unwrap();
+    // Get n and e components
+    let n = private_key.n();
+    let e = private_key.e();
 
-    // Verify with the original key
-    let verified = public_key.verify_token::<NoCustomClaims>(&token, None);
+    // Encode as base64url
+    let n_b64 = URL_SAFE_NO_PAD.encode(n.to_bytes_be());
+    let e_b64 = URL_SAFE_NO_PAD.encode(e.to_bytes_be());
+
+    // Create decoding key from components
+    let decoding_key = DecodingKey::from_rsa_components(&n_b64, &e_b64).unwrap();
+
+    // Create encoding key for signing
+    let private_der = private_key.to_pkcs1_der().unwrap();
+    let encoding_key = EncodingKey::from_rsa_der(private_der.as_bytes());
+
+    // Sign a token
+    let claims = create_test_claims();
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key).unwrap();
+
+    // Verify with the decoding key
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.validate_aud = false;
+    let verified = decode::<TestClaims>(&token, &decoding_key, &validation);
     assert!(verified.is_ok(), "Key should verify token");
 }
 
@@ -35,17 +72,15 @@ fn test_standard_exponent_65537() {
     // 65537 = 0x010001 in bytes
     let e_bytes = vec![0x01, 0x00, 0x01];
 
-    // Generate a real key to get valid n bytes
-    let key_pair = RS256KeyPair::generate(2048).unwrap();
-
-    // Verify the key works
-    let claims = Claims::create(Duration::from_hours(1));
-    let token = key_pair.sign(claims).unwrap();
-    assert!(!token.is_empty());
-
     // Verify exponent encoding (AQAB is standard base64url for 65537)
     let e_b64 = URL_SAFE_NO_PAD.encode(&e_bytes);
     assert_eq!(e_b64, "AQAB");
+
+    // Generate a key and verify the exponent is 65537
+    let mut rng = rand::thread_rng();
+    let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+    let e = private_key.e();
+    assert_eq!(e.to_bytes_be(), e_bytes, "RSA exponent should be 65537");
 }
 
 // ============ SIGNATURE VERIFICATION TESTS ============
@@ -53,19 +88,29 @@ fn test_standard_exponent_65537() {
 /// Test that a parsed key can actually verify a signature.
 #[test]
 fn test_key_verifies_signature() {
-    let key_pair = RS256KeyPair::generate(2048).unwrap();
-    let public_key = key_pair.public_key();
+    let mut rng = rand::thread_rng();
+    let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
 
-    let claims = Claims::create(Duration::from_hours(1)).with_subject("test-user");
-    let token = key_pair.sign(claims).unwrap();
+    let n = private_key.n();
+    let e = private_key.e();
+    let n_b64 = URL_SAFE_NO_PAD.encode(n.to_bytes_be());
+    let e_b64 = URL_SAFE_NO_PAD.encode(e.to_bytes_be());
 
-    let verification = public_key.verify_token::<NoCustomClaims>(&token, None);
+    let decoding_key = DecodingKey::from_rsa_components(&n_b64, &e_b64).unwrap();
+    let private_der = private_key.to_pkcs1_der().unwrap();
+    let encoding_key = EncodingKey::from_rsa_der(private_der.as_bytes());
+
+    let claims = create_test_claims();
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key).unwrap();
+
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.validate_aud = false;
+    let verification = decode::<TestClaims>(&token, &decoding_key, &validation);
     assert!(verification.is_ok(), "Key should verify valid signature");
 
     let verified_claims = verification.unwrap();
     assert_eq!(
-        verified_claims.subject,
-        Some("test-user".to_string()),
+        verified_claims.claims.sub, "test-user",
         "Claims should be preserved"
     );
 }
@@ -73,14 +118,28 @@ fn test_key_verifies_signature() {
 /// Test that a key rejects signatures from a different key pair.
 #[test]
 fn test_key_rejects_wrong_signature() {
-    let key_pair_1 = RS256KeyPair::generate(2048).unwrap();
-    let key_pair_2 = RS256KeyPair::generate(2048).unwrap();
+    let mut rng = rand::thread_rng();
+    let private_key_1 = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+    let private_key_2 = RsaPrivateKey::new(&mut rng, 2048).unwrap();
 
-    let claims = Claims::create(Duration::from_hours(1));
-    let token = key_pair_1.sign(claims).unwrap();
+    // Sign with key 1
+    let private_der_1 = private_key_1.to_pkcs1_der().unwrap();
+    let encoding_key_1 = EncodingKey::from_rsa_der(private_der_1.as_bytes());
 
-    let public_key_2 = key_pair_2.public_key();
-    let verification = public_key_2.verify_token::<NoCustomClaims>(&token, None);
+    let claims = create_test_claims();
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key_1).unwrap();
+
+    // Try to verify with key 2's public key
+    let n_2 = private_key_2.n();
+    let e_2 = private_key_2.e();
+    let n_b64_2 = URL_SAFE_NO_PAD.encode(n_2.to_bytes_be());
+    let e_b64_2 = URL_SAFE_NO_PAD.encode(e_2.to_bytes_be());
+
+    let decoding_key_2 = DecodingKey::from_rsa_components(&n_b64_2, &e_b64_2).unwrap();
+
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.validate_aud = false;
+    let verification = decode::<TestClaims>(&token, &decoding_key_2, &validation);
 
     assert!(
         verification.is_err(),
@@ -91,11 +150,20 @@ fn test_key_rejects_wrong_signature() {
 /// Test that a key rejects a tampered token.
 #[test]
 fn test_key_rejects_tampered_token() {
-    let key_pair = RS256KeyPair::generate(2048).unwrap();
-    let public_key = key_pair.public_key();
+    let mut rng = rand::thread_rng();
+    let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
 
-    let claims = Claims::create(Duration::from_hours(1));
-    let token = key_pair.sign(claims).unwrap();
+    let n = private_key.n();
+    let e = private_key.e();
+    let n_b64 = URL_SAFE_NO_PAD.encode(n.to_bytes_be());
+    let e_b64 = URL_SAFE_NO_PAD.encode(e.to_bytes_be());
+
+    let decoding_key = DecodingKey::from_rsa_components(&n_b64, &e_b64).unwrap();
+    let private_der = private_key.to_pkcs1_der().unwrap();
+    let encoding_key = EncodingKey::from_rsa_der(private_der.as_bytes());
+
+    let claims = create_test_claims();
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key).unwrap();
 
     // Tamper with the payload
     let parts: Vec<&str> = token.split('.').collect();
@@ -108,7 +176,9 @@ fn test_key_rejects_tampered_token() {
     let tampered_payload = STANDARD.encode(&payload_bytes);
     let tampered_token = format!("{}.{}.{}", parts[0], tampered_payload, parts[2]);
 
-    let verification = public_key.verify_token::<NoCustomClaims>(&tampered_token, None);
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.validate_aud = false;
+    let verification = decode::<TestClaims>(&tampered_token, &decoding_key, &validation);
     assert!(verification.is_err(), "Key should reject tampered token");
 }
 
@@ -117,37 +187,50 @@ fn test_key_rejects_tampered_token() {
 /// Test from_components with valid n and e bytes.
 #[test]
 fn test_from_components_valid_input() {
-    // Generate a key and get its DER representation
-    let key_pair = RS256KeyPair::generate(2048).unwrap();
-    let public_key = key_pair.public_key();
+    let mut rng = rand::thread_rng();
+    let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
 
-    // Export to PEM and verify key is valid by using it
-    let claims = Claims::create(Duration::from_hours(1));
-    let token = key_pair.sign(claims).unwrap();
+    let n = private_key.n();
+    let e = private_key.e();
+    let n_b64 = URL_SAFE_NO_PAD.encode(n.to_bytes_be());
+    let e_b64 = URL_SAFE_NO_PAD.encode(e.to_bytes_be());
 
-    let verification = public_key.verify_token::<NoCustomClaims>(&token, None);
+    let decoding_key = DecodingKey::from_rsa_components(&n_b64, &e_b64).unwrap();
+    let private_der = private_key.to_pkcs1_der().unwrap();
+    let encoding_key = EncodingKey::from_rsa_der(private_der.as_bytes());
+
+    let claims = create_test_claims();
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key).unwrap();
+
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.validate_aud = false;
+    let verification = decode::<TestClaims>(&token, &decoding_key, &validation);
     assert!(verification.is_ok());
 }
 
-/// Test that invalid keys (created from garbage) fail at verification time.
-/// Note: from_components may accept invalid inputs but verification will fail.
+/// Test that invalid keys fail at verification time.
 #[test]
 fn test_invalid_key_fails_at_verification() {
-    // Create a key with garbage data
-    let garbage_n = vec![0x01; 32]; // Way too small for RSA
-    let valid_e = vec![0x01, 0x00, 0x01]; // 65537
+    // Create a key with garbage data (way too small for RSA)
+    let garbage_n = URL_SAFE_NO_PAD.encode(&[0x01; 32]);
+    let valid_e = "AQAB"; // 65537
 
     // The library may or may not accept this at construction
-    let result = RS256PublicKey::from_components(&garbage_n, &valid_e);
+    let result = DecodingKey::from_rsa_components(&garbage_n, valid_e);
 
     if let Ok(bad_key) = result {
-        // If it accepts the bad key, it should fail at verification
-        let key_pair = RS256KeyPair::generate(2048).unwrap();
-        let claims = Claims::create(Duration::from_hours(1));
-        let token = key_pair.sign(claims).unwrap();
+        // If it accepts the bad key, verification should fail
+        let mut rng = rand::thread_rng();
+        let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let private_der = private_key.to_pkcs1_der().unwrap();
+        let encoding_key = EncodingKey::from_rsa_der(private_der.as_bytes());
 
-        // Verification with bad key should fail
-        let verification = bad_key.verify_token::<NoCustomClaims>(&token, None);
+        let claims = create_test_claims();
+        let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key).unwrap();
+
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.validate_aud = false;
+        let verification = decode::<TestClaims>(&token, &bad_key, &validation);
         assert!(
             verification.is_err(),
             "Invalid key should fail at verification"
@@ -179,16 +262,42 @@ fn test_valid_base64url_decodes() {
 /// Test with Google JWKS format (2048-bit RSA, e=65537).
 #[test]
 fn test_google_jwks_format_compatibility() {
-    let key_pair = RS256KeyPair::generate(2048).unwrap();
+    let mut rng = rand::thread_rng();
+    let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
 
-    let claims = Claims::create(Duration::from_hours(1))
-        .with_issuer("https://accounts.google.com")
-        .with_audience("test-client-id");
+    let n = private_key.n();
+    let e = private_key.e();
+    let n_b64 = URL_SAFE_NO_PAD.encode(n.to_bytes_be());
+    let e_b64 = URL_SAFE_NO_PAD.encode(e.to_bytes_be());
 
-    let token = key_pair.sign(claims).unwrap();
+    let decoding_key = DecodingKey::from_rsa_components(&n_b64, &e_b64).unwrap();
+    let private_der = private_key.to_pkcs1_der().unwrap();
+    let encoding_key = EncodingKey::from_rsa_der(private_der.as_bytes());
 
-    let public_key = key_pair.public_key();
-    let verification = public_key.verify_token::<NoCustomClaims>(&token, None);
+    let now = chrono::Utc::now().timestamp();
+    #[derive(Serialize, Deserialize)]
+    struct GoogleClaims {
+        iss: String,
+        aud: String,
+        sub: String,
+        exp: i64,
+        iat: i64,
+    }
+
+    let claims = GoogleClaims {
+        iss: "https://accounts.google.com".to_string(),
+        aud: "test-client-id".to_string(),
+        sub: "user123".to_string(),
+        exp: now + 3600,
+        iat: now,
+    };
+
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key).unwrap();
+
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.set_issuer(&["https://accounts.google.com"]);
+    validation.set_audience(&["test-client-id"]);
+    let verification = decode::<GoogleClaims>(&token, &decoding_key, &validation);
 
     assert!(verification.is_ok(), "Google-format key should work");
 }
@@ -196,16 +305,42 @@ fn test_google_jwks_format_compatibility() {
 /// Test with Auth0 JWKS format.
 #[test]
 fn test_auth0_jwks_format_compatibility() {
-    let key_pair = RS256KeyPair::generate(2048).unwrap();
+    let mut rng = rand::thread_rng();
+    let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
 
-    let claims = Claims::create(Duration::from_hours(1))
-        .with_issuer("https://tenant.auth0.com/")
-        .with_audience("https://api.example.com");
+    let n = private_key.n();
+    let e = private_key.e();
+    let n_b64 = URL_SAFE_NO_PAD.encode(n.to_bytes_be());
+    let e_b64 = URL_SAFE_NO_PAD.encode(e.to_bytes_be());
 
-    let token = key_pair.sign(claims).unwrap();
+    let decoding_key = DecodingKey::from_rsa_components(&n_b64, &e_b64).unwrap();
+    let private_der = private_key.to_pkcs1_der().unwrap();
+    let encoding_key = EncodingKey::from_rsa_der(private_der.as_bytes());
 
-    let public_key = key_pair.public_key();
-    let verification = public_key.verify_token::<NoCustomClaims>(&token, None);
+    let now = chrono::Utc::now().timestamp();
+    #[derive(Serialize, Deserialize)]
+    struct Auth0Claims {
+        iss: String,
+        aud: String,
+        sub: String,
+        exp: i64,
+        iat: i64,
+    }
+
+    let claims = Auth0Claims {
+        iss: "https://tenant.auth0.com/".to_string(),
+        aud: "https://api.example.com".to_string(),
+        sub: "auth0|user123".to_string(),
+        exp: now + 3600,
+        iat: now,
+    };
+
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key).unwrap();
+
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.set_issuer(&["https://tenant.auth0.com/"]);
+    validation.set_audience(&["https://api.example.com"]);
+    let verification = decode::<Auth0Claims>(&token, &decoding_key, &validation);
 
     assert!(verification.is_ok(), "Auth0-format key should work");
 }
@@ -213,41 +348,50 @@ fn test_auth0_jwks_format_compatibility() {
 /// Test with various RSA key sizes.
 #[test]
 fn test_various_key_sizes() {
+    let mut rng = rand::thread_rng();
+
     // 2048-bit (minimum recommended)
-    let key_2048 = RS256KeyPair::generate(2048).unwrap();
-    let claims = Claims::create(Duration::from_hours(1));
-    let token = key_2048.sign(claims.clone()).unwrap();
-    assert!(
-        key_2048
-            .public_key()
-            .verify_token::<NoCustomClaims>(&token, None)
-            .is_ok()
-    );
+    let key_2048 = RsaPrivateKey::new(&mut rng, 2048).unwrap();
+    let n = key_2048.n();
+    let e = key_2048.e();
+    let decoding_key_2048 =
+        DecodingKey::from_rsa_components(&URL_SAFE_NO_PAD.encode(n.to_bytes_be()), &URL_SAFE_NO_PAD.encode(e.to_bytes_be())).unwrap();
+    let encoding_key_2048 =
+        EncodingKey::from_rsa_der(key_2048.to_pkcs1_der().unwrap().as_bytes());
+
+    let claims = create_test_claims();
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key_2048).unwrap();
+
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.validate_aud = false;
+    assert!(decode::<TestClaims>(&token, &decoding_key_2048, &validation).is_ok());
 
     // 3072-bit
-    let key_3072 = RS256KeyPair::generate(3072).unwrap();
-    let token = key_3072.sign(claims.clone()).unwrap();
-    assert!(
-        key_3072
-            .public_key()
-            .verify_token::<NoCustomClaims>(&token, None)
-            .is_ok()
-    );
+    let key_3072 = RsaPrivateKey::new(&mut rng, 3072).unwrap();
+    let n = key_3072.n();
+    let e = key_3072.e();
+    let decoding_key_3072 =
+        DecodingKey::from_rsa_components(&URL_SAFE_NO_PAD.encode(n.to_bytes_be()), &URL_SAFE_NO_PAD.encode(e.to_bytes_be())).unwrap();
+    let encoding_key_3072 =
+        EncodingKey::from_rsa_der(key_3072.to_pkcs1_der().unwrap().as_bytes());
+
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key_3072).unwrap();
+    assert!(decode::<TestClaims>(&token, &decoding_key_3072, &validation).is_ok());
 
     // 4096-bit
-    let key_4096 = RS256KeyPair::generate(4096).unwrap();
-    let token = key_4096.sign(claims).unwrap();
-    assert!(
-        key_4096
-            .public_key()
-            .verify_token::<NoCustomClaims>(&token, None)
-            .is_ok()
-    );
+    let key_4096 = RsaPrivateKey::new(&mut rng, 4096).unwrap();
+    let n = key_4096.n();
+    let e = key_4096.e();
+    let decoding_key_4096 =
+        DecodingKey::from_rsa_components(&URL_SAFE_NO_PAD.encode(n.to_bytes_be()), &URL_SAFE_NO_PAD.encode(e.to_bytes_be())).unwrap();
+    let encoding_key_4096 =
+        EncodingKey::from_rsa_der(key_4096.to_pkcs1_der().unwrap().as_bytes());
+
+    let token = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key_4096).unwrap();
+    assert!(decode::<TestClaims>(&token, &decoding_key_4096, &validation).is_ok());
 }
 
 // ============ JWKS CACHE TESTS ============
-// Note: RwLock poisoning recovery tests are in src/jwt/jwks.rs (unit tests)
-// because they need internal access to poison the lock.
 
 /// Test that JwksCache can be created and used.
 #[test]

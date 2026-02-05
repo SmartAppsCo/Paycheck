@@ -201,7 +201,7 @@ mod expiration_validation {
         );
 
         // Simulate an expired token by creating one with expired claims
-        // Note: The jwt-simple library handles exp internally, so we test with
+        // Note: The jsonwebtoken library handles exp internally, so we test with
         // manually constructed expired tokens in the endpoint tests below
     }
 
@@ -532,7 +532,7 @@ mod audience_validation {
         );
 
         // The audience is the project name, included for debugging
-        // Audiences type from jwt-simple doesn't have is_empty, just verify we got something
+        // The audience is returned as a Vec<String> - just verify it was set
         // We already verified it's Some above, which means audience was set
     }
 

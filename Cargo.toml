@@ -24,8 +24,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # JWT and crypto
-jwt-simple = "0.12"
-ed25519-dalek = { version = "2", features = ["rand_core"] }
+jsonwebtoken = "9"
+ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8"] }
 rand = "0.8"
 
 # HTTP client (for payment providers)
@@ -63,3 +63,4 @@ unicode-normalization = "0.1"
 [dev-dependencies]
 tempfile = "3.24.0"
 tokio-test = "0.4"
+rsa = "0.9"  # For RSA key generation in tests

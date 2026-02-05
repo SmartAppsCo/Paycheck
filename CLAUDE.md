@@ -522,7 +522,7 @@ pub struct LicenseClaims {
 }
 ```
 
-Standard JWT claims (iss, sub, aud, jti, iat, exp) handled by jwt-simple.
+Standard JWT claims (iss, sub, aud, jti, iat, exp) handled by jsonwebtoken.
 
 ## Payment Flow
 

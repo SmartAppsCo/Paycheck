@@ -537,28 +537,34 @@ pub fn sign_claims_with_exp_offset(
     jti: &str,
     exp_offset_secs: i64,
 ) -> String {
+    use ed25519_dalek::pkcs8::EncodePrivateKey;
     use ed25519_dalek::SigningKey;
-    use jwt_simple::prelude::*;
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 
     let key_bytes: [u8; 32] = private_key.try_into().expect("Invalid private key length");
     let signing_key = SigningKey::from_bytes(&key_bytes);
-    let key_pair = Ed25519KeyPair::from_bytes(&signing_key.to_keypair_bytes())
-        .expect("Failed to create key pair");
+    let der = signing_key
+        .to_pkcs8_der()
+        .expect("Failed to encode private key as PKCS8");
+    let encoding_key = EncodingKey::from_ed_der(der.as_bytes());
 
-    // Calculate absolute expiration time
-    let exp_time = chrono::Utc::now().timestamp() + exp_offset_secs;
+    let now = chrono::Utc::now().timestamp();
+    let signing_claims = jwt::SigningClaims {
+        iss: "paycheck".to_string(),
+        sub: subject.to_string(),
+        aud: audience.to_string(),
+        jti: jti.to_string(),
+        iat: now,
+        exp: now + exp_offset_secs,
+        custom: claims.clone(),
+    };
 
-    // Create claims - use a duration and then override the expires_at field
-    let mut jwt_claims = Claims::with_custom_claims(claims.clone(), Duration::from_secs(3600))
-        .with_issuer("paycheck")
-        .with_subject(subject)
-        .with_audience(audience)
-        .with_jwt_id(jti);
-
-    // Override the expiration time
-    jwt_claims.expires_at = Some(UnixTimeStamp::from_secs(exp_time as u64));
-
-    key_pair.sign(jwt_claims).expect("Failed to sign token")
+    encode(
+        &Header::new(Algorithm::EdDSA),
+        &signing_claims,
+        &encoding_key,
+    )
+    .expect("Failed to sign token")
 }
 
 /// Create a license at device limit (all slots used)

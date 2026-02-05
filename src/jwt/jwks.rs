@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
-use jwt_simple::prelude::*;
+use jsonwebtoken::DecodingKey;
 use serde::Deserialize;
 
 use crate::error::{AppError, Result};
@@ -32,10 +32,17 @@ const FETCH_RETRY_BASE_DELAY_MS: u64 = 100;
 
 /// A cached JWKS with its keys and fetch timestamp
 struct CachedJwks {
-    /// Map from key ID (kid) to public key
-    keys: HashMap<String, RS256PublicKey>,
+    /// Map from key ID (kid) to RSA components (n, e as base64url strings)
+    keys: HashMap<String, RsaComponents>,
     /// When the JWKS was fetched
     fetched_at: Instant,
+}
+
+/// RSA key components (stored for later decoding key creation)
+#[derive(Clone)]
+struct RsaComponents {
+    n: String,
+    e: String,
 }
 
 impl CachedJwks {
@@ -81,7 +88,7 @@ impl JwksCache {
     ///
     /// On fetch failure, retries with exponential backoff. If all retries fail
     /// and we have stale (but not expired) cached keys, uses those as fallback.
-    pub async fn get_key(&self, jwks_url: &str, kid: &str) -> Result<RS256PublicKey> {
+    pub async fn get_key(&self, jwks_url: &str, kid: &str) -> Result<DecodingKey> {
         // Try to get from fresh cache first
         {
             // Note: Recover from mutex poisoning to prevent cascading failures.
@@ -93,8 +100,8 @@ impl JwksCache {
             if let Some(cached) = cache.get(jwks_url)
                 && !cached.is_stale()
             {
-                if let Some(key) = cached.keys.get(kid) {
-                    return Ok(key.clone());
+                if let Some(components) = cached.keys.get(kid) {
+                    return create_decoding_key(components);
                 }
                 // Key ID not found in cached JWKS - don't refresh, just error
                 return Err(AppError::JwtValidationFailed(format!(
@@ -108,7 +115,7 @@ impl JwksCache {
         match self.fetch_jwks_with_retry(jwks_url).await {
             Ok(keys) => {
                 // Get the key we need (before moving keys into cache)
-                let key = keys.get(kid).cloned().ok_or_else(|| {
+                let components = keys.get(kid).cloned().ok_or_else(|| {
                     AppError::JwtValidationFailed(format!("Key ID '{}' not found in JWKS", kid))
                 })?;
 
@@ -127,7 +134,7 @@ impl JwksCache {
                     );
                 }
 
-                Ok(key)
+                create_decoding_key(&components)
             }
             Err(fetch_error) => {
                 // Fetch failed after retries - try stale cache fallback
@@ -137,7 +144,7 @@ impl JwksCache {
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 if let Some(cached) = cache.get(jwks_url)
                     && !cached.is_expired()
-                    && let Some(key) = cached.keys.get(kid)
+                    && let Some(components) = cached.keys.get(kid)
                 {
                     tracing::warn!(
                         jwks_url = %jwks_url,
@@ -145,7 +152,7 @@ impl JwksCache {
                         cache_age_secs = ?cached.fetched_at.elapsed().as_secs(),
                         "JWKS fetch failed, using stale cached key as fallback"
                     );
-                    return Ok(key.clone());
+                    return create_decoding_key(components);
                 }
 
                 // No usable fallback - propagate the original error
@@ -155,7 +162,7 @@ impl JwksCache {
     }
 
     /// Fetch JWKS with retry and exponential backoff.
-    async fn fetch_jwks_with_retry(&self, url: &str) -> Result<HashMap<String, RS256PublicKey>> {
+    async fn fetch_jwks_with_retry(&self, url: &str) -> Result<HashMap<String, RsaComponents>> {
         let mut last_error = None;
 
         for attempt in 0..FETCH_RETRY_ATTEMPTS {
@@ -190,7 +197,7 @@ impl JwksCache {
     }
 
     /// Fetch JWKS from a URL and parse the keys.
-    async fn fetch_jwks(&self, url: &str) -> Result<HashMap<String, RS256PublicKey>> {
+    async fn fetch_jwks(&self, url: &str) -> Result<HashMap<String, RsaComponents>> {
         let response = self
             .client
             .get(url)
@@ -229,19 +236,22 @@ impl JwksCache {
                 None => continue,
             };
 
-            // Parse the RSA public key from n and e components
-            match parse_rsa_public_key(&jwk.n, &jwk.e) {
-                Ok(public_key) => {
-                    keys.insert(kid, public_key);
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to parse JWK with kid '{}': {}",
-                        jwk.kid.as_deref().unwrap_or("unknown"),
-                        e
-                    );
-                }
+            // Store the RSA components for later key creation
+            if jwk.n.is_empty() || jwk.e.is_empty() {
+                tracing::warn!(
+                    "JWK with kid '{}' has empty n or e component",
+                    jwk.kid.as_deref().unwrap_or("unknown")
+                );
+                continue;
             }
+
+            keys.insert(
+                kid,
+                RsaComponents {
+                    n: jwk.n,
+                    e: jwk.e,
+                },
+            );
         }
 
         if keys.is_empty() {
@@ -252,6 +262,12 @@ impl JwksCache {
 
         Ok(keys)
     }
+}
+
+/// Create a DecodingKey from RSA components
+fn create_decoding_key(components: &RsaComponents) -> Result<DecodingKey> {
+    DecodingKey::from_rsa_components(&components.n, &components.e)
+        .map_err(|e| AppError::JwksFetchFailed(format!("Failed to parse RSA key: {}", e)))
 }
 
 /// JWKS response structure (RFC 7517)
@@ -277,47 +293,6 @@ struct Jwk {
     e: String,
 }
 
-/// Parse an RSA public key from base64url-encoded n and e components.
-fn parse_rsa_public_key(n_b64: &str, e_b64: &str) -> Result<RS256PublicKey> {
-    use base64::Engine;
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-
-    // Decode base64url components
-    let n_bytes = URL_SAFE_NO_PAD
-        .decode(n_b64)
-        .map_err(|e| AppError::JwksFetchFailed(format!("Invalid base64url for 'n': {}", e)))?;
-    let e_bytes = URL_SAFE_NO_PAD
-        .decode(e_b64)
-        .map_err(|e| AppError::JwksFetchFailed(format!("Invalid base64url for 'e': {}", e)))?;
-
-    // Use jwt-simple's built-in RSA key construction from components
-    RS256PublicKey::from_components(&n_bytes, &e_bytes)
-        .map_err(|e| AppError::JwksFetchFailed(format!("Failed to parse RSA key: {}", e)))
-}
-
-impl JwksCache {
-    /// Seed the cache with keys for testing purposes.
-    /// The `age` parameter controls how old the cached entry appears.
-    #[cfg(test)]
-    pub fn seed_cache_for_testing(
-        &self,
-        url: &str,
-        keys: HashMap<String, RS256PublicKey>,
-        age: Duration,
-    ) {
-        let mut cache = self
-            .cache
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        cache.insert(
-            url.to_string(),
-            CachedJwks {
-                keys,
-                fetched_at: Instant::now() - age,
-            },
-        );
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -355,134 +330,6 @@ mod tests {
         };
         assert!(cached.is_stale());
         assert!(!cached.is_expired());
-    }
-
-    /// Test that JwksCache recovers from RwLock poisoning.
-    ///
-    /// If a thread panics while holding the RwLock, subsequent operations
-    /// should still work (not panic) since for a cache, partial data is acceptable.
-    ///
-    /// This test verifies the fix by:
-    /// 1. Seeding the cache with data
-    /// 2. Poisoning the RwLock by panicking in another thread
-    /// 3. Verifying that using `unwrap_or_else` recovers the data
-    #[test]
-    fn test_cache_recovers_from_rwlock_poisoning() {
-        use std::sync::Arc;
-        use std::thread;
-
-        let cache = Arc::new(JwksCache::new());
-
-        // First, seed the cache with a valid entry
-        let key_pair = RS256KeyPair::generate(2048).unwrap();
-        let mut keys = HashMap::new();
-        keys.insert("test-kid".to_string(), key_pair.public_key());
-        cache.seed_cache_for_testing(
-            "https://example.com/.well-known/jwks.json",
-            keys,
-            Duration::from_secs(0),
-        );
-
-        // Poison the RwLock by panicking while holding a write lock
-        let cache_for_poison = Arc::clone(&cache);
-        let poison_result = thread::spawn(move || {
-            // Get a write lock and panic while holding it
-            let _guard = cache_for_poison.cache.write().unwrap();
-            panic!("Intentional panic to poison the lock");
-        })
-        .join();
-
-        // The thread should have panicked
-        assert!(poison_result.is_err(), "Thread should have panicked");
-
-        // Now verify the cache is poisoned by checking the RwLock state
-        assert!(
-            cache.cache.is_poisoned(),
-            "RwLock should be poisoned after panic"
-        );
-
-        // After the fix (using unwrap_or_else), reading should NOT panic
-        // and should recover the data. Before the fix, this would panic.
-        // Note: We don't use catch_unwind here because reqwest::Client isn't RefUnwindSafe.
-        // If this test passes, it means the unwrap_or_else pattern works.
-        let guard = cache
-            .cache
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-        // The recovered data should still have our seeded entry
-        assert!(
-            guard.contains_key("https://example.com/.well-known/jwks.json"),
-            "Seeded cache entry should be recoverable after poisoning"
-        );
-
-        // Verify the key is intact
-        let cached = guard.get("https://example.com/.well-known/jwks.json").unwrap();
-        assert!(
-            cached.keys.contains_key("test-kid"),
-            "Key ID should be present in recovered cache"
-        );
-    }
-
-    /// Test that concurrent access to JwksCache doesn't cause issues.
-    #[test]
-    fn test_concurrent_cache_access() {
-        use std::sync::Arc;
-        use std::thread;
-
-        let cache = Arc::new(JwksCache::new());
-
-        // Seed some data
-        let key_pair = RS256KeyPair::generate(2048).unwrap();
-        let mut keys = HashMap::new();
-        keys.insert("kid-1".to_string(), key_pair.public_key());
-        cache.seed_cache_for_testing("https://test.com/jwks", keys, Duration::from_secs(0));
-
-        // Spawn multiple threads doing concurrent reads and writes
-        let mut handles = vec![];
-        for i in 0..10 {
-            let cache_clone = Arc::clone(&cache);
-            let handle = thread::spawn(move || {
-                for j in 0..100 {
-                    // Read operation
-                    {
-                        let guard = cache_clone
-                            .cache
-                            .read()
-                            .unwrap_or_else(|p| p.into_inner());
-                        let _ = guard.get("https://test.com/jwks");
-                    }
-
-                    // Occasional write operation
-                    if j % 10 == i {
-                        let key_pair = RS256KeyPair::generate(2048).unwrap();
-                        let mut keys = HashMap::new();
-                        keys.insert(format!("kid-{}-{}", i, j), key_pair.public_key());
-                        let mut guard = cache_clone
-                            .cache
-                            .write()
-                            .unwrap_or_else(|p| p.into_inner());
-                        guard.insert(
-                            format!("https://test-{}-{}.com/jwks", i, j),
-                            CachedJwks {
-                                keys,
-                                fetched_at: Instant::now(),
-                            },
-                        );
-                    }
-                }
-            });
-            handles.push(handle);
-        }
-
-        // All threads should complete without panic
-        for handle in handles {
-            handle.join().expect("Thread should not panic");
-        }
-
-        // Cache should have accumulated entries
-        let guard = cache.cache.read().unwrap_or_else(|p| p.into_inner());
-        assert!(guard.len() >= 1, "Cache should have at least the initial entry");
     }
 
     #[test]

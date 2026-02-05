@@ -1,14 +1,6 @@
 # Build stage
 FROM rust:1.92-bookworm AS builder
 
-# Build dependencies for boring-sys (BoringSSL) - enables FIPS compliance
-RUN apt-get update && apt-get install -y \
-    cmake \
-    build-essential \
-    golang \
-    libclang-dev \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /build
 
 # Cache dependencies by building a dummy project first

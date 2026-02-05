@@ -3,10 +3,7 @@
 //! Validates JWTs from trusted first-party apps (Console, mobile, etc.)
 //! using JWKS from configured issuers.
 
-use std::collections::HashSet;
-
-use jwt_simple::algorithms::RSAPublicKeyLike;
-use jwt_simple::prelude::{Token, VerificationOptions};
+use jsonwebtoken::{decode, Algorithm, Validation};
 use serde::{Deserialize, Serialize};
 
 use crate::config::TrustedIssuer;
@@ -45,11 +42,11 @@ pub async fn validate_first_party_token(
     trusted_issuers: &[TrustedIssuer],
     jwks_cache: &JwksCache,
 ) -> Result<ValidatedFirstPartyToken> {
-    // 1. Decode token metadata to get key ID
-    let metadata = Token::decode_metadata(token)
+    // 1. Decode token header to get key ID
+    let header = jsonwebtoken::decode_header(token)
         .map_err(|e| AppError::JwtValidationFailed(format!("Invalid token format: {}", e)))?;
 
-    let kid = metadata.key_id().ok_or(AppError::MissingKeyId)?;
+    let kid = header.kid.ok_or(AppError::MissingKeyId)?;
 
     // 2. Decode claims (unverified) to get issuer
     #[derive(Deserialize)]
@@ -64,8 +61,8 @@ pub async fn validate_first_party_token(
         ));
     }
 
-    use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
 
     let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1]).map_err(|e| {
         tracing::debug!("Invalid base64 encoding in JWT payload: {}", e);
@@ -86,27 +83,18 @@ pub async fn validate_first_party_token(
         .ok_or(AppError::UntrustedIssuer)?;
 
     // 4. Get public key from JWKS cache
-    let public_key = jwks_cache.get_key(&trusted.jwks_url, kid).await?;
+    let decoding_key = jwks_cache.get_key(&trusted.jwks_url, &kid).await?;
 
     // 5. Verify token signature and claims
-    let mut allowed_issuers = HashSet::new();
-    allowed_issuers.insert(trusted.issuer.clone());
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.set_issuer(&[&trusted.issuer]);
+    validation.set_audience(&[&trusted.audience]);
 
-    let mut allowed_audiences = HashSet::new();
-    allowed_audiences.insert(trusted.audience.clone());
-
-    let options = VerificationOptions {
-        allowed_issuers: Some(allowed_issuers),
-        allowed_audiences: Some(allowed_audiences),
-        ..Default::default()
-    };
-
-    let verified_claims = public_key
-        .verify_token::<FirstPartyTokenClaims>(token, Some(options))
+    let token_data = decode::<FirstPartyTokenClaims>(token, &decoding_key, &validation)
         .map_err(|e| AppError::JwtValidationFailed(format!("Token verification failed: {}", e)))?;
 
     Ok(ValidatedFirstPartyToken {
-        claims: verified_claims.custom,
+        claims: token_data.claims,
         issuer: trusted.issuer.clone(),
     })
 }
