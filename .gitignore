@@ -15,6 +15,9 @@ dist/
 # Bruno environments (contain API keys and IDs)
 bruno/environments/
 
+# Bruno metering collection (symlink to internal/)
+bruno/metering
+
 # Internal (deploy configs, planning docs, etc.)
 internal/
 
