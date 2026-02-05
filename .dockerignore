@@ -22,9 +22,6 @@ bruno/
 tests/
 sdk/
 
-# Internal (deploy, planning, etc.)
-internal/
-
 # Other non-runtime files
 landing/
 logo/
