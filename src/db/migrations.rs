@@ -182,9 +182,13 @@ pub fn run_migrations(
         pending.len()
     );
 
-    // Backup before any changes (unless disabled with 0)
+    // Backup before any changes (unless disabled with 0 or fresh database)
     let backup_path = if backup_keep_count == 0 {
         tracing::warn!("Migration backups disabled (MIGRATION_BACKUP_COUNT=0)");
+        None
+    } else if current_version == 0 {
+        // Fresh database - nothing to backup
+        tracing::debug!("Fresh database (version 0), skipping backup");
         None
     } else {
         let path = backup_database(db_path, current_version)?;
@@ -336,7 +340,7 @@ mod tests {
         // Should be at version 1 (latest main migration)
         assert_eq!(get_version(&conn).unwrap(), 1);
 
-        // Backup should exist
+        // No backup for fresh database (nothing to backup)
         let backups: Vec<_> = fs::read_dir(dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
@@ -347,7 +351,7 @@ mod tests {
                     .unwrap_or(false)
             })
             .collect();
-        assert_eq!(backups.len(), 1);
+        assert_eq!(backups.len(), 0);
     }
 
     #[test]
