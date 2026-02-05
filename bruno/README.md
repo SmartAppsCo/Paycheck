@@ -73,11 +73,11 @@ Requests are grouped by resource type:
 
 | Seq Range | Resource |
 |-----------|----------|
-| 1-7 | Users |
-| 8-15 | Organizations |
-| 16-20 | Operators |
-| 21-23 | User API Keys |
-| 24-26 | Utilities (Lookup, Audit Logs) |
+| 1-8 | Users |
+| 9-17 | Organizations |
+| 18-22 | Operators |
+| 23-25 | User API Keys |
+| 26-28 | Utilities (Lookup, Audit Logs) |
 
 ## How Ordering Works
 

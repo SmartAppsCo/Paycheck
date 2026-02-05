@@ -1,0 +1,45 @@
+meta {
+  name: Update User Tags
+  type: http
+  seq: 5
+}
+
+patch {
+  url: {{base_url}}/operators/users/{{user_id}}/tags
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{operator_api_key}}
+}
+
+body:json {
+  {
+    "add": ["beta", "vip"],
+    "remove": ["suspended"]
+  }
+}
+
+docs {
+  Update user tags with add/remove semantics (requires admin+ operator role).
+
+  Tags are arbitrary strings used for user status/flags (e.g., "suspended", "beta", "vip").
+
+  Request body:
+  - add: Array of tags to add (default: [])
+  - remove: Array of tags to remove (default: [])
+
+  Both fields are optional. Tags are deduplicated automatically.
+
+  Example - add a tag:
+  { "add": ["beta"] }
+
+  Example - remove a tag:
+  { "remove": ["suspended"] }
+
+  Example - add and remove in one request:
+  { "add": ["vip"], "remove": ["trial"] }
+
+  Returns updated user with new tags array.
+}
