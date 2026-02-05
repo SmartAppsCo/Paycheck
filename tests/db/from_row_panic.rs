@@ -30,6 +30,7 @@ fn setup_test_db_no_check_constraints() -> Connection {
             email TEXT NOT NULL UNIQUE,
             name TEXT NOT NULL,
             operator_role TEXT,  -- No CHECK constraint!
+            tags TEXT NOT NULL DEFAULT '[]',
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             deleted_at INTEGER,
@@ -39,10 +40,9 @@ fn setup_test_db_no_check_constraints() -> Connection {
         CREATE TABLE organizations (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
-            stripe_config TEXT,
-            ls_config TEXT,
-            resend_api_key BLOB,
-            payment_provider TEXT,
+            payment_config_id TEXT,
+            email_config_id TEXT,
+            tags TEXT NOT NULL DEFAULT '[]',
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             deleted_at INTEGER,

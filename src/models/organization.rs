@@ -10,6 +10,9 @@ pub struct Organization {
     pub payment_config_id: Option<String>,
     /// Default email service config for this org (can be overridden at project level)
     pub email_config_id: Option<String>,
+    /// Tags for org status/flags (e.g., "disabled", "nonpayment", "overage")
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub created_at: i64,
     pub updated_at: i64,
     /// Soft delete timestamp (None = active, Some = deleted at this time)
@@ -59,6 +62,17 @@ impl UpdateOrganization {
     }
 }
 
+/// Request to update tags with add/remove semantics
+#[derive(Debug, Deserialize)]
+pub struct UpdateTags {
+    /// Tags to add
+    #[serde(default)]
+    pub add: Vec<String>,
+    /// Tags to remove
+    #[serde(default)]
+    pub remove: Vec<String>,
+}
+
 /// Deserialize a field that can be:
 /// - absent (None) - leave unchanged
 /// - null (Some(None)) - clear the value
@@ -85,6 +99,8 @@ pub struct OrganizationPublic {
     pub email_config_id: Option<String>,
     /// Available service configs for this org (id -> name mapping)
     pub service_configs: std::collections::HashMap<String, String>,
+    /// Tags for org status/flags (e.g., "disabled", "nonpayment", "overage")
+    pub tags: Vec<String>,
     pub created_at: i64,
     pub updated_at: i64,
     /// Soft delete timestamp (None = active, Some = deleted at this time)
@@ -107,6 +123,7 @@ impl OrganizationPublic {
             payment_config_id: org.payment_config_id,
             email_config_id: org.email_config_id,
             service_configs,
+            tags: org.tags,
             created_at: org.created_at,
             updated_at: org.updated_at,
             deleted_at: org.deleted_at,

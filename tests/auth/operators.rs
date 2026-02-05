@@ -446,3 +446,317 @@ async fn missing_token_cannot_access_audit_logs() {
         "request without Authorization header should not access audit logs"
     );
 }
+
+// ------------------------------------------------------------------------
+// Tag Endpoints (Admin+ Only)
+// ------------------------------------------------------------------------
+
+#[tokio::test]
+async fn view_role_cannot_update_user_tags() {
+    let (app, state) = operator_app();
+    let mut conn = state.db.get().unwrap();
+
+    let (_view_user, view_key) =
+        create_test_operator(&mut conn, "view@test.com", OperatorRole::View);
+    let target_user = create_test_user(&mut conn, "target@test.com", "Target User");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/operators/users/{}/tags", target_user.id))
+                .header("Authorization", format!("Bearer {}", view_key))
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{"add": ["suspended"], "remove": []}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "view role should not update user tags (admin+ required)"
+    );
+}
+
+#[tokio::test]
+async fn view_role_cannot_update_org_tags() {
+    let (app, state) = operator_app();
+    let mut conn = state.db.get().unwrap();
+
+    let (_view_user, view_key) =
+        create_test_operator(&mut conn, "view@test.com", OperatorRole::View);
+    let org = create_test_org(&mut conn, "Test Org");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/operators/organizations/{}/tags", org.id))
+                .header("Authorization", format!("Bearer {}", view_key))
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{"add": ["disabled"], "remove": []}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "view role should not update org tags (admin+ required)"
+    );
+}
+
+#[tokio::test]
+async fn admin_role_can_update_user_tags() {
+    let (app, state) = operator_app();
+    let mut conn = state.db.get().unwrap();
+
+    let (_admin_user, admin_key) =
+        create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
+    let target_user = create_test_user(&mut conn, "target@test.com", "Target User");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/operators/users/{}/tags", target_user.id))
+                .header("Authorization", format!("Bearer {}", admin_key))
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{"add": ["suspended"], "remove": []}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "admin role should update user tags successfully"
+    );
+
+    // Verify tag was actually added
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        json["tags"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("suspended")),
+        "response should contain the added tag"
+    );
+}
+
+#[tokio::test]
+async fn admin_role_can_update_org_tags() {
+    let (app, state) = operator_app();
+    let mut conn = state.db.get().unwrap();
+
+    let (_admin_user, admin_key) =
+        create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
+    let org = create_test_org(&mut conn, "Test Org");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/operators/organizations/{}/tags", org.id))
+                .header("Authorization", format!("Bearer {}", admin_key))
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{"add": ["disabled"], "remove": []}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "admin role should update org tags successfully"
+    );
+
+    // Verify tag was actually added
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        json["tags"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("disabled")),
+        "response should contain the added tag"
+    );
+}
+
+#[tokio::test]
+async fn owner_role_can_update_user_tags() {
+    let (app, state) = operator_app();
+    let mut conn = state.db.get().unwrap();
+
+    let (_owner_user, owner_key) =
+        create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
+    let target_user = create_test_user(&mut conn, "target@test.com", "Target User");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/operators/users/{}/tags", target_user.id))
+                .header("Authorization", format!("Bearer {}", owner_key))
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{"add": ["vip", "beta"], "remove": []}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "owner role should update user tags successfully"
+    );
+}
+
+#[tokio::test]
+async fn owner_role_can_update_org_tags() {
+    let (app, state) = operator_app();
+    let mut conn = state.db.get().unwrap();
+
+    let (_owner_user, owner_key) =
+        create_test_operator(&mut conn, "owner@test.com", OperatorRole::Owner);
+    let org = create_test_org(&mut conn, "Test Org");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/operators/organizations/{}/tags", org.id))
+                .header("Authorization", format!("Bearer {}", owner_key))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    r#"{"add": ["overage", "checkout_blocked"], "remove": []}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "owner role should update org tags successfully"
+    );
+}
+
+#[tokio::test]
+async fn update_user_tags_returns_404_for_nonexistent_user() {
+    let (app, state) = operator_app();
+    let mut conn = state.db.get().unwrap();
+
+    let (_admin_user, admin_key) =
+        create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/operators/users/nonexistent-user-id/tags")
+                .header("Authorization", format!("Bearer {}", admin_key))
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{"add": ["test"], "remove": []}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::NOT_FOUND,
+        "updating tags for nonexistent user should return 404"
+    );
+}
+
+#[tokio::test]
+async fn update_org_tags_returns_404_for_nonexistent_org() {
+    let (app, state) = operator_app();
+    let mut conn = state.db.get().unwrap();
+
+    let (_admin_user, admin_key) =
+        create_test_operator(&mut conn, "admin@test.com", OperatorRole::Admin);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/operators/organizations/nonexistent-org-id/tags")
+                .header("Authorization", format!("Bearer {}", admin_key))
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{"add": ["test"], "remove": []}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::NOT_FOUND,
+        "updating tags for nonexistent org should return 404"
+    );
+}
+
+#[tokio::test]
+async fn missing_token_cannot_update_user_tags() {
+    let (app, state) = operator_app();
+    let mut conn = state.db.get().unwrap();
+
+    let target_user = create_test_user(&mut conn, "target@test.com", "Target User");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/operators/users/{}/tags", target_user.id))
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{"add": ["test"], "remove": []}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "request without token should not update user tags"
+    );
+}
+
+#[tokio::test]
+async fn missing_token_cannot_update_org_tags() {
+    let (app, state) = operator_app();
+    let mut conn = state.db.get().unwrap();
+
+    let org = create_test_org(&mut conn, "Test Org");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/operators/organizations/{}/tags", org.id))
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{"add": ["test"], "remove": []}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "request without token should not update org tags"
+    );
+}

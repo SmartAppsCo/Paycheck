@@ -11,7 +11,7 @@ use crate::extractors::{Json, Path};
 use crate::middleware::OperatorContext;
 use crate::models::{
     ActorType, AuditAction, CreateOrgMember, CreateOrganization, OrgMemberRole, Organization,
-    OrganizationPublic, UpdateOrganization,
+    OrganizationPublic, UpdateOrganization, UpdateTags,
 };
 use crate::pagination::Paginated;
 use crate::util::AuditLogBuilder;
@@ -204,6 +204,39 @@ pub async fn update_organization(
         .save()?;
 
     Ok(Json(org_to_public(&conn, organization)?))
+}
+
+/// Update organization tags with add/remove semantics.
+pub async fn update_organization_tags(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<OperatorContext>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<UpdateTags>,
+) -> Result<Json<OrganizationPublic>> {
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
+
+    let existing = queries::get_organization_by_id(&conn, &id)?.or_not_found(msg::ORG_NOT_FOUND)?;
+
+    let org =
+        queries::update_organization_tags(&conn, &id, &input)?.or_not_found(msg::ORG_NOT_FOUND)?;
+
+    AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
+        .actor(ActorType::User, Some(&ctx.user.id))
+        .action(AuditAction::UpdateOrgTags)
+        .resource("org", &id)
+        .details(&serde_json::json!({
+            "add": input.add,
+            "remove": input.remove,
+            "old_tags": existing.tags,
+            "new_tags": org.tags
+        }))
+        .names(&ctx.audit_names().resource(org.name.clone()))
+        .auth_method(&ctx.auth_method)
+        .save()?;
+
+    Ok(Json(org_to_public(&conn, org)?))
 }
 
 pub async fn delete_organization(

@@ -8,11 +8,13 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         -- Soft delete: deleted_at = timestamp when deleted, NULL = active
         -- deleted_cascade_depth: 0 = directly deleted, >0 = cascaded from parent
         -- operator_role: NULL = not an operator, otherwise 'owner'/'admin'/'view'
+        -- tags: JSON array of strings, e.g. '["suspended", "beta"]'
         CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,
             email TEXT NOT NULL UNIQUE,
             name TEXT NOT NULL,
             operator_role TEXT CHECK (operator_role IS NULL OR operator_role IN ('owner', 'admin', 'view')),
+            tags TEXT NOT NULL DEFAULT '[]',
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             deleted_at INTEGER,
@@ -81,11 +83,13 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_service_configs_active ON service_configs(id) WHERE deleted_at IS NULL;
 
         -- Organizations (customers - indie devs, companies)
+        -- tags: JSON array of strings, e.g. '["disabled", "nonpayment"]'
         CREATE TABLE IF NOT EXISTS organizations (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             payment_config_id TEXT REFERENCES service_configs(id) ON DELETE SET NULL,
             email_config_id TEXT REFERENCES service_configs(id) ON DELETE SET NULL,
+            tags TEXT NOT NULL DEFAULT '[]',
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             deleted_at INTEGER,

@@ -61,10 +61,10 @@ pub fn query_all<T: FromRow>(
 // ============ SQL SELECT Constants ============
 
 pub const USER_COLS: &str =
-    "id, email, name, operator_role, created_at, updated_at, deleted_at, deleted_cascade_depth";
+    "id, email, name, operator_role, tags, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
 pub const ORGANIZATION_COLS: &str =
-    "id, name, payment_config_id, email_config_id, created_at, updated_at, deleted_at, deleted_cascade_depth";
+    "id, name, payment_config_id, email_config_id, tags, created_at, updated_at, deleted_at, deleted_cascade_depth";
 
 pub const SERVICE_CONFIG_COLS: &str =
     "id, org_id, name, category, provider, config_encrypted, created_at, updated_at, deleted_at, deleted_cascade_depth";
@@ -109,30 +109,38 @@ impl FromRow for User {
         let operator_role: Option<OperatorRole> = row
             .get::<_, Option<String>>(3)?
             .and_then(|s| s.parse().ok());
+        // tags is stored as JSON array
+        let tags_str: String = row.get(4)?;
+        let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
         Ok(User {
             id: row.get(0)?,
             email: row.get(1)?,
             name: row.get(2)?,
             operator_role,
-            created_at: row.get(4)?,
-            updated_at: row.get(5)?,
-            deleted_at: row.get(6)?,
-            deleted_cascade_depth: row.get(7)?,
+            tags,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
+            deleted_at: row.get(7)?,
+            deleted_cascade_depth: row.get(8)?,
         })
     }
 }
 
 impl FromRow for Organization {
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        // tags is stored as JSON array
+        let tags_str: String = row.get(4)?;
+        let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
         Ok(Organization {
             id: row.get(0)?,
             name: row.get(1)?,
             payment_config_id: row.get(2)?,
             email_config_id: row.get(3)?,
-            created_at: row.get(4)?,
-            updated_at: row.get(5)?,
-            deleted_at: row.get(6)?,
-            deleted_cascade_depth: row.get(7)?,
+            tags,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
+            deleted_at: row.get(7)?,
+            deleted_cascade_depth: row.get(8)?,
         })
     }
 }

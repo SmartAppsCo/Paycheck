@@ -144,8 +144,8 @@ pub fn create_user(conn: &Connection, input: &CreateUser) -> Result<User> {
     let email = input.email.trim().to_lowercase();
 
     conn.execute(
-        "INSERT INTO users (id, email, name, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO users (id, email, name, tags, created_at, updated_at)
+         VALUES (?1, ?2, ?3, '[]', ?4, ?5)",
         params![&id, &email, &input.name, now, now],
     )?;
 
@@ -154,6 +154,7 @@ pub fn create_user(conn: &Connection, input: &CreateUser) -> Result<User> {
         email,
         name: input.name.clone(),
         operator_role: None,
+        tags: Vec::new(),
         created_at: now,
         updated_at: now,
         deleted_at: None,
@@ -230,6 +231,40 @@ pub fn update_user(conn: &Connection, id: &str, input: &UpdateUser) -> Result<Op
         .set_opt("email", email)
         .set_opt("name", input.name.clone())
         .execute_returning(conn, USER_COLS)
+}
+
+/// Update user tags with add/remove semantics.
+/// Returns the updated user, or None if not found.
+pub fn update_user_tags(
+    conn: &Connection,
+    id: &str,
+    input: &UpdateTags,
+) -> Result<Option<User>> {
+    // Get current user to read existing tags
+    let Some(user) = get_user_by_id(conn, id)? else {
+        return Ok(None);
+    };
+
+    // Apply add/remove operations
+    let mut tags: Vec<String> = user.tags;
+    for tag in &input.add {
+        if !tags.contains(tag) {
+            tags.push(tag.clone());
+        }
+    }
+    tags.retain(|t| !input.remove.contains(t));
+
+    // Update the tags in the database
+    let now = now();
+    let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".to_string());
+
+    conn.execute(
+        "UPDATE users SET tags = ?1, updated_at = ?2 WHERE id = ?3 AND deleted_at IS NULL",
+        params![&tags_json, now, id],
+    )?;
+
+    // Return updated user
+    get_user_by_id(conn, id)
 }
 
 pub fn delete_user(conn: &Connection, id: &str) -> Result<bool> {
@@ -1212,8 +1247,8 @@ pub fn create_organization(conn: &Connection, input: &CreateOrganization) -> Res
     let now = now();
 
     conn.execute(
-        "INSERT INTO organizations (id, name, payment_config_id, email_config_id, created_at, updated_at)
-         VALUES (?1, ?2, NULL, NULL, ?3, ?4)",
+        "INSERT INTO organizations (id, name, payment_config_id, email_config_id, tags, created_at, updated_at)
+         VALUES (?1, ?2, NULL, NULL, '[]', ?3, ?4)",
         params![&id, &input.name, now, now],
     )?;
 
@@ -1222,6 +1257,7 @@ pub fn create_organization(conn: &Connection, input: &CreateOrganization) -> Res
         name: input.name.clone(),
         payment_config_id: None,
         email_config_id: None,
+        tags: Vec::new(),
         created_at: now,
         updated_at: now,
         deleted_at: None,
@@ -1295,6 +1331,40 @@ pub fn update_organization(
         .set_opt_nullable("email_config_id", input.email_config_id.clone())
         .execute_returning(conn, ORGANIZATION_COLS)?;
     Ok(result.is_some())
+}
+
+/// Update organization tags with add/remove semantics.
+/// Returns the updated organization, or None if not found.
+pub fn update_organization_tags(
+    conn: &Connection,
+    id: &str,
+    input: &UpdateTags,
+) -> Result<Option<Organization>> {
+    // Get current org to read existing tags
+    let Some(org) = get_organization_by_id(conn, id)? else {
+        return Ok(None);
+    };
+
+    // Apply add/remove operations
+    let mut tags: Vec<String> = org.tags;
+    for tag in &input.add {
+        if !tags.contains(tag) {
+            tags.push(tag.clone());
+        }
+    }
+    tags.retain(|t| !input.remove.contains(t));
+
+    // Update the tags in the database
+    let now = now();
+    let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".to_string());
+
+    conn.execute(
+        "UPDATE organizations SET tags = ?1, updated_at = ?2 WHERE id = ?3 AND deleted_at IS NULL",
+        params![&tags_json, now, id],
+    )?;
+
+    // Return updated org
+    get_organization_by_id(conn, id)
 }
 
 // ============ Named Service Configs ============

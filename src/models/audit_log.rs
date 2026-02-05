@@ -19,6 +19,7 @@ pub enum AuditAction {
     // User management
     CreateUser,
     UpdateUser,
+    UpdateUserTags,
     DeleteUser,
 
     // Operator management
@@ -30,6 +31,7 @@ pub enum AuditAction {
     // Organization management
     CreateOrg,
     UpdateOrg,
+    UpdateOrgTags,
     DeleteOrg,
 
     // Org member management

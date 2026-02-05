@@ -59,6 +59,9 @@ pub struct User {
     pub name: String,
     /// Operator role (None = not an operator)
     pub operator_role: Option<crate::models::OperatorRole>,
+    /// Tags for user status/flags (e.g., "suspended", "beta", "vip")
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub created_at: i64,
     pub updated_at: i64,
     /// Soft delete timestamp (None = active, Some = deleted at this time)

@@ -14,7 +14,7 @@ pub use users::*;
 
 use axum::{
     Router, middleware,
-    routing::{delete, get, post, put},
+    routing::{delete, get, patch, post, put},
 };
 
 use crate::db::AppState;
@@ -48,6 +48,10 @@ pub fn router(state: AppState) -> Router<AppState> {
                     "/operators/users/{user_id}/hard-delete",
                     post(users::hard_delete_user),
                 )
+                .route(
+                    "/operators/users/{user_id}/tags",
+                    patch(users::update_user_tags),
+                )
                 // Organization management (admin+)
                 .route("/operators/organizations", post(create_organization))
                 .route("/operators/organizations", get(list_organizations))
@@ -67,6 +71,10 @@ pub fn router(state: AppState) -> Router<AppState> {
                 .route(
                     "/operators/organizations/{org_id}/hard-delete",
                     post(hard_delete_organization),
+                )
+                .route(
+                    "/operators/organizations/{org_id}/tags",
+                    patch(update_organization_tags),
                 )
                 // Support endpoints (admin+)
                 .route(

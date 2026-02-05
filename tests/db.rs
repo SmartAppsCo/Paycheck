@@ -23,3 +23,6 @@ mod service_config_inheritance;
 
 #[path = "db/bulk_license_atomicity.rs"]
 mod bulk_license_atomicity;
+
+#[path = "db/tags.rs"]
+mod tags;

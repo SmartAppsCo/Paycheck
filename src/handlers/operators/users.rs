@@ -8,7 +8,7 @@ use crate::db::{AppState, queries};
 use crate::error::{AppError, OptionExt, Result, msg};
 use crate::extractors::{Json, Path, RestoreRequest};
 use crate::middleware::OperatorContext;
-use crate::models::{ActorType, AuditAction, CreateUser, UpdateUser, User, UserWithRoles};
+use crate::models::{ActorType, AuditAction, CreateUser, UpdateTags, UpdateUser, User, UserWithRoles};
 use crate::pagination::{Paginated, PaginationQuery};
 use crate::util::AuditLogBuilder;
 
@@ -139,6 +139,38 @@ pub async fn update_user(
         .save()?;
 
     let user = queries::get_user_with_roles(&conn, &id)?.or_not_found(msg::USER_NOT_FOUND)?;
+
+    Ok(Json(user))
+}
+
+/// Update user tags with add/remove semantics.
+pub async fn update_user_tags(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<OperatorContext>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<UpdateTags>,
+) -> Result<Json<User>> {
+    let conn = state.db.get()?;
+    let audit_conn = state.audit.get()?;
+
+    let existing = queries::get_user_by_id(&conn, &id)?.or_not_found(msg::USER_NOT_FOUND)?;
+
+    let user = queries::update_user_tags(&conn, &id, &input)?.or_not_found(msg::USER_NOT_FOUND)?;
+
+    AuditLogBuilder::new(&audit_conn, state.audit_log_enabled, &headers)
+        .actor(ActorType::User, Some(&ctx.user.id))
+        .action(AuditAction::UpdateUserTags)
+        .resource("user", &id)
+        .details(&serde_json::json!({
+            "add": input.add,
+            "remove": input.remove,
+            "old_tags": existing.tags,
+            "new_tags": user.tags
+        }))
+        .names(&ctx.audit_names().resource_user(&user.name, &user.email))
+        .auth_method(&ctx.auth_method)
+        .save()?;
 
     Ok(Json(user))
 }
