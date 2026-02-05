@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use reqwest::Client;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Retry delays in milliseconds for metering webhooks.
 /// Quick retries (100ms, 200ms) to avoid blocking user flow.
@@ -34,7 +34,7 @@ pub fn generate_email_idempotency_key() -> String {
 }
 
 /// Email metering event payload (owned version for async spawning).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailMeteringEvent {
     /// Event type: "activation_sent", "feedback_sent", "crash_sent"
     pub event: String,
@@ -57,7 +57,7 @@ pub struct EmailMeteringEvent {
 }
 
 /// Sales metering event payload (owned version for async spawning).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SalesMeteringEvent {
     /// Event type: "purchase", "renewal", "refund"
     pub event: String,
