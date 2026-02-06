@@ -349,29 +349,36 @@ impl Config {
     /// Creates a CORS layer for admin APIs (operator/org routes).
     /// Only allows requests from configured console origins.
     pub fn console_cors_layer(&self) -> tower_http::cors::CorsLayer {
-        use axum::http::{HeaderName, HeaderValue, Method};
-        use tower_http::cors::CorsLayer;
-
-        let origins: Vec<HeaderValue> = self
-            .console_origins
-            .iter()
-            .filter_map(|o| o.parse().ok())
-            .collect();
-
-        CorsLayer::new()
-            .allow_origin(origins)
-            .allow_methods([
-                Method::GET,
-                Method::POST,
-                Method::PUT,
-                Method::DELETE,
-                Method::OPTIONS,
-            ])
-            .allow_headers([
-                HeaderName::from_static("authorization"),
-                HeaderName::from_static("content-type"),
-                HeaderName::from_static("x-on-behalf-of"),
-            ])
-            .allow_credentials(true)
+        build_console_cors_layer(&self.console_origins)
     }
+}
+
+/// Builds a CORS layer for admin APIs from a list of allowed origin strings.
+///
+/// This is the single source of truth for admin CORS configuration.
+/// Used by `Config::console_cors_layer()` in production and directly in tests.
+pub fn build_console_cors_layer(origins: &[String]) -> tower_http::cors::CorsLayer {
+    use axum::http::{HeaderName, HeaderValue, Method};
+    use tower_http::cors::CorsLayer;
+
+    let origin_values: Vec<HeaderValue> = origins
+        .iter()
+        .filter_map(|o| o.parse().ok())
+        .collect();
+
+    CorsLayer::new()
+        .allow_origin(origin_values)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([
+            HeaderName::from_static("authorization"),
+            HeaderName::from_static("content-type"),
+            HeaderName::from_static("x-on-behalf-of"),
+        ])
+        .allow_credentials(true)
 }

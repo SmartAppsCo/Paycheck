@@ -11,3 +11,6 @@ mod webhooks;
 
 #[path = "handlers/org_api_coverage.rs"]
 mod org_api_coverage;
+
+#[path = "handlers/service_configs.rs"]
+mod service_configs;

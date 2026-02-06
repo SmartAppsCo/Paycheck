@@ -1310,3 +1310,510 @@ mod api_key_visibility_isolation {
         );
     }
 }
+
+// ============================================================================
+// CROSS-ORG WRITE OPERATION ISOLATION TESTS
+// ============================================================================
+
+mod cross_org_write_isolation {
+    use super::*;
+
+    /// Helper: set up two orgs with full resource hierarchies.
+    /// Returns (app, state, org_a_id, org_b_key, project_a_id, product_a_id, license_a_id, device_a_id, user_a_id)
+    struct TwoOrgSetup {
+        app: Router,
+        org_a_id: String,
+        key_b: String,
+        project_a_id: String,
+        product_a_id: String,
+        license_a_id: String,
+        device_a_id: String,
+        user_a_id: String,
+    }
+
+    fn setup_two_orgs() -> TwoOrgSetup {
+        let (app, state) = org_app();
+        let mut conn = state.db.get().unwrap();
+
+        let org_a = create_test_org(&mut conn, "Organization A");
+        let org_b = create_test_org(&mut conn, "Organization B");
+
+        let (user_a, _member_a, _key_a) =
+            create_test_org_member(&mut conn, &org_a.id, "user@orga.com", OrgMemberRole::Owner);
+        let (_user_b, _member_b, key_b) =
+            create_test_org_member(&mut conn, &org_b.id, "user@orgb.com", OrgMemberRole::Owner);
+
+        let project_a =
+            create_test_project(&mut conn, &org_a.id, "Project A", &state.master_key);
+        let product_a = create_test_product(&mut conn, &project_a.id, "Product A", "pro");
+        let license_a = create_test_license(&mut conn, &project_a.id, &product_a.id, None);
+        let device_a =
+            create_test_device(&conn, &license_a.id, "device-a-1", DeviceType::Uuid);
+
+        TwoOrgSetup {
+            app,
+            org_a_id: org_a.id,
+            key_b,
+            project_a_id: project_a.id,
+            product_a_id: product_a.id,
+            license_a_id: license_a.id,
+            device_a_id: device_a.id,
+            user_a_id: user_a.id,
+        }
+    }
+
+    /// Helper to make a cross-org request and assert 403.
+    async fn assert_cross_org_forbidden(
+        app: Router,
+        method: &str,
+        uri: &str,
+        key: &str,
+        body: Option<&str>,
+        test_name: &str,
+    ) {
+        let body = match body {
+            Some(json) => Body::from(json.to_string()),
+            None => Body::empty(),
+        };
+
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("Authorization", format!("Bearer {}", key));
+
+        if method == "POST" || method == "PUT" || method == "PATCH" {
+            builder = builder.header("Content-Type", "application/json");
+        }
+
+        let response = app
+            .oneshot(builder.body(body).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "{}: expected 403 FORBIDDEN, got {}",
+            test_name,
+            response.status()
+        );
+
+        // Verify response body does not leak org A data
+        let body_bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_str = String::from_utf8_lossy(&body_bytes);
+        assert!(
+            !body_str.contains("Organization A"),
+            "{}: response should not leak org A data",
+            test_name
+        );
+    }
+
+    // --- Member operations ---
+
+    #[tokio::test]
+    async fn test_cross_org_create_member() {
+        let s = setup_two_orgs();
+        let new_user_json = r#"{"user_id": "nonexistent-user-id", "role": "member"}"#;
+        assert_cross_org_forbidden(
+            s.app,
+            "POST",
+            &format!("/orgs/{}/members", s.org_a_id),
+            &s.key_b,
+            Some(new_user_json),
+            "cross_org_create_member",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_update_member() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "PUT",
+            &format!("/orgs/{}/members/{}", s.org_a_id, s.user_a_id),
+            &s.key_b,
+            Some(r#"{"role": "admin"}"#),
+            "cross_org_update_member",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_delete_member() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "DELETE",
+            &format!("/orgs/{}/members/{}", s.org_a_id, s.user_a_id),
+            &s.key_b,
+            None,
+            "cross_org_delete_member",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_restore_member() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "POST",
+            &format!("/orgs/{}/members/{}/restore", s.org_a_id, s.user_a_id),
+            &s.key_b,
+            None,
+            "cross_org_restore_member",
+        )
+        .await;
+    }
+
+    // --- Project operations ---
+
+    #[tokio::test]
+    async fn test_cross_org_create_project() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "POST",
+            &format!("/orgs/{}/projects", s.org_a_id),
+            &s.key_b,
+            Some(r#"{"name": "Evil Project"}"#),
+            "cross_org_create_project",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_update_project() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "PUT",
+            &format!("/orgs/{}/projects/{}", s.org_a_id, s.project_a_id),
+            &s.key_b,
+            Some(r#"{"name": "Renamed by attacker"}"#),
+            "cross_org_update_project",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_delete_project() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "DELETE",
+            &format!("/orgs/{}/projects/{}", s.org_a_id, s.project_a_id),
+            &s.key_b,
+            None,
+            "cross_org_delete_project",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_restore_project() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "POST",
+            &format!("/orgs/{}/projects/{}/restore", s.org_a_id, s.project_a_id),
+            &s.key_b,
+            None,
+            "cross_org_restore_project",
+        )
+        .await;
+    }
+
+    // --- Product operations ---
+
+    #[tokio::test]
+    async fn test_cross_org_create_product() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "POST",
+            &format!(
+                "/orgs/{}/projects/{}/products",
+                s.org_a_id, s.project_a_id
+            ),
+            &s.key_b,
+            Some(r#"{"name": "Evil Product", "tier": "evil"}"#),
+            "cross_org_create_product",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_update_product() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "PUT",
+            &format!(
+                "/orgs/{}/projects/{}/products/{}",
+                s.org_a_id, s.project_a_id, s.product_a_id
+            ),
+            &s.key_b,
+            Some(r#"{"name": "Renamed Product"}"#),
+            "cross_org_update_product",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_delete_product() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "DELETE",
+            &format!(
+                "/orgs/{}/projects/{}/products/{}",
+                s.org_a_id, s.project_a_id, s.product_a_id
+            ),
+            &s.key_b,
+            None,
+            "cross_org_delete_product",
+        )
+        .await;
+    }
+
+    // --- License operations ---
+
+    #[tokio::test]
+    async fn test_cross_org_create_license() {
+        let s = setup_two_orgs();
+        let body = format!(r#"{{"product_id": "{}"}}"#, s.product_a_id);
+        assert_cross_org_forbidden(
+            s.app,
+            "POST",
+            &format!(
+                "/orgs/{}/projects/{}/licenses",
+                s.org_a_id, s.project_a_id
+            ),
+            &s.key_b,
+            Some(&body),
+            "cross_org_create_license",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_revoke_license() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "POST",
+            &format!(
+                "/orgs/{}/projects/{}/licenses/{}/revoke",
+                s.org_a_id, s.project_a_id, s.license_a_id
+            ),
+            &s.key_b,
+            None,
+            "cross_org_revoke_license",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_send_activation_code() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "POST",
+            &format!(
+                "/orgs/{}/projects/{}/licenses/{}/send-code",
+                s.org_a_id, s.project_a_id, s.license_a_id
+            ),
+            &s.key_b,
+            None,
+            "cross_org_send_activation_code",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_deactivate_device() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "DELETE",
+            &format!(
+                "/orgs/{}/projects/{}/licenses/{}/devices/{}",
+                s.org_a_id, s.project_a_id, s.license_a_id, s.device_a_id
+            ),
+            &s.key_b,
+            None,
+            "cross_org_deactivate_device",
+        )
+        .await;
+    }
+
+    // --- Project member operations ---
+
+    #[tokio::test]
+    async fn test_cross_org_create_project_member() {
+        let s = setup_two_orgs();
+        let body = format!(r#"{{"user_id": "{}", "role": "view"}}"#, s.user_a_id);
+        assert_cross_org_forbidden(
+            s.app,
+            "POST",
+            &format!(
+                "/orgs/{}/projects/{}/members",
+                s.org_a_id, s.project_a_id
+            ),
+            &s.key_b,
+            Some(&body),
+            "cross_org_create_project_member",
+        )
+        .await;
+    }
+
+    // --- Transaction read operations (still org-isolated) ---
+
+    #[tokio::test]
+    async fn test_cross_org_list_transactions() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "GET",
+            &format!("/orgs/{}/transactions", s.org_a_id),
+            &s.key_b,
+            None,
+            "cross_org_list_transactions",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_get_transaction_stats() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "GET",
+            &format!("/orgs/{}/transactions/stats", s.org_a_id),
+            &s.key_b,
+            None,
+            "cross_org_get_transaction_stats",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_project_transactions() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "GET",
+            &format!(
+                "/orgs/{}/projects/{}/transactions",
+                s.org_a_id, s.project_a_id
+            ),
+            &s.key_b,
+            None,
+            "cross_org_project_transactions",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_project_tx_stats() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "GET",
+            &format!(
+                "/orgs/{}/projects/{}/transactions/stats",
+                s.org_a_id, s.project_a_id
+            ),
+            &s.key_b,
+            None,
+            "cross_org_project_tx_stats",
+        )
+        .await;
+    }
+
+    // --- Service config operations ---
+
+    #[tokio::test]
+    async fn test_cross_org_list_service_configs() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "GET",
+            &format!("/orgs/{}/service-configs", s.org_a_id),
+            &s.key_b,
+            None,
+            "cross_org_list_service_configs",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cross_org_create_service_config() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "POST",
+            &format!("/orgs/{}/service-configs", s.org_a_id),
+            &s.key_b,
+            Some(r#"{"key": "stripe_api_key", "value": "sk_evil"}"#),
+            "cross_org_create_service_config",
+        )
+        .await;
+    }
+
+    // --- Member API key operations ---
+
+    #[tokio::test]
+    async fn test_cross_org_member_api_keys() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "GET",
+            &format!(
+                "/orgs/{}/members/{}/api-keys",
+                s.org_a_id, s.user_a_id
+            ),
+            &s.key_b,
+            None,
+            "cross_org_member_api_keys",
+        )
+        .await;
+    }
+
+    // --- Payment provider ---
+
+    #[tokio::test]
+    async fn test_cross_org_payment_provider() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "GET",
+            &format!("/orgs/{}/payment-provider", s.org_a_id),
+            &s.key_b,
+            None,
+            "cross_org_payment_provider",
+        )
+        .await;
+    }
+
+    // --- Provider link operations ---
+
+    #[tokio::test]
+    async fn test_cross_org_create_provider_link() {
+        let s = setup_two_orgs();
+        assert_cross_org_forbidden(
+            s.app,
+            "POST",
+            &format!(
+                "/orgs/{}/projects/{}/products/{}/provider-links",
+                s.org_a_id, s.project_a_id, s.product_a_id
+            ),
+            &s.key_b,
+            Some(r#"{"provider": "stripe", "provider_id": "price_evil"}"#),
+            "cross_org_create_provider_link",
+        )
+        .await;
+    }
+}

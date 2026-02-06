@@ -16,7 +16,7 @@ use crate::email::{
 use crate::error::{AppError, Result};
 use crate::extractors::Json;
 use crate::metering::{generate_email_idempotency_key, spawn_email_metering, EmailMeteringEvent};
-use crate::models::{ActorType, AuditAction, AuditLogNames};
+use crate::models::{ActorType, AuditAction, AuditLogNames, validate_email_format};
 use crate::util::AuditLogBuilder;
 
 #[derive(Debug, Deserialize)]
@@ -45,6 +45,9 @@ pub async fn request_activation_code(
     headers: HeaderMap,
     Json(body): Json<RequestCodeBody>,
 ) -> Result<Json<RequestCodeResponse>> {
+    // Reject malformed emails early (prevents CRLF injection into email services)
+    validate_email_format(&body.email)?;
+
     let conn = state.db.get()?;
 
     // Compute email hash for rate limiting and lookup

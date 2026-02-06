@@ -1348,4 +1348,84 @@ mod tests {
         let path = "/usr/local/bin/app";
         assert_eq!(sanitize_path(path), path);
     }
+
+    // ==================== MemoryStorage for tests ====================
+
+    struct MemoryStorage(std::sync::RwLock<std::collections::HashMap<String, String>>);
+
+    impl MemoryStorage {
+        fn new() -> Self {
+            Self(std::sync::RwLock::new(std::collections::HashMap::new()))
+        }
+    }
+
+    impl crate::storage::StorageAdapter for MemoryStorage {
+        fn get(&self, key: &str) -> Option<String> {
+            self.0.read().ok()?.get(key).cloned()
+        }
+        fn set(&self, key: &str, value: &str) {
+            if let Ok(mut map) = self.0.write() {
+                map.insert(key.to_string(), value.to_string());
+            }
+        }
+        fn remove(&self, key: &str) {
+            if let Ok(mut map) = self.0.write() {
+                map.remove(key);
+            }
+        }
+    }
+
+    fn make_test_paycheck(name: &str) -> Paycheck {
+        let storage = Arc::new(MemoryStorage::new());
+        let dir = std::env::temp_dir().join("paycheck_sdk_tests").join(name);
+        Paycheck::with_options(
+            // Valid base64 but not a real Ed25519 key (doesn't matter for no-token tests)
+            "dGVzdC1wdWJsaWMta2V5LXBhZGRlZC10by0zMmI=",
+            &dir,
+            PaycheckOptions {
+                storage: Some(storage),
+                device_id: Some("test-device-123".into()),
+                device_type: Some(crate::types::DeviceType::Uuid),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    // ==================== Paycheck client tests ====================
+
+    #[test]
+    fn test_paycheck_new_rejects_empty_public_key() {
+        let result = Paycheck::new("", std::path::Path::new("/nonexistent"));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.message.contains("public_key"),
+            "Error should mention public_key: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn test_paycheck_validate_no_token() {
+        let paycheck = make_test_paycheck("validate_no_token");
+        let result = paycheck.validate(None);
+        assert!(!result.valid, "validate with no token should return valid: false");
+        assert!(result.claims.is_none(), "validate with no token should have no claims");
+    }
+
+    #[test]
+    fn test_paycheck_is_licensed_no_token() {
+        let paycheck = make_test_paycheck("is_licensed_no_token");
+        assert!(!paycheck.is_licensed(), "is_licensed with no token should return false");
+    }
+
+    #[test]
+    fn test_paycheck_is_expired_no_token() {
+        let paycheck = make_test_paycheck("is_expired_no_token");
+        assert!(
+            paycheck.is_expired(),
+            "is_expired with no token should return true (conservative default)"
+        );
+    }
 }

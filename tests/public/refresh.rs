@@ -779,8 +779,8 @@ async fn test_refresh_with_expired_license_fails() {
 /// 4. User renews - webhook updates license.expires_at to 30 days from now
 /// 5. Refresh should succeed and return the stored expiration
 ///
-/// BUG: The current implementation calculates expiration from
-/// device.activated_at + product.license_exp_days, which ignores the renewal.
+/// The implementation correctly uses the stored license.expires_at from the DB,
+/// which gets updated by renewal webhooks.
 #[tokio::test]
 async fn test_refresh_renewed_subscription_uses_stored_expiration() {
     let master_key = test_master_key();

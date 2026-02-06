@@ -18,125 +18,35 @@ use common::*;
 use axum::{
     Router,
     body::Body,
-    http::{HeaderName, HeaderValue, Method, Request, StatusCode},
-    routing::{get, post},
+    http::{Request, StatusCode},
 };
 use tower::ServiceExt;
-use tower_http::cors::{Any, CorsLayer};
 
 use paycheck::config::RateLimitConfig;
 use paycheck::db::AppState;
 use paycheck::handlers;
-use paycheck::handlers::public::{
-    deactivate_device, get_license_info, initiate_buy, payment_callback, redeem_with_code,
-    request_activation_code, validate_license,
-};
 use paycheck::models::{OperatorRole, OrgMemberRole};
-
-use r2d2::Pool;
-use r2d2_sqlite::SqliteConnectionManager;
 
 // ============================================================================
 // Test App Setup Helpers
 // ============================================================================
 
-/// Creates a test app with public endpoints and CORS layer (no rate limiting for tests)
+/// Creates a test app using the production public router (with its CORS layer).
+/// This tests the actual production CORS config, not a test-specific reconstruction.
 fn public_app() -> (Router, AppState) {
     let state = create_test_app_state();
-
-    // CORS layer for public endpoints: Allow any origin
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers([
-            HeaderName::from_static("authorization"),
-            HeaderName::from_static("content-type"),
-        ]);
-
-    // Create a simplified router with public endpoints (no rate limiting for tests)
-    let app = Router::new()
-        .route("/health", get(health_handler))
-        .route("/buy", post(initiate_buy))
-        .route("/callback", get(payment_callback))
-        .route("/redeem", post(redeem_with_code))
-        .route("/activation/request-code", post(request_activation_code))
-        .route("/validate", post(validate_license))
-        .route("/license", get(get_license_info))
-        .route("/devices/deactivate", post(deactivate_device))
-        .layer(cors)
+    let app = handlers::public::router(RateLimitConfig::disabled())
         .with_state(state.clone());
-
     (app, state)
 }
 
-/// Simple health handler for tests
-async fn health_handler() -> &'static str {
-    "ok"
-}
-
-/// Creates a test app with the org router and specific console origins for CORS
+/// Creates a test app with the org router using the production CORS factory.
+/// This tests the actual admin CORS config from `build_console_cors_layer()`.
 fn admin_app_with_origins(origins: Vec<&str>) -> (Router, AppState) {
-    let master_key = test_master_key();
+    let state = create_test_app_state();
+    let origin_strings: Vec<String> = origins.iter().map(|o| o.to_string()).collect();
+    let cors = paycheck::config::build_console_cors_layer(&origin_strings);
 
-    let manager = SqliteConnectionManager::memory();
-    let pool = Pool::builder().max_size(4).build(manager).unwrap();
-    {
-        let conn = pool.get().unwrap();
-        paycheck::db::init_db(&conn).unwrap();
-    }
-
-    let audit_manager = SqliteConnectionManager::memory();
-    let audit_pool = Pool::builder().max_size(4).build(audit_manager).unwrap();
-    {
-        let conn = audit_pool.get().unwrap();
-        paycheck::db::init_audit_db(&conn).unwrap();
-    }
-
-    let state = AppState {
-        db: pool,
-        audit: audit_pool,
-        base_url: "http://localhost:3000".to_string(),
-        audit_log_enabled: false,
-        master_key,
-        email_hasher: paycheck::crypto::EmailHasher::from_bytes([0xAA; 32]),
-        success_page_url: "http://localhost:3000/success".to_string(),
-        activation_rate_limiter: std::sync::Arc::new(
-            paycheck::rate_limit::ActivationRateLimiter::default(),
-        ),
-        email_service: std::sync::Arc::new(paycheck::email::EmailService::new(
-            None,
-            "test@example.com".to_string(),
-        )),
-        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
-            None,
-            "test@example.com".to_string(),
-        )),
-        http_client: reqwest::Client::new(),
-        metering_webhook_url: None,
-        disable_checkout_tag: None,
-        disable_public_api_tag: None,
-    };
-
-    // Create CORS layer with specified origins
-    let origin_values: Vec<HeaderValue> = origins.iter().filter_map(|o| o.parse().ok()).collect();
-
-    let cors = CorsLayer::new()
-        .allow_origin(origin_values)
-        .allow_methods([
-            Method::GET,
-            Method::POST,
-            Method::PUT,
-            Method::DELETE,
-            Method::OPTIONS,
-        ])
-        .allow_headers([
-            HeaderName::from_static("authorization"),
-            HeaderName::from_static("content-type"),
-            HeaderName::from_static("x-on-behalf-of"),
-        ])
-        .allow_credentials(true);
-
-    // Apply CORS to org router
     let app = handlers::orgs::router(state.clone(), RateLimitConfig::disabled())
         .layer(cors)
         .with_state(state.clone());
@@ -144,69 +54,13 @@ fn admin_app_with_origins(origins: Vec<&str>) -> (Router, AppState) {
     (app, state)
 }
 
-/// Creates a test app with the operator router and specific console origins for CORS
+/// Creates a test app with the operator router using the production CORS factory.
+/// This tests the actual admin CORS config from `build_console_cors_layer()`.
 fn operator_app_with_origins(origins: Vec<&str>) -> (Router, AppState) {
-    let master_key = test_master_key();
+    let state = create_test_app_state();
+    let origin_strings: Vec<String> = origins.iter().map(|o| o.to_string()).collect();
+    let cors = paycheck::config::build_console_cors_layer(&origin_strings);
 
-    let manager = SqliteConnectionManager::memory();
-    let pool = Pool::builder().max_size(4).build(manager).unwrap();
-    {
-        let conn = pool.get().unwrap();
-        paycheck::db::init_db(&conn).unwrap();
-    }
-
-    let audit_manager = SqliteConnectionManager::memory();
-    let audit_pool = Pool::builder().max_size(4).build(audit_manager).unwrap();
-    {
-        let conn = audit_pool.get().unwrap();
-        paycheck::db::init_audit_db(&conn).unwrap();
-    }
-
-    let state = AppState {
-        db: pool,
-        audit: audit_pool,
-        base_url: "http://localhost:3000".to_string(),
-        audit_log_enabled: false,
-        master_key,
-        email_hasher: paycheck::crypto::EmailHasher::from_bytes([0xAA; 32]),
-        success_page_url: "http://localhost:3000/success".to_string(),
-        activation_rate_limiter: std::sync::Arc::new(
-            paycheck::rate_limit::ActivationRateLimiter::default(),
-        ),
-        email_service: std::sync::Arc::new(paycheck::email::EmailService::new(
-            None,
-            "test@example.com".to_string(),
-        )),
-        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
-            None,
-            "test@example.com".to_string(),
-        )),
-        http_client: reqwest::Client::new(),
-        metering_webhook_url: None,
-        disable_checkout_tag: None,
-        disable_public_api_tag: None,
-    };
-
-    // Create CORS layer with specified origins
-    let origin_values: Vec<HeaderValue> = origins.iter().filter_map(|o| o.parse().ok()).collect();
-
-    let cors = CorsLayer::new()
-        .allow_origin(origin_values)
-        .allow_methods([
-            Method::GET,
-            Method::POST,
-            Method::PUT,
-            Method::DELETE,
-            Method::OPTIONS,
-        ])
-        .allow_headers([
-            HeaderName::from_static("authorization"),
-            HeaderName::from_static("content-type"),
-            HeaderName::from_static("x-on-behalf-of"),
-        ])
-        .allow_credentials(true);
-
-    // Apply CORS to operator router
     let app = handlers::operators::router(state.clone())
         .layer(cors)
         .with_state(state.clone());
@@ -462,6 +316,36 @@ mod public_cors {
                 "Should allow Authorization header"
             );
         }
+    }
+
+    /// Verify that public endpoints do NOT set Access-Control-Allow-Credentials.
+    /// ACAO: * with ACAC: true is a CORS spec violation (browsers reject it).
+    #[tokio::test]
+    async fn test_public_endpoints_do_not_set_credentials_header() {
+        let (app, _state) = public_app();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/health")
+                    .header("Origin", "https://example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let credentials = response
+            .headers()
+            .get("access-control-allow-credentials");
+
+        assert!(
+            credentials.is_none(),
+            "Public endpoints with ACAO:* must NOT set Access-Control-Allow-Credentials \
+             (CORS spec violation). Got: {:?}",
+            credentials.map(|v| v.to_str().unwrap_or(""))
+        );
     }
 }
 
@@ -1011,15 +895,21 @@ mod preflight_requests {
             .await
             .unwrap();
 
-        // Check if max-age header is present (optional but recommended)
-        // tower-http's CorsLayer sets a default max-age
-        let _max_age = response
-            .headers()
-            .get("access-control-max-age")
-            .map(|v| v.to_str().unwrap_or(""));
-
-        // The presence of max-age is good for caching preflight responses
-        // No assertion here since it may or may not be configured
+        // If max-age is present, it must be reasonable (1..=86400 seconds).
+        // If absent, tower-http omits it by default -- acceptable but suboptimal
+        // since browsers will repeat preflight requests every time.
+        if let Some(value) = response.headers().get("access-control-max-age") {
+            let max_age_value: u64 = value
+                .to_str()
+                .expect("max-age should be valid string")
+                .parse()
+                .expect("max-age should be a number");
+            assert!(
+                max_age_value > 0 && max_age_value <= 86400,
+                "Max-age should be between 1 and 86400 seconds, got {}",
+                max_age_value
+            );
+        }
     }
 }
 

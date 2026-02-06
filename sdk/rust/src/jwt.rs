@@ -200,4 +200,153 @@ mod tests {
             "validate_issuer should accept 'paycheck' issuer"
         );
     }
+
+    // ==================== Helpers for signature tests ====================
+
+    fn make_signed_jwt(claims_json: &str, signing_key: &ed25519_dalek::SigningKey) -> String {
+        use ed25519_dalek::Signer;
+        let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"EdDSA","typ":"JWT"}"#);
+        let payload = URL_SAFE_NO_PAD.encode(claims_json);
+        let message = format!("{}.{}", header, payload);
+        let signature = signing_key.sign(message.as_bytes());
+        let sig_b64 = URL_SAFE_NO_PAD.encode(signature.to_bytes());
+        format!("{}.{}", message, sig_b64)
+    }
+
+    fn make_claims(exp: i64, license_exp: Option<i64>, updates_exp: Option<i64>) -> LicenseClaims {
+        let license_exp_str = match license_exp {
+            Some(v) => v.to_string(),
+            None => "null".to_string(),
+        };
+        let updates_exp_str = match updates_exp {
+            Some(v) => v.to_string(),
+            None => "null".to_string(),
+        };
+        serde_json::from_str(&format!(
+            r#"{{"iss":"paycheck","sub":"lic-123","aud":"test","jti":"jti-123","iat":1704067200,"exp":{},"license_exp":{},"updates_exp":{},"tier":"pro","features":[],"device_id":"dev-123","device_type":"uuid","product_id":"prod-123"}}"#,
+            exp, license_exp_str, updates_exp_str
+        )).unwrap()
+    }
+
+    const TEST_CLAIMS_JSON: &str = r#"{"iss":"paycheck","sub":"license-123","aud":"test.com","jti":"jti-123","iat":1704067200,"exp":1704070800,"license_exp":null,"updates_exp":null,"tier":"pro","features":["export"],"device_id":"device-123","device_type":"uuid","product_id":"product-123"}"#;
+
+    // ==================== verify_token tests ====================
+
+    #[test]
+    fn test_verify_token_valid_signature() {
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]);
+        let public_key_b64 = STANDARD.encode(signing_key.verifying_key().as_bytes());
+
+        let token = make_signed_jwt(TEST_CLAIMS_JSON, &signing_key);
+        assert!(verify_token(&token, &public_key_b64));
+
+        // Also verify the decoded claims are correct
+        let claims = decode_token(&token).unwrap();
+        assert_eq!(claims.iss, "paycheck");
+        assert_eq!(claims.tier, "pro");
+        assert_eq!(claims.device_id, "device-123");
+    }
+
+    #[test]
+    fn test_verify_token_invalid_signature() {
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]);
+        let public_key_b64 = STANDARD.encode(signing_key.verifying_key().as_bytes());
+
+        let token = make_signed_jwt(TEST_CLAIMS_JSON, &signing_key);
+
+        // Corrupt the signature by flipping a byte
+        let parts: Vec<&str> = token.split('.').collect();
+        let mut sig_bytes = URL_SAFE_NO_PAD.decode(parts[2]).unwrap();
+        sig_bytes[0] ^= 0xFF;
+        let corrupted_sig = URL_SAFE_NO_PAD.encode(&sig_bytes);
+        let corrupted_token = format!("{}.{}.{}", parts[0], parts[1], corrupted_sig);
+
+        assert!(!verify_token(&corrupted_token, &public_key_b64));
+    }
+
+    #[test]
+    fn test_verify_token_wrong_key() {
+        let key_a = ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]);
+        let key_b = ed25519_dalek::SigningKey::from_bytes(&[99u8; 32]);
+        let public_key_b_b64 = STANDARD.encode(key_b.verifying_key().as_bytes());
+
+        // Sign with key A, verify with key B
+        let token = make_signed_jwt(TEST_CLAIMS_JSON, &key_a);
+        assert!(!verify_token(&token, &public_key_b_b64));
+    }
+
+    #[test]
+    fn test_verify_token_malformed_input() {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]);
+        let pub_key = STANDARD.encode(key.verifying_key().as_bytes());
+
+        // All of these should return false, not panic
+        assert!(!verify_token("", &pub_key));
+        assert!(!verify_token("not.a.jwt", &pub_key));
+        assert!(!verify_token("a.b", &pub_key));
+        assert!(!verify_token("a.b.c.d", &pub_key));
+    }
+
+    // ==================== Expiration tests ====================
+
+    #[test]
+    fn test_is_jwt_expired() {
+        let past = now() - 3600;
+        let future = now() + 3600;
+
+        let expired_claims = make_claims(past, None, None);
+        assert!(is_jwt_expired(&expired_claims), "JWT with past exp should be expired");
+
+        let valid_claims = make_claims(future, None, None);
+        assert!(!is_jwt_expired(&valid_claims), "JWT with future exp should not be expired");
+    }
+
+    #[test]
+    fn test_is_license_expired_perpetual() {
+        // license_exp: None = perpetual license, never expires
+        let claims = make_claims(now() + 3600, None, None);
+        assert!(!is_license_expired(&claims));
+    }
+
+    #[test]
+    fn test_is_license_expired_past() {
+        let claims = make_claims(now() + 3600, Some(now() - 3600), None);
+        assert!(is_license_expired(&claims));
+    }
+
+    #[test]
+    fn test_is_license_expired_future() {
+        let claims = make_claims(now() + 3600, Some(now() + 3600), None);
+        assert!(!is_license_expired(&claims));
+    }
+
+    // ==================== covers_version tests ====================
+
+    #[test]
+    fn test_covers_version_no_updates_exp() {
+        // updates_exp: None = all versions covered
+        let claims = make_claims(now() + 3600, None, None);
+        assert!(covers_version(&claims, 999_999_999));
+    }
+
+    #[test]
+    fn test_covers_version_before_exp() {
+        // updates_exp: 1000, timestamp 999 = covered
+        let claims = make_claims(now() + 3600, None, Some(1000));
+        assert!(covers_version(&claims, 999));
+    }
+
+    #[test]
+    fn test_covers_version_at_boundary() {
+        // Boundary: timestamp == updates_exp (uses <=, so should be covered)
+        let claims = make_claims(now() + 3600, None, Some(1000));
+        assert!(covers_version(&claims, 1000));
+    }
+
+    #[test]
+    fn test_covers_version_after_exp() {
+        // timestamp > updates_exp = not covered
+        let claims = make_claims(now() + 3600, None, Some(1000));
+        assert!(!covers_version(&claims, 1001));
+    }
 }

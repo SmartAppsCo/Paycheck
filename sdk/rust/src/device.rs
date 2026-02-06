@@ -157,10 +157,17 @@ mod tests {
     #[test]
     fn test_machine_id_consistency() {
         // Machine ID should be consistent across calls
-        if let Ok(id1) = get_machine_id() {
-            if let Ok(id2) = get_machine_id() {
-                assert_eq!(id1, id2);
-            }
+        #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+        {
+            let id1 = get_machine_id().expect("should succeed on supported platform");
+            let id2 = get_machine_id().expect("should succeed on supported platform");
+            assert_eq!(id1, id2, "machine ID should be deterministic");
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        {
+            // On unsupported platforms, get_machine_id should return an error
+            assert!(get_machine_id().is_err());
         }
     }
 }

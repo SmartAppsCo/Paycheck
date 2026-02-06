@@ -3356,12 +3356,7 @@ fn test_checkout_inconsistent_state_is_unrecoverable() {
 
 /// Verifies that checkout with transaction data creates BOTH license AND transaction record.
 ///
-/// BUG: Currently transaction creation is OUTSIDE the atomic scope (after commit).
-/// If transaction creation fails, license exists but transaction record is missing.
-/// This breaks refund linkage and revenue tracking.
-///
-/// This test verifies the expected behavior: both should be created together.
-/// After the fix, they will be atomic. Before the fix, this test documents the coupling.
+/// Both are created within the same SQLite transaction for atomicity.
 #[test]
 fn test_checkout_creates_transaction_record_with_license() {
     use axum::http::StatusCode;
@@ -4454,8 +4449,8 @@ fn test_stripe_invoice_includes_payment_intent_for_refund_linkage() {
 // ============ Stripe Dispute Linkage Tests ============
 
 /// Verifies that checkout and dispute use matching order_id for proper linkage.
-/// BUG: Disputes use charge ID, but transactions are stored with payment_intent.
-/// This test demonstrates the bug by checking if checkout and dispute order_ids match.
+/// Both use payment_intent as order_id, falling back to charge ID only when
+/// payment_intent is absent.
 #[test]
 fn test_stripe_checkout_and_dispute_order_ids_match() {
     use axum::body::Bytes;
@@ -4522,11 +4517,9 @@ fn test_stripe_checkout_and_dispute_order_ids_match() {
     };
 
     // 3. The order_ids MUST match for dispute to find the original transaction
-    // BUG: Currently this will FAIL because dispute uses charge ID instead of payment_intent
     assert_eq!(
         checkout_order_id, dispute_order_id,
-        "Checkout order_id ({}) must match dispute order_id ({}) for transaction linkage. \
-        BUG: Disputes currently use charge ID instead of payment_intent!",
+        "Checkout order_id ({}) must match dispute order_id ({}) for transaction linkage",
         checkout_order_id, dispute_order_id
     );
 }

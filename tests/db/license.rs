@@ -789,6 +789,270 @@ fn test_mark_activation_code_used() {
     );
 }
 
+// ============ Activation Code Atomic Claim Tests ============
+
+#[test]
+fn test_try_claim_activation_code_success() {
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
+    let license = create_test_license(&mut conn, &project.id, &product.id, None);
+
+    let code = queries::create_activation_code(&mut conn, &license.id, "TEST")
+        .expect("Failed to create activation code");
+    assert!(!code.used, "new code should not be used");
+
+    // Claim the code
+    let claimed = queries::try_claim_activation_code(&conn, &code.code)
+        .expect("try_claim should not error")
+        .expect("claim should return Some for valid unused code");
+
+    assert!(claimed.used, "claimed code should have used=true");
+    assert_eq!(
+        claimed.license_id, license.id,
+        "claimed code should be linked to the correct license"
+    );
+    assert_eq!(
+        claimed.expires_at, code.expires_at,
+        "expiry should not change after claiming"
+    );
+
+    // Verify via separate query that the code is marked used in DB
+    let fetched = queries::get_activation_code_by_code(&conn, &code.code)
+        .expect("query failed")
+        .expect("code should still exist");
+    assert!(fetched.used, "code should be marked used in DB after claim");
+}
+
+#[test]
+fn test_try_claim_activation_code_already_used() {
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
+    let license = create_test_license(&mut conn, &project.id, &product.id, None);
+
+    let code = queries::create_activation_code(&mut conn, &license.id, "TEST")
+        .expect("Failed to create activation code");
+
+    // First claim succeeds
+    let first = queries::try_claim_activation_code(&conn, &code.code)
+        .expect("try_claim should not error");
+    assert!(first.is_some(), "first claim should succeed");
+
+    // Second claim of the same code should fail
+    let second = queries::try_claim_activation_code(&conn, &code.code)
+        .expect("try_claim should not error");
+    assert!(
+        second.is_none(),
+        "second claim of already-used code should return None"
+    );
+
+    // Third attempt also fails -- idempotent rejection
+    let third = queries::try_claim_activation_code(&conn, &code.code)
+        .expect("try_claim should not error");
+    assert!(
+        third.is_none(),
+        "third claim of already-used code should also return None"
+    );
+}
+
+#[test]
+fn test_try_claim_activation_code_expired() {
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
+    let license = create_test_license(&mut conn, &project.id, &product.id, None);
+
+    let code = queries::create_activation_code(&mut conn, &license.id, "TEST")
+        .expect("Failed to create activation code");
+
+    // Expire the code by setting expires_at to the past
+    let past = now() - 60;
+    conn.execute(
+        "UPDATE activation_codes SET expires_at = ?1 WHERE code_hash = ?2",
+        rusqlite::params![past, paycheck::crypto::hash_secret(&code.code)],
+    )
+    .expect("failed to expire code");
+
+    // Claiming an expired code should fail
+    let result = queries::try_claim_activation_code(&conn, &code.code)
+        .expect("try_claim should not error");
+    assert!(
+        result.is_none(),
+        "claiming an expired code should return None"
+    );
+
+    // Verify the code still exists and is NOT marked as used (expiry prevented claim, not usage)
+    let fetched = queries::get_activation_code_by_code(&conn, &code.code)
+        .expect("query failed")
+        .expect("code should still exist in DB");
+    assert!(
+        !fetched.used,
+        "expired code should not be marked as used after failed claim"
+    );
+}
+
+#[test]
+fn test_try_claim_activation_code_nonexistent() {
+    let conn = setup_test_db();
+
+    let result = queries::try_claim_activation_code(&conn, "FAKE-XXXX-YYYY")
+        .expect("try_claim should not error");
+    assert!(
+        result.is_none(),
+        "claiming a nonexistent code should return None"
+    );
+}
+
+#[test]
+fn test_try_claim_activation_code_concurrent() {
+    // Verify the CAS pattern prevents double-redemption under concurrent access.
+    // Multiple threads try to claim the same code -- exactly 1 should win.
+
+    use rusqlite::Connection;
+    use std::sync::{Arc, Barrier};
+
+    let num_threads = 5;
+    let db_path = format!(
+        "/tmp/claude/test_claim_code_concurrent_{}.db",
+        uuid::Uuid::new_v4()
+    );
+
+    let conn = Connection::open(&db_path).expect("Failed to create test db");
+    init_db(&conn).expect("Failed to init schema");
+
+    let master_key = test_master_key();
+    let org = create_test_org(&conn, "Test Org");
+    let project = create_test_project(&conn, &org.id, "My App", &master_key);
+    let product = create_test_product(&conn, &project.id, "Pro", "pro");
+    let license = create_test_license(&conn, &project.id, &product.id, None);
+
+    let code = queries::create_activation_code(&conn, &license.id, "TEST")
+        .expect("Failed to create activation code");
+    let code_str = Arc::new(code.code.clone());
+
+    drop(conn);
+
+    let barrier = Arc::new(Barrier::new(num_threads));
+    let db_path_arc = Arc::new(db_path.clone());
+
+    let handles: Vec<_> = (0..num_threads)
+        .map(|_| {
+            let barrier = Arc::clone(&barrier);
+            let db_path = Arc::clone(&db_path_arc);
+            let code_str = Arc::clone(&code_str);
+
+            std::thread::spawn(move || {
+                let thread_conn =
+                    Connection::open(db_path.as_str()).expect("thread failed to open db");
+                thread_conn
+                    .busy_timeout(std::time::Duration::from_secs(5))
+                    .expect("failed to set busy timeout");
+
+                barrier.wait();
+
+                queries::try_claim_activation_code(&thread_conn, &code_str)
+                    .expect("try_claim should not error")
+                    .is_some()
+            })
+        })
+        .collect();
+
+    let results: Vec<bool> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    let claim_count = results.iter().filter(|&&r| r).count();
+
+    assert_eq!(
+        claim_count, 1,
+        "exactly 1 of {} concurrent claims should succeed, got {}",
+        num_threads, claim_count
+    );
+
+    // Verify DB state: code should be marked as used
+    let verify_conn = Connection::open(&db_path).expect("failed to open db for verification");
+    let fetched = queries::get_activation_code_by_code(&verify_conn, &code.code)
+        .expect("query failed")
+        .expect("code should exist");
+    assert!(fetched.used, "code should be marked as used after concurrent race");
+
+    std::fs::remove_file(&db_path).ok();
+}
+
+#[test]
+fn test_cleanup_expired_activation_codes() {
+    let mut conn = setup_test_db();
+    let master_key = test_master_key();
+    let org = create_test_org(&mut conn, "Test Org");
+    let project = create_test_project(&mut conn, &org.id, "My App", &master_key);
+    let product = create_test_product(&mut conn, &project.id, "Pro", "pro");
+    let license = create_test_license(&mut conn, &project.id, &product.id, None);
+
+    // Create 3 codes
+    let expired_code = queries::create_activation_code(&mut conn, &license.id, "EXP")
+        .expect("create failed");
+    let used_code = queries::create_activation_code(&mut conn, &license.id, "USED")
+        .expect("create failed");
+    let fresh_code = queries::create_activation_code(&mut conn, &license.id, "FRESH")
+        .expect("create failed");
+
+    // Expire one code
+    let past = now() - 60;
+    conn.execute(
+        "UPDATE activation_codes SET expires_at = ?1 WHERE code_hash = ?2",
+        rusqlite::params![past, paycheck::crypto::hash_secret(&expired_code.code)],
+    )
+    .expect("failed to expire code");
+
+    // Mark one code as used (via try_claim)
+    queries::try_claim_activation_code(&conn, &used_code.code)
+        .expect("claim should succeed")
+        .expect("should return Some");
+
+    // Cleanup: should remove expired codes AND used codes
+    // (implementation: DELETE WHERE expires_at < now OR used = 1)
+    let deleted = queries::cleanup_expired_activation_codes(&conn)
+        .expect("cleanup should succeed");
+    assert_eq!(deleted, 2, "should delete 1 expired + 1 used code");
+
+    // Fresh code should survive
+    let still_exists = queries::get_activation_code_by_code(&conn, &fresh_code.code)
+        .expect("query failed");
+    assert!(
+        still_exists.is_some(),
+        "fresh unused code should survive cleanup"
+    );
+
+    // Expired code should be gone
+    let expired_gone = queries::get_activation_code_by_code(&conn, &expired_code.code)
+        .expect("query failed");
+    assert!(
+        expired_gone.is_none(),
+        "expired code should be removed by cleanup"
+    );
+
+    // Used code should be gone
+    let used_gone = queries::get_activation_code_by_code(&conn, &used_code.code)
+        .expect("query failed");
+    assert!(
+        used_gone.is_none(),
+        "used code should be removed by cleanup"
+    );
+}
+
+#[test]
+fn test_cleanup_activation_codes_empty_table() {
+    let conn = setup_test_db();
+
+    let deleted = queries::cleanup_expired_activation_codes(&conn)
+        .expect("cleanup should succeed");
+    assert_eq!(deleted, 0, "nothing to clean up on empty table");
+}
+
 // ============ Email Hash Tests ============
 
 #[test]

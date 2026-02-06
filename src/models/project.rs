@@ -258,11 +258,19 @@ fn validate_webhook_url(url_str: &str, field_name: &str) -> Result<()> {
             }
 
             // Check for potential DNS rebinding with numeric-looking hostnames
-            // This catches things like "127.0.0.1.nip.io" or similar
+            // This catches things like "127.0.0.1.nip.io" or "172.16.0.1.nip.io"
             if domain_lower.starts_with("127.")
                 || domain_lower.starts_with("10.")
                 || domain_lower.starts_with("192.168.")
                 || domain_lower.starts_with("169.254.")
+                || (domain_lower.starts_with("172.") && {
+                    // 172.16.0.0/12 private range: second octet 16-31
+                    domain_lower[4..]
+                        .split('.')
+                        .next()
+                        .and_then(|s| s.parse::<u8>().ok())
+                        .is_some_and(|octet| (16..=31).contains(&octet))
+                })
             {
                 return Err(AppError::BadRequest(format!(
                     "{} cannot target internal or private IP addresses",

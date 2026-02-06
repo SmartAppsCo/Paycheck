@@ -1151,3 +1151,151 @@ async fn test_impersonation_failure_does_not_leak_membership_status() {
         "response for 'user with no orgs' should match 'nonexistent user'"
     );
 }
+
+// ========================================================================
+// Audit Log Correctness Tests
+// ========================================================================
+
+/// When an operator impersonates an org member to create another member,
+/// the audit log must record:
+/// - actor_user_id = the impersonated member's user_id (NOT the operator's)
+/// - details.impersonator.user_id = the operator's user_id
+/// - details.impersonator.email = the operator's email
+/// - action = "create_org_member"
+#[tokio::test]
+async fn test_impersonation_audit_log_correctness() {
+    // Build app with audit logging enabled
+    let master_key = test_master_key();
+
+    let manager = SqliteConnectionManager::memory();
+    let pool = Pool::builder().max_size(4).build(manager).unwrap();
+    {
+        let conn = pool.get().unwrap();
+        paycheck::db::init_db(&conn).unwrap();
+    }
+
+    let audit_manager = SqliteConnectionManager::memory();
+    let audit_pool = Pool::builder().max_size(4).build(audit_manager).unwrap();
+    {
+        let conn = audit_pool.get().unwrap();
+        paycheck::db::init_audit_db(&conn).unwrap();
+    }
+
+    let state = AppState {
+        db: pool,
+        audit: audit_pool,
+        base_url: "http://localhost:3000".to_string(),
+        audit_log_enabled: true,
+        master_key,
+        email_hasher: paycheck::crypto::EmailHasher::from_bytes([0xAA; 32]),
+        success_page_url: "http://localhost:3000/success".to_string(),
+        activation_rate_limiter: std::sync::Arc::new(
+            paycheck::rate_limit::ActivationRateLimiter::default(),
+        ),
+        email_service: std::sync::Arc::new(paycheck::email::EmailService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
+        delivery_service: std::sync::Arc::new(paycheck::feedback::DeliveryService::new(
+            None,
+            "test@example.com".to_string(),
+        )),
+        http_client: reqwest::Client::new(),
+        metering_webhook_url: None,
+        disable_checkout_tag: None,
+        disable_public_api_tag: None,
+    };
+
+    let app = handlers::orgs::router(state.clone(), RateLimitConfig::disabled())
+        .with_state(state.clone());
+
+    let mut conn = state.db.get().unwrap();
+
+    // Create an admin operator
+    let (op_user, operator_key) =
+        create_test_operator(&mut conn, "admin@platform.com", OperatorRole::Admin);
+
+    // Create an org and an owner member to impersonate
+    let org = create_test_org(&mut conn, "Test Org");
+    let (owner_user, _owner_member, _owner_key) =
+        create_test_org_member(&mut conn, &org.id, "owner@org.com", OrgMemberRole::Owner);
+
+    // Create a new user to be added as member
+    let new_user = create_test_user(&mut conn, "new@org.com", "New Member");
+    drop(conn);
+
+    // Operator impersonates the owner to create a new org member
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/orgs/{}/members", org.id))
+                .header("Authorization", format!("Bearer {}", operator_key))
+                .header("X-On-Behalf-Of", &owner_user.id)
+                .header("Content-Type", "application/json")
+                .body(Body::from(format!(
+                    r#"{{"user_id": "{}", "role": "member"}}"#,
+                    new_user.id
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "impersonated owner should be able to create org members"
+    );
+
+    // Query audit logs from the audit database
+    let audit_conn = state.audit.get().unwrap();
+    let query = paycheck::models::AuditLogQuery {
+        actor_type: None,
+        user_id: None,
+        action: Some("create_org_member".to_string()),
+        resource_type: None,
+        resource_id: None,
+        org_id: Some(org.id.clone()),
+        project_id: None,
+        from_timestamp: None,
+        to_timestamp: None,
+        auth_type: None,
+        auth_credential: None,
+        limit: None,
+        offset: None,
+    };
+    let (logs, total) =
+        paycheck::db::queries::query_audit_logs(&audit_conn, &query).unwrap();
+
+    assert_eq!(total, 1, "should have exactly 1 audit log entry for create_org_member");
+    let log = &logs[0];
+
+    // actor_user_id should be the impersonated member's user_id (NOT the operator's)
+    assert_eq!(
+        log.user_id.as_deref(),
+        Some(owner_user.id.as_str()),
+        "audit actor_user_id should be the impersonated member's user_id, not the operator's"
+    );
+
+    // The action should be create_org_member
+    assert_eq!(log.action, "create_org_member", "audit action should be create_org_member");
+
+    // details should contain impersonator info
+    let details = log.details.as_ref().expect("audit log should have details JSON");
+    let impersonator = &details["impersonator"];
+    assert!(
+        !impersonator.is_null(),
+        "audit details should contain 'impersonator' object"
+    );
+    assert_eq!(
+        impersonator["user_id"].as_str(),
+        Some(op_user.id.as_str()),
+        "impersonator.user_id should be the operator's user_id"
+    );
+    assert_eq!(
+        impersonator["email"].as_str(),
+        Some("admin@platform.com"),
+        "impersonator.email should be the operator's email"
+    );
+}

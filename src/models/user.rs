@@ -5,18 +5,32 @@ use crate::error::{AppError, Result, msg};
 /// Basic email format validation.
 ///
 /// Validates that email has:
+/// - No control characters (prevents CRLF injection and null byte attacks)
+/// - RFC 5321 length limits (local part <= 64, total <= 254)
 /// - Exactly one @ symbol
 /// - Non-empty local part (before @)
 /// - Non-empty domain part (after @)
 /// - At least one dot in the domain
 ///
 /// This is intentionally permissive to avoid rejecting valid but unusual emails.
-/// It's not meant to be RFC 5322 compliant - just a basic sanity check.
-fn validate_email_format(email: &str) -> Result<()> {
+/// It's not meant to be RFC 5322 compliant - just a basic sanity check plus
+/// security-critical control character and length validation.
+pub fn validate_email_format(email: &str) -> Result<()> {
     let email = email.trim();
 
     if email.is_empty() {
         return Err(AppError::BadRequest(msg::EMAIL_EMPTY.into()));
+    }
+
+    // Reject control characters (null bytes, CRLF, etc.)
+    // This prevents email header injection when the address is passed to email services.
+    if email.bytes().any(|b| b < 0x20 || b == 0x7f) {
+        return Err(AppError::BadRequest(msg::INVALID_EMAIL_FORMAT.into()));
+    }
+
+    // RFC 5321: total email length must not exceed 254 characters
+    if email.len() > 254 {
+        return Err(AppError::BadRequest(msg::INVALID_EMAIL_FORMAT.into()));
     }
 
     // Check for exactly one @
@@ -30,6 +44,11 @@ fn validate_email_format(email: &str) -> Result<()> {
 
     // Local part cannot be empty
     if local_part.is_empty() {
+        return Err(AppError::BadRequest(msg::INVALID_EMAIL_FORMAT.into()));
+    }
+
+    // RFC 5321: local part must not exceed 64 characters
+    if local_part.len() > 64 {
         return Err(AppError::BadRequest(msg::INVALID_EMAIL_FORMAT.into()));
     }
 

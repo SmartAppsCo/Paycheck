@@ -26,3 +26,6 @@ mod bulk_license_atomicity;
 
 #[path = "db/tags.rs"]
 mod tags;
+
+#[path = "db/payment_session.rs"]
+mod payment_session;

@@ -134,3 +134,199 @@ fn test_hash_secret_produces_deterministic_hex_output() {
         "different inputs should produce different hashes"
     );
 }
+
+// ============ AES-256-GCM Authentication / Tamper Detection Tests ============
+
+/// Encrypted format: ENC1 (4 bytes) || nonce (12 bytes) || ciphertext
+const MAGIC_LEN: usize = 4;
+const NONCE_LEN: usize = 12;
+const HEADER_LEN: usize = MAGIC_LEN + NONCE_LEN; // 16 bytes before ciphertext
+
+#[test]
+fn test_tampered_ciphertext_detected() {
+    let master_key = MasterKey::from_base64(&MasterKey::generate()).unwrap();
+    let project_id = "project-tamper-ct";
+    let plaintext = b"secret private key data for tamper test";
+
+    let mut encrypted = master_key
+        .encrypt_private_key(project_id, plaintext)
+        .expect("encrypt should succeed");
+
+    assert!(encrypted.len() > HEADER_LEN + 1, "ciphertext should exist after header");
+
+    // Flip a byte in the ciphertext portion (after magic + nonce)
+    let ct_index = HEADER_LEN + 1;
+    encrypted[ct_index] ^= 0xFF;
+
+    let result = master_key.decrypt_private_key(project_id, &encrypted);
+    assert!(
+        result.is_err(),
+        "tampered ciphertext should be rejected by AES-256-GCM authentication"
+    );
+}
+
+#[test]
+fn test_tampered_nonce_detected() {
+    let master_key = MasterKey::from_base64(&MasterKey::generate()).unwrap();
+    let project_id = "project-tamper-nonce";
+    let plaintext = b"secret private key data for nonce tamper test";
+
+    let mut encrypted = master_key
+        .encrypt_private_key(project_id, plaintext)
+        .expect("encrypt should succeed");
+
+    // Flip a byte in the nonce region (bytes 4..16)
+    let nonce_index = MAGIC_LEN + 3; // byte 7, within the nonce
+    encrypted[nonce_index] ^= 0xFF;
+
+    let result = master_key.decrypt_private_key(project_id, &encrypted);
+    assert!(
+        result.is_err(),
+        "tampered nonce should cause decryption to fail (wrong nonce = wrong keystream)"
+    );
+}
+
+#[test]
+fn test_tampered_magic_bytes_detected() {
+    let master_key = MasterKey::from_base64(&MasterKey::generate()).unwrap();
+    let project_id = "project-tamper-magic";
+    let plaintext = b"secret data";
+
+    let mut encrypted = master_key
+        .encrypt_private_key(project_id, plaintext)
+        .expect("encrypt should succeed");
+
+    // Verify the magic bytes are "ENC1"
+    assert_eq!(&encrypted[..4], b"ENC1", "should start with ENC1 magic");
+
+    // Change magic from "ENC1" to "ENC2"
+    encrypted[3] = b'2';
+
+    let result = master_key.decrypt_private_key(project_id, &encrypted);
+    assert!(
+        result.is_err(),
+        "tampered magic bytes should be rejected"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("magic bytes"),
+        "error should mention magic bytes, got: {}",
+        err_msg
+    );
+}
+
+#[test]
+fn test_wrong_master_key_fails_decrypt() {
+    let key_a = MasterKey::from_base64(&MasterKey::generate()).unwrap();
+    let key_b = MasterKey::from_base64(&MasterKey::generate()).unwrap();
+    let project_id = "project-wrong-key";
+    let plaintext = b"secret data encrypted with key A";
+
+    let encrypted = key_a
+        .encrypt_private_key(project_id, plaintext)
+        .expect("encrypt should succeed");
+
+    // Attempt to decrypt with a different master key (same project_id)
+    let result = key_b.decrypt_private_key(project_id, &encrypted);
+    assert!(
+        result.is_err(),
+        "decryption with wrong master key should fail (different DEK derived)"
+    );
+}
+
+#[test]
+fn test_same_plaintext_different_ciphertext() {
+    let master_key = MasterKey::from_base64(&MasterKey::generate()).unwrap();
+    let project_id = "project-nonce-uniqueness";
+    let plaintext = b"identical plaintext for both encryptions";
+
+    let encrypted1 = master_key
+        .encrypt_private_key(project_id, plaintext)
+        .expect("first encrypt should succeed");
+    let encrypted2 = master_key
+        .encrypt_private_key(project_id, plaintext)
+        .expect("second encrypt should succeed");
+
+    // Same key + same project + same plaintext, but random nonce should differ
+    assert_ne!(
+        encrypted1, encrypted2,
+        "encrypting the same plaintext twice should produce different ciphertext (random nonce)"
+    );
+
+    // Verify the nonces themselves are different
+    let nonce1 = &encrypted1[MAGIC_LEN..HEADER_LEN];
+    let nonce2 = &encrypted2[MAGIC_LEN..HEADER_LEN];
+    assert_ne!(
+        nonce1, nonce2,
+        "random nonces should differ between encryptions"
+    );
+
+    // Both should decrypt to the same plaintext
+    let decrypted1 = master_key
+        .decrypt_private_key(project_id, &encrypted1)
+        .expect("decrypt 1 should succeed");
+    let decrypted2 = master_key
+        .decrypt_private_key(project_id, &encrypted2)
+        .expect("decrypt 2 should succeed");
+    assert_eq!(decrypted1, plaintext);
+    assert_eq!(decrypted2, plaintext);
+}
+
+#[test]
+fn test_truncated_ciphertext_rejected() {
+    let master_key = MasterKey::from_base64(&MasterKey::generate()).unwrap();
+    let project_id = "project-truncated";
+
+    // Test various truncated lengths that should all fail:
+    // Minimum valid: MAGIC(4) + NONCE(12) + at least 1 byte ciphertext = 17
+    let test_lengths = [0, 4, 12, 16];
+
+    for len in test_lengths {
+        // Build data with valid magic prefix where possible
+        let mut data = vec![0u8; len];
+        if len >= 4 {
+            data[..4].copy_from_slice(b"ENC1");
+        }
+
+        let result = master_key.decrypt_private_key(project_id, &data);
+        assert!(
+            result.is_err(),
+            "truncated data of length {} should be rejected (minimum is {})",
+            len,
+            HEADER_LEN + 1
+        );
+    }
+
+    // Length 17 passes the length check but has garbage ciphertext -- should still fail
+    let mut data_17 = vec![0u8; 17];
+    data_17[..4].copy_from_slice(b"ENC1");
+    let result = master_key.decrypt_private_key(project_id, &data_17);
+    assert!(
+        result.is_err(),
+        "17 bytes with garbage ciphertext should fail AES-GCM authentication"
+    );
+}
+
+#[test]
+fn test_encrypt_decrypt_empty_plaintext() {
+    let master_key = MasterKey::from_base64(&MasterKey::generate()).unwrap();
+    let project_id = "project-empty";
+
+    let encrypted = master_key
+        .encrypt_private_key(project_id, &[])
+        .expect("encrypting empty plaintext should succeed");
+
+    // Should still have magic + nonce + AES-GCM auth tag (16 bytes)
+    assert!(
+        encrypted.len() > HEADER_LEN,
+        "encrypted empty plaintext should have header + auth tag"
+    );
+
+    let decrypted = master_key
+        .decrypt_private_key(project_id, &encrypted)
+        .expect("decrypting empty plaintext should succeed");
+    assert!(
+        decrypted.is_empty(),
+        "decrypted empty plaintext should be empty"
+    );
+}

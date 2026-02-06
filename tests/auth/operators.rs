@@ -74,6 +74,45 @@ async fn malformed_auth_header_returns_401() {
 }
 
 // ------------------------------------------------------------------------
+// Non-Operator Rejection
+// ------------------------------------------------------------------------
+
+/// A valid user with a valid API key but NO operator role should get 401,
+/// not 403. The middleware checks operator_role.is_none() and returns
+/// UNAUTHORIZED to avoid revealing the user's existence as a non-operator.
+#[tokio::test]
+async fn non_operator_user_api_key_returns_401() {
+    let (app, state) = operator_app();
+    let mut conn = state.db.get().unwrap();
+
+    // Create a plain user (not an operator) with a valid API key
+    let user = create_test_user(&mut conn, "nonadmin@test.com", "Non-Operator User");
+    let (_api_key_record, raw_key) =
+        paycheck::db::queries::create_api_key(&mut conn, &user.id, "Default", None, true, None)
+            .expect("Failed to create API key");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/operators/audit-logs")
+                .header("Authorization", format!("Bearer {}", raw_key))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // The key is valid and the user exists, but they have no operator role.
+    // Middleware returns 401 (not 403) for non-operators.
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "valid user without operator role should get 401 on operator endpoints"
+    );
+}
+
+// ------------------------------------------------------------------------
 // Owner-Only Endpoints (/operators/*)
 // ------------------------------------------------------------------------
 

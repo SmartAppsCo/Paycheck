@@ -387,13 +387,8 @@ fn test_org_member_with_user_invalid_role_returns_error() {
 
 /// Test that get_user_with_roles handles invalid OrgMemberRole gracefully (not panic).
 ///
-/// This test documents a bug: get_user_with_roles uses .parse().unwrap() when
-/// reading OrgMemberRole from the database, which will panic if the role value
-/// is invalid. This is in contrast to other FromRow implementations that use
-/// proper error handling.
-///
-/// The fix should change the .unwrap() to proper error propagation so that
-/// corrupted data causes an error return, not a server crash.
+/// If the role value in the database is corrupted/invalid, the function should
+/// return an error rather than panicking.
 #[test]
 fn test_get_user_with_roles_invalid_member_role_returns_error() {
     let conn = setup_test_db_no_check_constraints();
@@ -414,7 +409,6 @@ fn test_get_user_with_roles_invalid_member_role_returns_error() {
     ).unwrap();
 
     // get_user_with_roles should return an error, not panic
-    // BUG: Currently this panics due to .parse().unwrap() in queries.rs:276
     let result = queries::get_user_with_roles(&conn, "u1");
 
     assert!(

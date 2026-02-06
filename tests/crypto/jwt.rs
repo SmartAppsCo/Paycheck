@@ -3,6 +3,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+use base64::Engine;
 use common::{LICENSE_VALID_DAYS, ONE_DAY, ONE_YEAR, UPDATES_VALID_DAYS};
 use paycheck::jwt::{self, LicenseClaims};
 
@@ -535,3 +536,190 @@ fn test_sign_with_many_features() {
 
 // NOTE: Audience verification was removed - signature verification with the
 // project's public key is sufficient to prove the token was issued for that project.
+
+// ============ Expiration Boundary Tests ============
+
+#[test]
+fn test_verify_rejects_expired_token() {
+    let (private_key, public_key) = jwt::generate_keypair();
+    let claims = create_test_claims();
+
+    // Create a token that expired 1 hour ago
+    let token = common::sign_claims_with_exp_offset(
+        &claims,
+        &private_key,
+        "license-id",
+        "myapp.com",
+        "jti-expired",
+        -3600,
+    );
+
+    let result = jwt::verify_token(&token, &public_key);
+    assert!(
+        result.is_err(),
+        "verify_token should reject an expired token"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.to_lowercase().contains("expired") || err_msg.to_lowercase().contains("invalid"),
+        "error should indicate expiration issue, got: {}",
+        err_msg
+    );
+}
+
+#[test]
+fn test_verify_allow_expired_accepts_expired_token() {
+    let (private_key, public_key) = jwt::generate_keypair();
+    let claims = create_test_claims();
+
+    // Create a token that expired 1 hour ago
+    let token = common::sign_claims_with_exp_offset(
+        &claims,
+        &private_key,
+        "license-id",
+        "myapp.com",
+        "jti-expired",
+        -3600,
+    );
+
+    // verify_token should reject it
+    assert!(
+        jwt::verify_token(&token, &public_key).is_err(),
+        "verify_token should reject expired token (sanity check)"
+    );
+
+    // verify_token_allow_expired should accept it
+    let verified = jwt::verify_token_allow_expired(&token, &public_key)
+        .expect("verify_token_allow_expired should accept expired token with valid signature");
+
+    assert_eq!(verified.custom.tier, "pro", "claims should be preserved");
+    assert_eq!(verified.custom.product_id, "product-abc");
+    assert_eq!(verified.issuer, Some("paycheck".to_string()));
+}
+
+#[test]
+fn test_allow_expired_still_rejects_wrong_signature() {
+    let (private_key, _) = jwt::generate_keypair();
+    let (_, wrong_public_key) = jwt::generate_keypair();
+    let claims = create_test_claims();
+
+    // Create an expired token signed with key A
+    let token = common::sign_claims_with_exp_offset(
+        &claims,
+        &private_key,
+        "license-id",
+        "myapp.com",
+        "jti-expired",
+        -3600,
+    );
+
+    // verify_token_allow_expired should STILL reject wrong signature
+    let result = jwt::verify_token_allow_expired(&token, &wrong_public_key);
+    assert!(
+        result.is_err(),
+        "allow_expired must NOT relax signature verification -- wrong key should still fail"
+    );
+}
+
+// ============ Algorithm Confusion Attack Tests ============
+
+#[test]
+fn test_alg_none_rejected() {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    // Manually construct a JWT with alg:none (classic JWT vulnerability)
+    let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"none","typ":"JWT"}"#);
+    let now = chrono::Utc::now().timestamp();
+    let payload_json = format!(
+        r#"{{"iss":"paycheck","sub":"license-id","aud":"myapp.com","jti":"jti-evil","iat":{},"exp":{},"license_exp":null,"updates_exp":null,"tier":"pro","features":[],"device_id":"dev","device_type":"uuid","product_id":"prod"}}"#,
+        now, now + 3600
+    );
+    let payload = URL_SAFE_NO_PAD.encode(&payload_json);
+
+    // alg:none tokens have an empty signature
+    let token = format!("{}.{}.", header, payload);
+
+    let (_, public_key) = jwt::generate_keypair();
+    let result = jwt::verify_token(&token, &public_key);
+    assert!(
+        result.is_err(),
+        "alg:none JWT should be rejected -- only EdDSA is accepted"
+    );
+}
+
+#[test]
+fn test_alg_hs256_confusion_rejected() {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    type HmacSha256 = Hmac<Sha256>;
+
+    let (_, public_key_b64) = jwt::generate_keypair();
+    let public_key_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&public_key_b64)
+        .expect("decode public key");
+
+    // Construct a JWT with HS256 header, signed with the public key as HMAC secret
+    let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"HS256","typ":"JWT"}"#);
+    let now = chrono::Utc::now().timestamp();
+    let payload_json = format!(
+        r#"{{"iss":"paycheck","sub":"license-id","aud":"myapp.com","jti":"jti-evil","iat":{},"exp":{},"license_exp":null,"updates_exp":null,"tier":"pro","features":[],"device_id":"dev","device_type":"uuid","product_id":"prod"}}"#,
+        now, now + 3600
+    );
+    let payload = URL_SAFE_NO_PAD.encode(&payload_json);
+
+    let signing_input = format!("{}.{}", header, payload);
+    let mut mac = HmacSha256::new_from_slice(&public_key_bytes)
+        .expect("HMAC can take key of any size");
+    mac.update(signing_input.as_bytes());
+    let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+    let token = format!("{}.{}", signing_input, signature);
+
+    let result = jwt::verify_token(&token, &public_key_b64);
+    assert!(
+        result.is_err(),
+        "HS256 algorithm confusion attack should be rejected -- only EdDSA is accepted"
+    );
+}
+
+#[test]
+fn test_verify_rejects_wrong_issuer() {
+    use ed25519_dalek::pkcs8::EncodePrivateKey;
+    use ed25519_dalek::SigningKey;
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+
+    let (private_key, public_key) = jwt::generate_keypair();
+    let claims = create_test_claims();
+
+    // Manually construct SigningClaims with wrong issuer
+    let key_bytes: [u8; 32] = private_key.as_slice().try_into().expect("key length");
+    let signing_key = SigningKey::from_bytes(&key_bytes);
+    let der = signing_key.to_pkcs8_der().expect("PKCS8");
+    let encoding_key = EncodingKey::from_ed_der(der.as_bytes());
+
+    let now = chrono::Utc::now().timestamp();
+    let signing_claims = jwt::SigningClaims {
+        iss: "evil-issuer".to_string(), // Wrong issuer
+        sub: "license-id".to_string(),
+        aud: "myapp.com".to_string(),
+        jti: "jti-evil".to_string(),
+        iat: now,
+        exp: now + 3600,
+        custom: claims,
+    };
+
+    let token = encode(
+        &Header::new(Algorithm::EdDSA),
+        &signing_claims,
+        &encoding_key,
+    )
+    .expect("signing should succeed even with wrong issuer");
+
+    let result = jwt::verify_token(&token, &public_key);
+    assert!(
+        result.is_err(),
+        "token with wrong issuer should be rejected (expected 'paycheck', got 'evil-issuer')"
+    );
+}

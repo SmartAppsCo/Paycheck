@@ -402,6 +402,184 @@ fn test_dns_rebinding_hostnames_blocked() {
     }
 }
 
+// ============================================================================
+// IPv4-mapped IPv6 bypass attempts
+// ============================================================================
+
+/// Test: IPv4-mapped IPv6 loopback is rejected
+#[test]
+fn test_ipv4_mapped_ipv6_loopback_rejected() {
+    let project = CreateProject {
+        name: "Test".to_string(),
+        license_key_prefix: "TEST".to_string(),
+        redirect_url: None,
+        email_from: None,
+        email_enabled: true,
+        email_webhook_url: None,
+        payment_config_id: None,
+        email_config_id: None,
+        feedback_webhook_url: Some("https://[::ffff:127.0.0.1]/webhook".to_string()),
+        feedback_email: None,
+        crash_webhook_url: None,
+        crash_email: None,
+    };
+
+    assert!(
+        project.validate().is_err(),
+        "IPv4-mapped IPv6 loopback (::ffff:127.0.0.1) should be rejected"
+    );
+}
+
+/// Test: IPv4-mapped IPv6 private addresses are rejected
+#[test]
+fn test_ipv4_mapped_ipv6_private_rejected() {
+    let dangerous_urls = vec![
+        ("https://[::ffff:10.0.0.1]/webhook", "10.x mapped"),
+        ("https://[::ffff:192.168.1.1]/webhook", "192.168.x mapped"),
+        ("https://[::ffff:172.16.0.1]/webhook", "172.16.x mapped"),
+    ];
+
+    for (url, desc) in dangerous_urls {
+        let project = CreateProject {
+            name: "Test".to_string(),
+            license_key_prefix: "TEST".to_string(),
+            redirect_url: None,
+            email_from: None,
+            email_enabled: true,
+            email_webhook_url: None,
+            payment_config_id: None,
+            email_config_id: None,
+            feedback_webhook_url: Some(url.to_string()),
+            feedback_email: None,
+            crash_webhook_url: None,
+            crash_email: None,
+        };
+
+        assert!(
+            project.validate().is_err(),
+            "IPv4-mapped IPv6 private address '{}' ({}) should be rejected",
+            url,
+            desc
+        );
+    }
+}
+
+/// Test: IPv4-mapped IPv6 cloud metadata is rejected
+#[test]
+fn test_ipv4_mapped_ipv6_metadata_rejected() {
+    let project = CreateProject {
+        name: "Test".to_string(),
+        license_key_prefix: "TEST".to_string(),
+        redirect_url: None,
+        email_from: None,
+        email_enabled: true,
+        email_webhook_url: None,
+        payment_config_id: None,
+        email_config_id: None,
+        feedback_webhook_url: Some("https://[::ffff:169.254.169.254]/webhook".to_string()),
+        feedback_email: None,
+        crash_webhook_url: None,
+        crash_email: None,
+    };
+
+    assert!(
+        project.validate().is_err(),
+        "IPv4-mapped IPv6 metadata endpoint (::ffff:169.254.169.254) should be rejected"
+    );
+}
+
+// ============================================================================
+// IPv6 special addresses
+// ============================================================================
+
+/// Test: IPv6 unspecified address (::) is rejected
+#[test]
+fn test_ipv6_unspecified_rejected() {
+    let project = CreateProject {
+        name: "Test".to_string(),
+        license_key_prefix: "TEST".to_string(),
+        redirect_url: None,
+        email_from: None,
+        email_enabled: true,
+        email_webhook_url: None,
+        payment_config_id: None,
+        email_config_id: None,
+        feedback_webhook_url: Some("https://[::]/webhook".to_string()),
+        feedback_email: None,
+        crash_webhook_url: None,
+        crash_email: None,
+    };
+
+    assert!(
+        project.validate().is_err(),
+        "IPv6 unspecified address (::) should be rejected"
+    );
+}
+
+/// Test: 0.0.0.0 is rejected
+#[test]
+fn test_0000_rejected() {
+    let project = CreateProject {
+        name: "Test".to_string(),
+        license_key_prefix: "TEST".to_string(),
+        redirect_url: None,
+        email_from: None,
+        email_enabled: true,
+        email_webhook_url: None,
+        payment_config_id: None,
+        email_config_id: None,
+        feedback_webhook_url: Some("https://0.0.0.0/webhook".to_string()),
+        feedback_email: None,
+        crash_webhook_url: None,
+        crash_email: None,
+    };
+
+    assert!(
+        project.validate().is_err(),
+        "0.0.0.0 should be rejected"
+    );
+}
+
+// ============================================================================
+// DNS rebinding: 172.16-31.x range
+// ============================================================================
+
+/// Test: 172.16-31.x DNS rebinding hostnames are blocked
+///
+/// Wildcard DNS services like nip.io resolve hostnames containing IP addresses
+/// to those IPs. The domain-level check must catch 172.16-31.x prefixes
+/// to prevent DNS rebinding attacks targeting private networks.
+#[test]
+fn test_172_range_dns_rebinding_rejected() {
+    let dangerous_urls = vec![
+        "https://172.16.0.1.nip.io/webhook",
+        "https://172.31.255.255.nip.io/webhook",
+    ];
+
+    for url in dangerous_urls {
+        let project = CreateProject {
+            name: "Test".to_string(),
+            license_key_prefix: "TEST".to_string(),
+            redirect_url: None,
+            email_from: None,
+            email_enabled: true,
+            email_webhook_url: None,
+            payment_config_id: None,
+            email_config_id: None,
+            feedback_webhook_url: Some(url.to_string()),
+            feedback_email: None,
+            crash_webhook_url: None,
+            crash_email: None,
+        };
+
+        assert!(
+            project.validate().is_err(),
+            "172.x DNS rebinding hostname '{}' should be rejected",
+            url
+        );
+    }
+}
+
 /// Test: Invalid URLs are rejected
 #[test]
 fn test_invalid_urls_are_rejected() {
