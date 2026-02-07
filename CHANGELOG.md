@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [0.8.1] - 2026-02-07
+
+### Added
+
+- **Test coverage**: Email validation, SSRF prevention, auth/impersonation, feedback/crash endpoints, SDK token verification, service config CRUD, cross-org isolation, webhook error handling
+- Bruno API collection files for operator tag endpoints and metering service
+- `Deserialize` derive on metering event types for downstream consumption
+
+### Changed
+
+- **Replaced `jwt-simple` with `jsonwebtoken`**: Migrated from BoringSSL backend to ring backend, eliminating heavy build dependencies (cmake, golang, libclang) from Docker builds
+- **Removed dead JWKS/first-party JWT code**: Deleted speculative `JwksCache`, `TrustedIssuer`, and RSA handling that was never used (console uses API keys via proxy pattern)
+- **Graceful Docker shutdown**: Server now handles SIGTERM in addition to SIGINT, preventing force-kill (exit code 137) on `docker stop`
+- Removed `internal/` from `.dockerignore`
+
+### Fixed
+
+- **SSRF prevention**: `validate_webhook_url()` now blocks IPv4-mapped IPv6 addresses, `0.0.0.0`, `::`, and 172.16-31.x DNS rebinding hostnames
+- **Email validation**: `validate_email_format()` rejects CRLF injection, null bytes, and enforces RFC 5321 length limits
+- **Activation code request**: Now validates email format before processing
+
+
 ## [0.8.0] - 2026-02-05
 
 ### Added
