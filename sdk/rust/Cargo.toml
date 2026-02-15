@@ -1,6 +1,6 @@
 [package]
 name = "paycheck-sdk"
-version = "0.8.1"
+version = "0.8.2"
 edition = "2024"
 description = "Paycheck licensing SDK for Rust applications"
 license = "Elastic-2.0"

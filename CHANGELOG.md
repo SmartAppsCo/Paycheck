@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [0.8.2] - 2026-02-15
+
+### Added
+
+- **Configurable grace period for online validation**: New `grace_period` (Rust) / `gracePeriod` (TS) client option controls how long a cached token is trusted when the server is unreachable during `validate_online()` / `validate({ online: true })`. Default: 24 hours. Based on JWT `iat` claim.
+
+### Changed
+
+- **`validate_online()` returns `OfflineValidateResult` with claims**: Previously returned a separate `ValidateResult` type without claims, forcing callers to decode the token separately. Now returns the same type as `validate()` and `sync()`, with `claims`, `reason`, and full local validation (signature, issuer, device, expiration) before the server call.
+- **`validate_online()` grace period on server unreachable**: Instead of immediately returning `valid: false` when the server can't be reached, the SDK now trusts the cached token if it was issued within the grace period window.
+- **`sync()` uses single `/refresh` round trip**: Previously called `/validate` then conditionally `/refresh` (two requests). Now calls `/refresh` directly, which validates and returns fresh claims in one call. Also distinguishes network errors (offline fallback) from server rejections (revoked/invalid).
+- **Removed `ValidateResult` type from both SDKs**: Was redundant with `OfflineValidateResult` and was dead code in the TypeScript SDK (defined but never returned by any method).
+
+
 ## [0.8.1] - 2026-02-07
 
 ### Added
