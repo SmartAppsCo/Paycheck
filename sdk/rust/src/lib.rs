@@ -107,7 +107,7 @@ pub use types::{
     ActivationResult, Breadcrumb, CallbackResult, CallbackStatus, CheckoutParams, CheckoutResult,
     CrashOptions, DeactivateResult, DeviceInfo, DeviceType, FeedbackOptions, FeedbackType,
     LicenseClaims, LicenseDeviceInfo, LicenseInfo, LicenseStatus, Priority, RequestCodeResult,
-    StackFrame, ValidateResult,
+    StackFrame,
 };
 
 // Device utilities

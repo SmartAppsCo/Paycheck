@@ -44,6 +44,10 @@ export interface PaycheckOptions {
   deviceId?: string;
   /** Auto-refresh expired tokens (default: true) */
   autoRefresh?: boolean;
+  /** Grace period in seconds for `validate({ online: true })` when the server is
+   *  unreachable. If the token was issued within this window, it's still considered
+   *  valid offline. (default: 86400 — 24 hours) */
+  gracePeriod?: number;
 }
 
 /**
@@ -106,6 +110,9 @@ export interface CallbackActivationResult {
 
 /** Default Paycheck API URL */
 const DEFAULT_BASE_URL = 'https://api.paycheck.dev';
+
+/** Default grace period for online validation (24 hours in seconds) */
+const DEFAULT_GRACE_PERIOD = 24 * 60 * 60;
 
 /** Valid characters for activation code parts (base32-like, excludes confusing 0/O/1/I) */
 const ACTIVATION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -290,6 +297,7 @@ export class Paycheck {
   private deviceId: string;
   private deviceType: DeviceType;
   private autoRefresh: boolean;
+  private gracePeriod: number;
 
   /**
    * Creates a new Paycheck client.
@@ -308,6 +316,7 @@ export class Paycheck {
     this.deviceType = options.deviceType ?? 'uuid';
     this.deviceId = options.deviceId ?? getOrCreateDeviceId(this.storage);
     this.autoRefresh = options.autoRefresh ?? true;
+    this.gracePeriod = options.gracePeriod ?? DEFAULT_GRACE_PERIOD;
   }
 
   // ==================== Private Helpers ====================
@@ -501,7 +510,13 @@ export class Paycheck {
           return { valid: false, reason: 'Revoked or invalid', claims };
         }
       } catch {
-        return { valid: false, reason: 'Online validation failed', claims };
+        // Server unreachable — use grace period.
+        // If token was issued recently (within grace period), trust it.
+        const now = Math.floor(Date.now() / 1000);
+        if (claims.iat + this.gracePeriod <= now) {
+          return { valid: false, reason: 'Online validation failed', claims };
+        }
+        // Within grace period — fall through to return valid
       }
     }
 
@@ -591,53 +606,19 @@ export class Paycheck {
       };
     }
 
-    // Try to sync with server
+    // Try to refresh with server — this validates and returns fresh claims in one call.
+    // /refresh checks revocation, license expiration, and returns a new JWT with
+    // up-to-date license_exp/updates_exp/tier/features from the database.
     try {
-      interface ValidateResponse {
-        valid: boolean;
-        license_exp?: number | null;
-        updates_exp?: number | null;
+      await this.refreshToken();
+
+      // Refresh succeeded — decode fresh claims
+      const newToken = this.getStoredToken();
+      if (newToken) {
+        claims = decodeToken(newToken);
       }
 
-      const response = await this.apiRequest<ValidateResponse>(
-        'POST',
-        '/validate',
-        {
-          body: {
-            public_key: this.publicKey,
-            token,
-          },
-        }
-      );
-
-      if (!response.valid) {
-        return {
-          valid: false,
-          synced: true,
-          offline: false,
-          reason: 'Revoked or invalid',
-          claims,
-        };
-      }
-
-      // Check if server has updated expiration - refresh token if so
-      const serverLicenseExp = response.license_exp ?? null;
-      const localLicenseExp = claims.license_exp ?? null;
-
-      if (serverLicenseExp !== localLicenseExp) {
-        try {
-          await this.refreshToken();
-          // Re-decode after refresh
-          const newToken = this.getStoredToken();
-          if (newToken) {
-            claims = decodeToken(newToken);
-          }
-        } catch {
-          // Refresh failed, but validation passed - continue with current token
-        }
-      }
-
-      // Check license expiration with potentially updated claims
+      // Check license expiration with fresh claims
       if (isLicenseExpired(claims)) {
         return {
           valid: false,
@@ -654,22 +635,34 @@ export class Paycheck {
         offline: false,
         claims,
       };
-    } catch {
-      // Server unreachable - fall back to offline validation
-      if (isLicenseExpired(claims)) {
+    } catch (err) {
+      // Distinguish network errors (offline fallback) from server rejections (revoked)
+      if (err instanceof PaycheckError && err.code === 'NETWORK_ERROR') {
+        // Server unreachable — fall back to offline validation
+        if (isLicenseExpired(claims)) {
+          return {
+            valid: false,
+            synced: false,
+            offline: true,
+            reason: 'License expired',
+            claims,
+          };
+        }
+
         return {
-          valid: false,
+          valid: true,
           synced: false,
           offline: true,
-          reason: 'License expired',
           claims,
         };
       }
 
+      // Server reachable but rejected (401 — revoked, expired, etc.)
       return {
-        valid: true,
-        synced: false,
-        offline: true,
+        valid: false,
+        synced: true,
+        offline: false,
+        reason: 'Revoked or invalid',
         claims,
       };
     }

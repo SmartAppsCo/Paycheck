@@ -163,18 +163,6 @@ export interface LicenseClaims {
 }
 
 /**
- * Result from online validation
- */
-export interface ValidateResult {
-  /** Whether the license is valid */
-  valid: boolean;
-  /** When license expires (if valid) */
-  licenseExp?: number | null;
-  /** When version access expires (if valid) */
-  updatesExp?: number | null;
-}
-
-/**
  * Device info from license info endpoint
  */
 export interface LicenseDeviceInfo {

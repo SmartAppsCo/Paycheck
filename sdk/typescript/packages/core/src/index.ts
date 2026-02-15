@@ -24,7 +24,6 @@ export type {
   DeviceInfo,
   ActivationResult,
   LicenseClaims,
-  ValidateResult,
   LicenseInfo,
   LicenseDeviceInfo,
   DeactivateResult,

@@ -178,33 +178,13 @@ pub struct LicenseClaims {
     pub product_id: String,
 }
 
-/// Result from online validation
-#[derive(Debug, Clone)]
-pub struct ValidateResult {
-    /// Whether the license is valid
-    pub valid: bool,
-    /// When license expires (if valid)
-    pub license_exp: Option<i64>,
-    /// When version access expires (if valid)
-    pub updates_exp: Option<i64>,
-}
-
 /// API response for validate endpoint
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub(crate) struct ValidateResponse {
     pub valid: bool,
     pub license_exp: Option<i64>,
     pub updates_exp: Option<i64>,
-}
-
-impl From<ValidateResponse> for ValidateResult {
-    fn from(r: ValidateResponse) -> Self {
-        Self {
-            valid: r.valid,
-            license_exp: r.license_exp,
-            updates_exp: r.updates_exp,
-        }
-    }
 }
 
 /// Device info from license info endpoint

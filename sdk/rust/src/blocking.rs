@@ -1,7 +1,7 @@
 //! Blocking Paycheck client using ureq
 
 use crate::device::{generate_uuid, get_machine_id};
-use crate::error::{PaycheckError, Result, map_status_to_error_code};
+use crate::error::{PaycheckError, PaycheckErrorCode, Result, map_status_to_error_code};
 use crate::jwt::{decode_token, is_jwt_expired, is_license_expired, validate_issuer, verify_token};
 use crate::storage::{FileStorage, StorageAdapter, keys};
 use crate::types::*;
@@ -113,6 +113,9 @@ fn validate_activation_code(code: &str) -> Result<String> {
     Ok(normalized)
 }
 
+/// Default grace period for online validation (24 hours in seconds).
+const DEFAULT_GRACE_PERIOD: i64 = 24 * 60 * 60;
+
 /// Configuration options for the Paycheck client
 #[derive(Clone, Default)]
 pub struct PaycheckOptions {
@@ -126,6 +129,9 @@ pub struct PaycheckOptions {
     pub device_id: Option<String>,
     /// Auto-refresh expired tokens (default: true)
     pub auto_refresh: Option<bool>,
+    /// Grace period for `validate_online` when the server is unreachable (default: 24 hours).
+    /// If the token was issued within this window, it's still considered valid offline.
+    pub grace_period: Option<std::time::Duration>,
 }
 
 impl std::fmt::Debug for PaycheckOptions {
@@ -136,6 +142,7 @@ impl std::fmt::Debug for PaycheckOptions {
             .field("device_type", &self.device_type)
             .field("device_id", &self.device_id)
             .field("auto_refresh", &self.auto_refresh)
+            .field("grace_period", &self.grace_period)
             .finish()
     }
 }
@@ -210,6 +217,7 @@ pub struct Paycheck {
     base_url: String,
     storage: Arc<dyn StorageAdapter>,
     auto_refresh: bool,
+    grace_period: i64,
     device_id: String,
     device_type: DeviceType,
 }
@@ -266,6 +274,10 @@ impl Paycheck {
 
         let device_type = options.device_type.unwrap_or(DeviceType::Machine);
         let auto_refresh = options.auto_refresh.unwrap_or(true);
+        let grace_period = options
+            .grace_period
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(DEFAULT_GRACE_PERIOD);
 
         // Determine device_id based on type:
         // - Machine: always derive fresh (deterministic, shouldn't be stored)
@@ -287,6 +299,7 @@ impl Paycheck {
             base_url,
             storage,
             auto_refresh,
+            grace_period,
             device_id,
             device_type,
         })
@@ -399,26 +412,72 @@ impl Paycheck {
     }
 
     /// Online validation check (also checks revocation).
-    pub fn validate_online(&self) -> Result<ValidateResult> {
+    ///
+    /// Performs the same local checks as `validate()` (signature, issuer, device),
+    /// then verifies with the server to check for revocation.
+    ///
+    /// If the server is unreachable, the JWT's `exp` claim acts as a grace period:
+    /// the license is still considered valid if the token was recently issued (within
+    /// the ~1 hour `exp` window). Once `exp` passes without a successful server check,
+    /// the license is invalid.
+    pub fn validate_online(&self) -> OfflineValidateResult {
         let Some(token) = self.get_token() else {
-            return Ok(ValidateResult {
+            return OfflineValidateResult {
                 valid: false,
-                license_exp: None,
-                updates_exp: None,
-            });
+                claims: None,
+                reason: None,
+            };
         };
 
+        // Verify signature
+        if !verify_token(&token, &self.public_key) {
+            return OfflineValidateResult {
+                valid: false,
+                claims: None,
+                reason: Some("Invalid signature".to_string()),
+            };
+        }
+
+        // Decode claims
         let claims = match decode_token(&token) {
             Ok(c) => c,
             Err(_) => {
-                return Ok(ValidateResult {
+                return OfflineValidateResult {
                     valid: false,
-                    license_exp: None,
-                    updates_exp: None,
-                });
+                    claims: None,
+                    reason: Some("Invalid token format".to_string()),
+                };
             }
         };
 
+        // Validate issuer
+        if !validate_issuer(&claims) {
+            return OfflineValidateResult {
+                valid: false,
+                claims: Some(claims),
+                reason: Some("Invalid issuer".to_string()),
+            };
+        }
+
+        // Check device ID matches
+        if claims.device_id != self.device_id {
+            return OfflineValidateResult {
+                valid: false,
+                claims: Some(claims),
+                reason: Some("Device mismatch".to_string()),
+            };
+        }
+
+        // Check license expiration
+        if is_license_expired(&claims) {
+            return OfflineValidateResult {
+                valid: false,
+                claims: Some(claims),
+                reason: Some("License expired".to_string()),
+            };
+        }
+
+        // Online check with server
         #[derive(Serialize)]
         struct ValidateRequest {
             public_key: String,
@@ -431,20 +490,41 @@ impl Paycheck {
         };
 
         match self.post::<ValidateResponse, _>("/validate", &body) {
-            Ok(r) => Ok(r.into()),
-            Err(_) => Ok(ValidateResult {
+            Ok(r) if !r.valid => OfflineValidateResult {
                 valid: false,
-                license_exp: None,
-                updates_exp: None,
-            }),
+                claims: Some(claims),
+                reason: Some("Revoked or invalid".to_string()),
+            },
+            Ok(_) => OfflineValidateResult {
+                valid: true,
+                claims: Some(claims),
+                reason: None,
+            },
+            Err(_) => {
+                // Server unreachable — use grace period.
+                // If token was issued recently (within grace_period), trust it.
+                if claims.iat + self.grace_period > crate::jwt::now() {
+                    OfflineValidateResult {
+                        valid: true,
+                        claims: Some(claims),
+                        reason: None,
+                    }
+                } else {
+                    OfflineValidateResult {
+                        valid: false,
+                        claims: Some(claims),
+                        reason: Some("Online validation failed".to_string()),
+                    }
+                }
+            }
         }
     }
 
     /// Sync with the server and validate the license.
     ///
     /// This is the recommended method for online/subscription apps. It:
-    /// 1. Tries to reach the server to check for updates (renewals, revocation)
-    /// 2. Refreshes the token if the server has newer expiration dates
+    /// 1. Verifies the token locally (signature, issuer, device)
+    /// 2. Refreshes the token via the server (validates + returns fresh claims in one call)
     /// 3. Falls back to offline validation if the server is unreachable
     ///
     /// Always returns a result - never returns an error for network failures.
@@ -489,8 +569,8 @@ impl Paycheck {
             };
         }
 
-        // Decode claims
-        let mut claims = match decode_token(&token) {
+        // Decode claims (for offline fallback and local checks)
+        let claims = match decode_token(&token) {
             Ok(c) => c,
             Err(_) => {
                 return SyncResult {
@@ -525,76 +605,72 @@ impl Paycheck {
             };
         }
 
-        // Try to sync with server
-        #[derive(Serialize)]
-        struct ValidateRequest {
-            public_key: String,
-            token: String,
-        }
-
-        let body = ValidateRequest {
-            public_key: self.public_key.clone(),
-            token: token.clone(),
-        };
-
-        match self.post::<ValidateResponse, _>("/validate", &body) {
-            Ok(response) => {
-                if !response.valid {
-                    return SyncResult {
-                        valid: false,
-                        claims: Some(claims),
-                        synced: true,
-                        offline: false,
-                        reason: Some("Revoked or invalid".to_string()),
-                    };
-                }
-
-                // Check if server has updated expiration - refresh token if so
-                if response.license_exp != claims.license_exp
-                    && let Ok(new_token) = self.refresh_token()
-                    && let Ok(new_claims) = decode_token(&new_token)
-                {
-                    claims = new_claims;
-                }
-                // Refresh failed, but validation passed - continue with current token
-
-                // Check license expiration with potentially updated claims
-                if is_license_expired(&claims) {
-                    return SyncResult {
-                        valid: false,
-                        claims: Some(claims),
-                        synced: true,
-                        offline: false,
-                        reason: Some("License expired".to_string()),
-                    };
-                }
-
-                SyncResult {
-                    valid: true,
-                    claims: Some(claims),
-                    synced: true,
-                    offline: false,
-                    reason: None,
+        // Try to refresh with server — this validates and returns fresh claims in one call.
+        // /refresh checks revocation, license expiration, and returns a new JWT with
+        // up-to-date license_exp/updates_exp/tier/features from the database.
+        match self.refresh_token() {
+            Ok(new_token) => {
+                // Refresh succeeded — decode fresh claims
+                match decode_token(&new_token) {
+                    Ok(new_claims) => {
+                        if is_license_expired(&new_claims) {
+                            SyncResult {
+                                valid: false,
+                                claims: Some(new_claims),
+                                synced: true,
+                                offline: false,
+                                reason: Some("License expired".to_string()),
+                            }
+                        } else {
+                            SyncResult {
+                                valid: true,
+                                claims: Some(new_claims),
+                                synced: true,
+                                offline: false,
+                                reason: None,
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Shouldn't happen — server returned a bad token
+                        SyncResult {
+                            valid: false,
+                            claims: Some(claims),
+                            synced: true,
+                            offline: false,
+                            reason: Some("Invalid token from server".to_string()),
+                        }
+                    }
                 }
             }
-            Err(_) => {
-                // Server unreachable - fall back to offline validation
+            Err(e) if e.code == PaycheckErrorCode::NetworkError => {
+                // Server unreachable — fall back to offline validation
                 if is_license_expired(&claims) {
-                    return SyncResult {
+                    SyncResult {
                         valid: false,
                         claims: Some(claims),
                         synced: false,
                         offline: true,
                         reason: Some("License expired".to_string()),
-                    };
+                    }
+                } else {
+                    SyncResult {
+                        valid: true,
+                        claims: Some(claims),
+                        synced: false,
+                        offline: true,
+                        reason: None,
+                    }
                 }
-
+            }
+            Err(_) => {
+                // Server reachable but rejected (401 — revoked, expired, etc.)
                 SyncResult {
-                    valid: true,
+                    valid: false,
                     claims: Some(claims),
-                    synced: false,
-                    offline: true,
-                    reason: None,
+                    synced: true,
+                    offline: false,
+                    reason: Some("Revoked or invalid".to_string()),
                 }
             }
         }
@@ -1084,6 +1160,7 @@ impl std::fmt::Debug for Paycheck {
             .field("device_id", &self.device_id)
             .field("device_type", &self.device_type)
             .field("auto_refresh", &self.auto_refresh)
+            .field("grace_period", &self.grace_period)
             .finish()
     }
 }

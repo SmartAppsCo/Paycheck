@@ -328,10 +328,10 @@ SyncResult:
 **Behavior:**
 1. If no token stored, returns `{ valid: false }` (no reason - this is not an error)
 2. Verifies Ed25519 signature locally
-3. Verifies `device_id` in claims matches current device
-4. Tries to reach server to check for updates (renewals, revocation)
-5. Refreshes token if server has newer expiration dates
-6. Falls back to offline validation if server unreachable
+3. Verifies issuer and `device_id` in claims matches current device
+4. Calls `/refresh` — validates the license and returns a fresh JWT in one round trip
+5. If server reachable: uses fresh claims (updated `license_exp`, `tier`, `features`)
+6. If server unreachable: falls back to offline validation using cached claims
 - Does NOT throw for network failures - always returns a result
 - Use `synced` to know if server was contacted
 - Use `offline` to show "offline mode" indicator to users
@@ -434,21 +434,31 @@ Checks if `updates_exp` covers the given version timestamp.
 
 ## Online Operations
 
-### `validateOnline() -> Promise<ValidateResult>` (Rust only)
+### `validateOnline() -> OfflineValidateResult` (Rust only)
 
-Performs online validation (checks revocation, updates last_seen).
+Performs the same local checks as `validate()` (signature, issuer, device, expiration),
+then additionally verifies with the server to check for revocation.
+
+Returns the same `OfflineValidateResult` as `validate()`:
 
 ```
-ValidateResult:
+OfflineValidateResult:
   valid: boolean
-  licenseExp?: number | null
-  updatesExp?: number | null
+  claims?: LicenseClaims
+  reason?: string
 ```
 
 **Behavior:**
-- GET `/validate` with `public_key` and `jti` from token
+- Verifies Ed25519 signature, issuer, device ID, and license expiration locally
+- POST `/validate` with `public_key` and token
 - Updates last_seen timestamp on server
-- Does NOT throw on invalid - returns `{ valid: false }`
+- Returns `{ valid: false, reason: "Revoked or invalid" }` if server rejects the license
+- If server is unreachable, uses the configurable grace period (default: 24 hours):
+  - Within grace period (`iat + gracePeriod > now`): returns `{ valid: true }`
+  - Past grace period: returns `{ valid: false, reason: "Online validation failed" }`
+- Configure via `gracePeriod` (TS) / `grace_period` (Rust) in client options
+
+**TypeScript equivalent:** `validate({ online: true })`
 
 ---
 
