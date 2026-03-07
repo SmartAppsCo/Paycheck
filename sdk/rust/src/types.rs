@@ -73,6 +73,8 @@ pub enum CallbackStatus {
 pub struct DeviceInfo {
     /// Human-readable device name
     pub device_name: Option<String>,
+    /// Operating system (auto-detected if not provided)
+    pub os: Option<String>,
 }
 
 /// Result from license activation
@@ -193,6 +195,7 @@ pub struct LicenseDeviceInfo {
     pub device_id: String,
     pub device_type: DeviceType,
     pub name: Option<String>,
+    pub os: Option<String>,
     pub activated_at: i64,
     pub last_seen_at: i64,
 }
@@ -247,6 +250,7 @@ pub(crate) struct LicenseDeviceInfoResponse {
     pub device_id: String,
     pub device_type: DeviceType,
     pub name: Option<String>,
+    pub os: Option<String>,
     pub activated_at: i64,
     pub last_seen_at: i64,
 }
@@ -276,6 +280,7 @@ impl From<LicenseInfoResponse> for LicenseInfo {
                     device_id: d.device_id,
                     device_type: d.device_type,
                     name: d.name,
+                    os: d.os,
                     activated_at: d.activated_at,
                     last_seen_at: d.last_seen_at,
                 })

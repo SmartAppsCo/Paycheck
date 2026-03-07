@@ -52,6 +52,12 @@ pub const MIGRATIONS: &[Migration] = &[
         target: MigrationTarget::Audit,
         up: migration_001_baseline_audit,
     },
+    Migration {
+        version: 2,
+        description: "Add os column to devices",
+        target: MigrationTarget::Main,
+        up: migration_002_add_device_os,
+    },
 ];
 
 /// Migration errors.
@@ -292,6 +298,25 @@ fn migration_001_baseline_audit(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Migration 2: Add `os` column to devices table.
+///
+/// Stores the operating system reported by the SDK at activation time.
+/// This helps developers understand where their software is being used.
+fn migration_002_add_device_os(conn: &Connection) -> rusqlite::Result<()> {
+    // Skip if devices table doesn't exist (fresh DB - init_db will create it with os column)
+    let table_exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='devices'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !table_exists {
+        return Ok(());
+    }
+
+    conn.execute_batch("ALTER TABLE devices ADD COLUMN os TEXT;")?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,8 +362,8 @@ mod tests {
 
         run_migrations(&mut conn, db_path_str, MigrationTarget::Main, 1).unwrap();
 
-        // Should be at version 1 (latest main migration)
-        assert_eq!(get_version(&conn).unwrap(), 1);
+        // Should be at version 2 (latest main migration)
+        assert_eq!(get_version(&conn).unwrap(), 2);
 
         // No backup for fresh database (nothing to backup)
         let backups: Vec<_> = fs::read_dir(dir.path())
@@ -362,8 +387,8 @@ mod tests {
 
         let mut conn = Connection::open(&db_path).unwrap();
 
-        // Set version to current (version 1 is the latest for Main)
-        set_version(&conn, 1).unwrap();
+        // Set version to current (version 2 is the latest for Main)
+        set_version(&conn, 2).unwrap();
 
         run_migrations(&mut conn, db_path_str, MigrationTarget::Main, 1).unwrap();
 
@@ -393,7 +418,7 @@ mod tests {
         run_migrations(&mut conn, db_path_str, MigrationTarget::Main, 0).unwrap();
 
         // Should still migrate to latest version
-        assert_eq!(get_version(&conn).unwrap(), 1);
+        assert_eq!(get_version(&conn).unwrap(), 2);
 
         // No backup should be created
         let backups: Vec<_> = fs::read_dir(dir.path())

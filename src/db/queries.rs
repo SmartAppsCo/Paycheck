@@ -3729,6 +3729,7 @@ pub fn acquire_device_atomic(
     device_type: DeviceType,
     jti: &str,
     name: Option<&str>,
+    os: Option<&str>,
     device_limit: Option<i32>,
     activation_limit: Option<i32>,
     device_inactive_days: Option<i32>,
@@ -3747,16 +3748,17 @@ pub fn acquire_device_atomic(
     )?;
 
     if let Some(device) = existing_device {
-        // Device exists - update JTI and return
+        // Device exists - update JTI, OS, and return
         let now = now();
         tx.execute(
-            "UPDATE devices SET jti = ?1, last_seen_at = ?2 WHERE id = ?3",
-            params![jti, now, device.id],
+            "UPDATE devices SET jti = ?1, last_seen_at = ?2, os = COALESCE(?3, os) WHERE id = ?4",
+            params![jti, now, os, device.id],
         )?;
         tx.commit()?;
         return Ok(DeviceAcquisitionResult::Existing(Device {
             jti: jti.to_string(),
             last_seen_at: now,
+            os: os.map(String::from).or(device.os),
             ..device
         }));
     }
@@ -3808,9 +3810,9 @@ pub fn acquire_device_atomic(
     let now = now();
 
     tx.execute(
-        "INSERT INTO devices (id, license_id, device_id, device_type, name, jti, activated_at, last_seen_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![&id, license_id, device_id, device_type.as_ref(), name, jti, now, now],
+        "INSERT INTO devices (id, license_id, device_id, device_type, name, os, jti, activated_at, last_seen_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![&id, license_id, device_id, device_type.as_ref(), name, os, jti, now, now],
     )?;
 
     tx.execute(
@@ -3826,6 +3828,7 @@ pub fn acquire_device_atomic(
         device_id: device_id.to_string(),
         device_type,
         name: name.map(String::from),
+        os: os.map(String::from),
         jti: jti.to_string(),
         activated_at: now,
         last_seen_at: now,
@@ -3839,14 +3842,15 @@ pub fn create_device(
     device_type: DeviceType,
     jti: &str,
     name: Option<&str>,
+    os: Option<&str>,
 ) -> Result<Device> {
     let id = EntityType::Device.gen_id();
     let now = now();
 
     conn.execute(
-        "INSERT INTO devices (id, license_id, device_id, device_type, name, jti, activated_at, last_seen_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![&id, license_id, device_id, device_type.as_ref(), name, jti, now, now],
+        "INSERT INTO devices (id, license_id, device_id, device_type, name, os, jti, activated_at, last_seen_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![&id, license_id, device_id, device_type.as_ref(), name, os, jti, now, now],
     )?;
 
     Ok(Device {
@@ -3855,6 +3859,7 @@ pub fn create_device(
         device_id: device_id.to_string(),
         device_type,
         name: name.map(String::from),
+        os: os.map(String::from),
         jti: jti.to_string(),
         activated_at: now,
         last_seen_at: now,
@@ -3867,7 +3872,7 @@ pub fn get_device_by_jti(conn: &Connection, jti: &str) -> Result<Option<Device>>
     // should be consistent and not return orphaned devices.
     query_one(
         conn,
-        "SELECT d.id, d.license_id, d.device_id, d.device_type, d.name, d.jti, d.activated_at, d.last_seen_at
+        "SELECT d.id, d.license_id, d.device_id, d.device_type, d.name, d.os, d.jti, d.activated_at, d.last_seen_at
          FROM devices d
          JOIN licenses l ON d.license_id = l.id
          WHERE d.jti = ?1 AND l.deleted_at IS NULL",

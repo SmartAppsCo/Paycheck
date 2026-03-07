@@ -22,6 +22,7 @@ pub struct LicenseDeviceInfo {
     pub device_id: String,
     pub device_type: String,
     pub name: Option<String>,
+    pub os: Option<String>,
     pub activated_at: i64,
     pub last_seen_at: i64,
 }
@@ -110,6 +111,7 @@ pub async fn get_license_info(
                 crate::models::DeviceType::Machine => "machine".to_string(),
             },
             name: d.name,
+            os: d.os,
             activated_at: d.activated_at,
             last_seen_at: d.last_seen_at,
         })

@@ -995,6 +995,7 @@ async fn test_refresh_perpetual_license_ignores_product_exp_days() {
             DeviceType::Uuid,
             &jti,
             Some("Test Device"),
+            None,
         )
         .unwrap();
 

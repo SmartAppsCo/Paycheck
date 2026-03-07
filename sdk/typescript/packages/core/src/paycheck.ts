@@ -698,6 +698,8 @@ export class Paycheck {
       activation_code_expires_at: number;
     }
 
+    const os = options?.os ?? detectOS();
+
     const response = await this.apiRequest<RedeemResponse>('POST', '/redeem', {
       body: {
         public_key: this.publicKey,
@@ -705,6 +707,7 @@ export class Paycheck {
         device_id: this.deviceId,
         device_type: this.deviceType,
         ...(options?.deviceName && { device_name: options.deviceName }),
+        ...(os && { os }),
       },
     });
 
@@ -966,6 +969,7 @@ export class Paycheck {
         device_id: string;
         device_type: 'uuid' | 'machine';
         name: string | null;
+        os: string | null;
         activated_at: number;
         last_seen_at: number;
       }>;
@@ -993,6 +997,7 @@ export class Paycheck {
         deviceId: d.device_id,
         deviceType: d.device_type,
         name: d.name,
+        os: d.os,
         activatedAt: d.activated_at,
         lastSeenAt: d.last_seen_at,
       })),

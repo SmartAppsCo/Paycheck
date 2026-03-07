@@ -19,6 +19,7 @@ const MAX_PUBLIC_KEY_LEN: usize = 256;
 const MAX_CODE_LEN: usize = 64;
 const MAX_DEVICE_ID_LEN: usize = 256;
 const MAX_DEVICE_NAME_LEN: usize = 256;
+const MAX_OS_LEN: usize = 64;
 
 /// Normalize an activation code to canonical format (PREFIX-XXXX-XXXX).
 ///
@@ -60,6 +61,8 @@ pub struct RedeemRequest {
     pub device_type: String,
     #[serde(default)]
     pub device_name: Option<String>,
+    #[serde(default)]
+    pub os: Option<String>,
 }
 
 impl RedeemRequest {
@@ -92,6 +95,14 @@ impl RedeemRequest {
             return Err(AppError::BadRequest(format!(
                 "device_name too long (max {} chars)",
                 MAX_DEVICE_NAME_LEN
+            )));
+        }
+        if let Some(ref os) = self.os
+            && os.len() > MAX_OS_LEN
+        {
+            return Err(AppError::BadRequest(format!(
+                "os too long (max {} chars)",
+                MAX_OS_LEN
             )));
         }
         Ok(())
@@ -166,6 +177,7 @@ pub async fn redeem_with_code(
         &req.device_id,
         device_type,
         req.device_name.as_deref(),
+        req.os.as_deref(),
     )?;
 
     // Audit log successful device activation
@@ -179,6 +191,7 @@ pub async fn redeem_with_code(
             "product_id": product_id,
             "device_type": req.device_type,
             "device_name": req.device_name,
+            "os": req.os,
         }))
         .org(&org_id)
         .project(&project_id)
@@ -205,6 +218,7 @@ fn redeem_license_internal(
     device_id: &str,
     device_type: DeviceType,
     device_name: Option<&str>,
+    os: Option<&str>,
 ) -> Result<Json<RedeemResponse>> {
     // Check if revoked or expired (generic message to prevent enumeration)
     let is_expired = license
@@ -240,6 +254,7 @@ fn redeem_license_internal(
         device_type,
         &jti,
         device_name,
+        os,
         product.device_limit,
         product.activation_limit,
         product.device_inactive_days,

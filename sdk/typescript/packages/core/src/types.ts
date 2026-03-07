@@ -75,6 +75,8 @@ export interface CallbackResult {
 export interface DeviceInfo {
   /** Human-readable device name */
   deviceName?: string;
+  /** Operating system (auto-detected if not provided) */
+  os?: string;
 }
 
 /**
@@ -169,6 +171,7 @@ export interface LicenseDeviceInfo {
   deviceId: string;
   deviceType: DeviceType;
   name: string | null;
+  os: string | null;
   activatedAt: number;
   lastSeenAt: number;
 }

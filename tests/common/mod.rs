@@ -222,6 +222,7 @@ pub fn create_test_device(
         device_type,
         &jti,
         Some("Test Device"),
+        None,
     )
     .expect("Failed to create test device")
 }

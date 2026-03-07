@@ -326,6 +326,7 @@ async fn test_license_many_devices() {
             DeviceType::Machine,
             &jti,
             Some(&format!("Device {}", i)),
+            None,
         )
         .expect("Failed to create device");
     }

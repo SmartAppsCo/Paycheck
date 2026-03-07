@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Paycheck is an offline-first licensing system for indie developers. It provides a payment flow with cryptographic receipts (signed JWTs) that work offline by default, with optional online features (validation, revocation, device limits) for apps that need them. The project uses Rust 2024 edition.
+Paycheck is always-on licensing infrastructure for indie developers who may not have their own website or server. It provides payment processing, license management, and quality-of-life features (feedback collection, crash reporting) so developers can ship software without building backend infrastructure. The core model is: payment flow → cryptographic receipts (signed JWTs) → offline-first validation. The project uses Rust 2024 edition.
 
-This repository contains the **API server** and **SDKs**. You'll need to build your own admin UI to manage organizations, projects, and licenses (or use the hosted service at [paycheck.dev](https://paycheck.dev)).
+This repository contains the **API server** and **SDKs** (TypeScript, React, Rust). You'll need to build your own admin UI to manage organizations, projects, and licenses (or use the hosted service at [paycheck.dev](https://paycheck.dev)).
 
 **Version:** See [CHANGELOG.md](CHANGELOG.md) for release history. This project follows [Semantic Versioning](VERSIONING.md).
 
@@ -63,11 +63,13 @@ Users (identity - source of truth for email/name)
 
 Organizations (customers - indie devs, companies)
 ├── Org Members (owner, admin, member roles)
-├── Payment Config (Stripe/LemonSqueezy keys - shared across all projects)
+├── Service Configs (named credential pool: Stripe, LemonSqueezy, Resend - encrypted)
 ├── Transactions (revenue tracking - amounts, currency, discounts, tax)
+├── Tags (control flags: disable_checkout, disable_public_api, custom)
 └── Projects (each software product)
     ├── Project Members (admin, view - for "member" role org members)
     ├── Products (pricing tiers: free, pro, enterprise)
+    │   ├── Provider Links (Stripe price IDs, LemonSqueezy variant IDs)
     │   └── Licenses → Devices
     └── Ed25519 key pair (auto-generated)
 
@@ -81,8 +83,8 @@ Audit Logs (immutable, separate database)
 
 - **Users as identity source**: The `users` table is the single source of truth for email/name. Operators and org members link to users via `user_id`
 - Each project gets its own Ed25519 key pair for isolation
-- **Payment config at org level**: Stripe/LemonSqueezy API keys and webhook secrets are configured per-organization, shared across all projects (no per-project payment setup needed)
-- **Envelope encryption**: Private keys (per-project) and payment provider configs (per-org) are encrypted at rest using AES-256-GCM with DEKs derived via HKDF from a master key
+- **Service configs as named credential pool**: Payment (Stripe/LemonSqueezy) and email (Resend) credentials are stored as named configs at org level, reusable across projects/products. Config lookup is hierarchical: product → project → org defaults
+- **Envelope encryption**: Private keys (per-project) and service configs (per-org) are encrypted at rest using AES-256-GCM with DEKs derived via HKDF from a master key
 - **Email as identity**: Purchase email hash stored for license recovery (no PII in DB)
 - **Three expiration claims** (see `sdk/CORE.md` for details):
   - `exp` (~1 hour): JWT freshness window. Controls revocation propagation and claims refresh. Expired JWTs can still be refreshed if license is valid.
@@ -196,6 +198,8 @@ src/
 | GET | `/orgs/{org_id}/audit-logs` | Query org's audit logs |
 | CRUD | `/orgs/{org_id}/projects/{id}/members` | Project member management (GET, POST, PUT, DELETE) |
 | CRUD | `/orgs/{org_id}/projects/{id}/products` | Product management |
+| CRUD | `/orgs/{org_id}/projects/{id}/products/{id}/provider-links` | Link products to Stripe/LemonSqueezy IDs |
+| CRUD | `/orgs/{org_id}/service-configs` | Named credential pool (payment/email configs) |
 | GET | `/orgs/{org_id}/projects/{id}/licenses` | List licenses (supports `email` and `payment_provider_order_id` filters) |
 | POST | `/orgs/{org_id}/projects/{id}/licenses` | Create license(s) directly |
 | GET | `/orgs/{org_id}/projects/{id}/licenses/{license_id}` | Get license with devices |
@@ -584,6 +588,50 @@ Transactions are recorded separately from licenses for revenue analytics. Create
 - `average_transaction_value`
 - `transactions_by_type` breakdown
 
+## SDKs
+
+SDKs live in `sdk/` and provide the developer-facing API for integrating Paycheck into apps. The core specification is in `sdk/CORE.md`.
+
+### TypeScript SDK (`sdk/typescript/`)
+
+Two packages:
+- **`@paycheck/sdk`** — Core SDK (vanilla JS/TS)
+- **`@paycheck/react`** — React hooks and components
+
+**Core capabilities:**
+- `checkout(productId)` — Start payment session
+- `handleCallback(url)` / `handleCallbackAndActivate(url)` — Parse post-payment redirect and optionally activate in one step
+- `activateWithCode(code)` — Exchange activation code for JWT (validates format client-side first)
+- `requestActivationCode(email)` — Email recovery flow
+- `importToken(jwt)` — Offline activation via JWT import (clipboard, QR code, file)
+- `validate()` / `validate({ online: true })` — Offline or online license validation with Ed25519 signature verification
+- `sync()` — Server sync with offline fallback (for subscription apps)
+- `isLicensed()`, `hasFeature()`, `getTier()`, `isExpired()`, `coversVersion()` — Quick license queries
+- `getLicenseInfo()` — Full license details with device list
+- `deactivate()` — Self-deactivate current device
+- `submitFeedback()` / `reportCrash()` / `reportError()` — Passthrough feedback and crash reporting
+- `formatActivationCode()` — UI helper for formatting user input as they type
+- `sanitizePath()` / `sanitizeStackTrace()` — Strip home directories from crash reports
+- Grace period config (`gracePeriod`) for online validation when server unreachable (default: 24h)
+
+**React SDK features:**
+- `<PaycheckProvider>` — Context provider
+- `useLicense({ sync?, syncInterval? })` — Main hook with all actions and state (cross-tab sync built in)
+- `useLicenseStatus()` — Lightweight status check
+- `useFeature(name)` / `useVersionAccess(timestamp)` — Feature/version gates
+- `<LicenseGate>` / `<FeatureGate>` — Declarative gating components
+- `usePaymentCallback()` — Seamless payment callback handling with auto-activation
+
+### Rust SDK (`sdk/rust/`)
+
+Crate: `paycheck-sdk`. **Fully synchronous** — no async runtime required. Ideal for desktop apps (Slint, egui, iced).
+
+- Same core API as TypeScript (`validate`, `sync`, `activate_with_code`, etc.)
+- `validate_online()` — Dedicated method for online validation with grace period
+- `DeviceType::Machine` — Hardware-derived device ID (Linux `/etc/machine-id`, macOS serial, Windows registry)
+- `FileStorage` — Persistent storage in platform app data directories
+- Features: `rustls-tls` (default) or `native-tls`
+
 ## Bruno API Collection
 
 The `bruno/` directory contains the API collection for testing. When adding new `.bru` files, maintain the established ordering conventions documented in `bruno/README.md`:
@@ -595,4 +643,4 @@ The `bruno/` directory contains the API collection for testing. When adding new 
 
 ## Philosophy
 
-Paycheck is a payment flow with cryptographic receipts, not DRM. Design for the honest majority—the 95% who just need a convenient way to pay and prove it. Avoid anti-tampering or obfuscation—that's security theater.
+Paycheck is backend infrastructure for indie devs who just want to ship software. Many don't have a website, a server, or the time to build billing and licensing systems — Paycheck provides that as an always-on service. It's a payment flow with cryptographic receipts, not DRM. Design for the honest majority — the 95% who just need a convenient way to pay and prove it. Quality-of-life features (feedback, crash reporting) are included because indie devs often lack these tools too. Avoid anti-tampering or obfuscation — that's security theater.

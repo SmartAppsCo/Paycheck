@@ -297,6 +297,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             device_id TEXT NOT NULL,
             device_type TEXT NOT NULL CHECK (device_type IN ('uuid', 'machine')),
             name TEXT,
+            os TEXT,
             jti TEXT NOT NULL,
             activated_at INTEGER NOT NULL,
             last_seen_at INTEGER NOT NULL,

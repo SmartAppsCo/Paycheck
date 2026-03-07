@@ -134,6 +134,7 @@ fn setup_complete_license(state: &AppState) -> (String, Vec<u8>, String, String,
         DeviceType::Uuid,
         &jti,
         Some("Test Device"),
+        None,
     )
     .unwrap();
 

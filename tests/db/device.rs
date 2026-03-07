@@ -58,6 +58,7 @@ fn test_create_device_machine_type() {
         DeviceType::Machine,
         &jti,
         Some("Desktop PC"),
+        None,
     )
     .expect("Failed to create device");
 
@@ -95,6 +96,7 @@ fn test_create_device_without_name() {
         DeviceType::Uuid,
         &jti,
         None, // No name
+        None,
     )
     .expect("Failed to create device");
 
@@ -274,6 +276,7 @@ fn test_device_id_unique_per_license() {
         DeviceType::Uuid,
         &jti2,
         None,
+        None,
     );
 
     assert!(
@@ -408,6 +411,7 @@ fn test_acquire_device_atomic_new_device() {
         DeviceType::Uuid,
         &jti,
         Some("My Laptop"),
+        None,
         Some(5),  // device_limit
         Some(10), // activation_limit
         None,     // device_inactive_days
@@ -460,6 +464,7 @@ fn test_acquire_device_atomic_existing_device_same_id() {
         DeviceType::Uuid,
         &jti1,
         Some("Laptop"),
+        None,
         Some(5),
         Some(10),
         None,
@@ -481,6 +486,7 @@ fn test_acquire_device_atomic_existing_device_same_id() {
         DeviceType::Uuid,
         &jti2,
         Some("Laptop"),
+        None,
         Some(5),
         Some(10),
         None,
@@ -540,6 +546,7 @@ fn test_acquire_device_atomic_device_limit_reached() {
             DeviceType::Uuid,
             &jti,
             None,
+            None,
             Some(device_limit),
             None, // no activation limit
             None,
@@ -555,6 +562,7 @@ fn test_acquire_device_atomic_device_limit_reached() {
         "device-overflow",
         DeviceType::Uuid,
         &jti,
+        None,
         None,
         Some(device_limit),
         None,
@@ -601,6 +609,7 @@ fn test_acquire_device_atomic_activation_limit_reached() {
         DeviceType::Uuid,
         &jti,
         None,
+        None,
         None,                    // no device limit
         Some(activation_limit),  // activation limit reached
         None,
@@ -643,6 +652,7 @@ fn test_acquire_device_atomic_inactive_device_eviction() {
         DeviceType::Uuid,
         &jti1,
         None,
+        None,
         Some(device_limit),
         None,
         Some(inactive_days),
@@ -656,6 +666,7 @@ fn test_acquire_device_atomic_inactive_device_eviction() {
         "stale-device",
         DeviceType::Uuid,
         &jti2,
+        None,
         None,
         Some(device_limit),
         None,
@@ -679,6 +690,7 @@ fn test_acquire_device_atomic_inactive_device_eviction() {
         "new-device",
         DeviceType::Uuid,
         &jti3,
+        None,
         None,
         Some(device_limit),
         None,
@@ -718,6 +730,7 @@ fn test_acquire_device_atomic_unlimited() {
             &format!("device-{}", i),
             DeviceType::Uuid,
             &jti,
+            None,
             None,
             None, // no device limit
             None, // no activation limit
@@ -795,6 +808,7 @@ fn test_acquire_device_atomic_concurrent() {
                     &format!("concurrent-device-{}", i),
                     DeviceType::Uuid,
                     &jti,
+                    None,
                     None,
                     Some(device_limit),
                     None,

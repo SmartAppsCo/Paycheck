@@ -16,6 +16,7 @@ pub struct Device {
     pub device_id: String,
     pub device_type: DeviceType,
     pub name: Option<String>,
+    pub os: Option<String>,
     pub jti: String,
     pub activated_at: i64,
     pub last_seen_at: i64,

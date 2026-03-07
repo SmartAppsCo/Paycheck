@@ -772,14 +772,22 @@ impl Paycheck {
             device_type: String,
             #[serde(skip_serializing_if = "Option::is_none")]
             device_name: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            os: Option<String>,
         }
+
+        let (device_name, os) = match options {
+            Some(d) => (d.device_name, Some(d.os.unwrap_or_else(detect_os))),
+            None => (None, Some(detect_os())),
+        };
 
         let body = RedeemRequest {
             public_key: self.public_key.clone(),
             code: normalized_code,
             device_id: self.device_id.clone(),
             device_type: self.device_type.to_string(),
-            device_name: options.and_then(|d| d.device_name),
+            device_name,
+            os,
         };
 
         let response: RedeemResponse = self.post("/redeem", &body)?;

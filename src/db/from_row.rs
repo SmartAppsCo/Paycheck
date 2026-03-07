@@ -94,7 +94,7 @@ pub const LICENSE_COLS: &str = "id, email_hash, project_id, product_id, customer
 pub const TRANSACTION_COLS: &str = "id, license_id, project_id, product_id, org_id, payment_provider, provider_customer_id, provider_subscription_id, provider_order_id, currency, subtotal_cents, discount_cents, net_cents, tax_cents, total_cents, discount_code, tax_inclusive, customer_country, transaction_type, parent_transaction_id, is_subscription, source, metadata, test_mode, created_at";
 
 pub const DEVICE_COLS: &str =
-    "id, license_id, device_id, device_type, name, jti, activated_at, last_seen_at";
+    "id, license_id, device_id, device_type, name, os, jti, activated_at, last_seen_at";
 
 pub const PAYMENT_SESSION_COLS: &str =
     "id, product_id, customer_id, created_at, completed, license_id";
@@ -388,9 +388,10 @@ impl FromRow for Device {
             device_id: row.get(2)?,
             device_type: parse_enum(row, 3, "device_type")?,
             name: row.get(4)?,
-            jti: row.get(5)?,
-            activated_at: row.get(6)?,
-            last_seen_at: row.get(7)?,
+            os: row.get(5)?,
+            jti: row.get(6)?,
+            activated_at: row.get(7)?,
+            last_seen_at: row.get(8)?,
         })
     }
 }
