@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
+## [0.9.0] - 2026-03-07
+
+### Added
+
+- **OS capture on device activation**: Record the operating system where licensed software is activated. The `os` field is stored on the device record and returned in license info responses (`GET /license`, `GET /orgs/.../licenses/{id}`).
+- **SDK auto-detection**: All SDKs (Rust, TypeScript, React) auto-detect the OS at activation time and send it with the `/redeem` request. Developers can override with `DeviceInfo { os: "custom" }`.
+- **New `os` field on `DeviceInfo`** (SDK input) and **`LicenseDeviceInfo`** (SDK response) across all SDKs.
+- **Database migration 002**: Adds `os TEXT` column to existing `devices` tables. Fresh databases include it in the schema automatically.
+
+### Changed
+
+- **`/redeem` request body**: New optional `os` field (max 64 chars). Fully backward compatible — omitting it results in `null`.
+- **Device reactivation preserves OS**: When an existing device reactivates, a new `os` value updates the record, but omitting it preserves the previous value (`COALESCE` semantics).
+- **Bruno `Local.bru` environment file untracked**: Moved operator API key to Bruno secret vars; file is now gitignored.
+
+
 ## [0.8.2] - 2026-02-15
 
 ### Added
